@@ -1033,3 +1033,16 @@ tr:hover td { background: #f8fbff; }
     border-radius: 22px;
   }
 }
+
+/* Ajuste corporativo: detalhes de aprovação sem JSON bruto */
+.detail-helper { margin: 0 0 4px; color: var(--muted); font-size: .92rem; }
+.detail-grid.compact { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.detail-card { border: 1px solid var(--line); background: linear-gradient(180deg, #ffffff, #f8fafc); border-radius: 16px; padding: 12px; display: grid; gap: 4px; min-height: 70px; }
+.detail-card span { color: var(--muted); font-size: .72rem; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+.detail-card strong { color: var(--text); overflow-wrap: anywhere; line-height: 1.35; }
+.accordion-menu nav b,
+.accordion-menu a b { min-width: 30px; height: 30px; border-radius: 10px; background: rgba(37,99,235,.16); color: #bfdbfe; display: inline-grid; place-items: center; font-size: .72rem; letter-spacing: .05em; }
+.bell { gap: 8px; min-width: 128px; justify-content: center; }
+.bell > span { font-weight: 900; font-size: .88rem; }
+.notification i { font-style: normal; font-weight: 950; font-size: .72rem; width: 32px; height: 32px; border-radius: 12px; display: inline-grid; place-items: center; background: rgba(37,99,235,.10); color: #1d4ed8; }
+@media (max-width: 840px) { .detail-grid.compact { grid-template-columns: 1fr; } .bell { min-width: 56px; } .bell > span { display: none; } }

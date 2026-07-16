@@ -28,12 +28,12 @@ export default function LivePulse() {
   const tips = useMemo(() => {
     const list = [];
     const k = cockpit?.kpis || {};
-    if (k.pendingApprovals > 0) list.push(`✅ ${k.pendingApprovals} aprovação(ões) aguardando decisão`);
-    if (k.pendingSignatures > 0) list.push(`🖊️ ${k.pendingSignatures} guia(s) sem assinatura`);
-    if (k.openOrders > 0) list.push(`📲 ${k.openOrders} OS aberta(s) para acompanhamento`);
-    if (notifications.unread > 0) list.push(`🔔 ${notifications.unread} alerta(s) novo(s)`);
-    if (!list.length) list.push('🟢 Operação sem pendências críticas agora');
-    list.push('💡 Dica: confira a caixa do técnico antes de liberar nova carga');
+    if (k.pendingApprovals > 0) list.push(`${k.pendingApprovals} aprovação(ões) aguardando decisão`);
+    if (k.pendingSignatures > 0) list.push(`${k.pendingSignatures} guia(s) sem assinatura`);
+    if (k.openOrders > 0) list.push(`${k.openOrders} OS aberta(s) para acompanhamento`);
+    if (notifications.unread > 0) list.push(`${notifications.unread} alerta(s) novo(s)`);
+    if (!list.length) list.push('Operação sem pendências críticas agora');
+    list.push('Dica: confira a caixa do técnico antes de liberar nova carga');
     return list.slice(0, 4);
   }, [cockpit, notifications]);
 

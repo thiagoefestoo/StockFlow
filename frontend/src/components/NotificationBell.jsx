@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import api from '../services/api';
 
 const severityIcon = {
-  danger: '🚨',
-  warning: '⚠️',
-  success: '✅',
-  info: '💡',
+  danger: 'AL',
+  warning: 'AT',
+  success: 'OK',
+  info: 'IN',
 };
 
 const defaultPosition = { top: 96, right: 28, left: 'auto', width: '430px' };
@@ -128,7 +128,7 @@ export default function NotificationBell() {
         aria-label="Abrir central de notificações"
         aria-expanded={open}
       >
-        <span>🔔</span>
+        <span>Notificações</span>
         {data.unread > 0 && <b>{data.unread}</b>}
       </button>
 
@@ -161,7 +161,7 @@ export default function NotificationBell() {
           <div className="bell-list">
             {notifications.slice(0, 8).map((item) => (
               <button key={item.id} type="button" className={`notification severity-${item.severity || 'info'}`} onClick={() => markRead(item)}>
-                <i>{severityIcon[item.severity] || '💡'}</i>
+                <i>{severityIcon[item.severity] || 'IN'}</i>
                 <span className="notification-content">
                   <strong>{item.title}</strong>
                   <small>{item.message}</small>
@@ -170,14 +170,14 @@ export default function NotificationBell() {
             ))}
             {notifications.length === 0 && (
               <div className="bell-empty">
-                <strong>✨ Tudo certo por aqui</strong>
+                <strong>Tudo certo por aqui</strong>
                 <span>Sem novas notificações no momento.</span>
               </div>
             )}
           </div>
 
           <div className="bell-footer">
-            <button type="button" className="ghost" onClick={load}>🔄 Atualizar agora</button>
+            <button type="button" className="ghost" onClick={load}>Atualizar agora</button>
           </div>
         </section>
       </dialog>

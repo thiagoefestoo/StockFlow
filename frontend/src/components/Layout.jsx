@@ -6,15 +6,15 @@ import LivePulse from './LivePulse';
 import StockFlowLogo from './StockFlowLogo';
 
 const adminGroups = [
-  { title: 'Comando', emoji: '🏠', links: [['/', '🎛️', 'Cockpit'], ['/aprovacoes', '✅', 'Aprovações'], ['/dashboard', '📌', 'Dashboard legado']] },
-  { title: 'Operação', emoji: '🚚', links: [['/solicitacoes-material', '📋', 'Solicitações'], ['/entrada', '📥', 'Entrada quinzenal'], ['/transferencias', '🔁', 'Transferências'], ['/os', '📲', 'Ordens de serviço'], ['/caixa-tecnico', '🧰', 'Caixa do técnico'], ['/central-caixa-tecnico', '🧑‍💼', 'Central da caixa']] },
-  { title: 'Cadastros e estoque', emoji: '📦', links: [['/estoque', '📦', 'Materiais/Estoque'], ['/patrimonio', '🏷️', 'Patrimônio'], ['/tecnicos', '👷', 'Técnicos']] },
-  { title: 'Administração', emoji: '🔐', adminOnly: true, links: [['/usuarios', '👥', 'Usuários e permissões']] },
-  { title: 'Minha conta', emoji: '👤', links: [['/minha-conta', '⚙️', 'Configurações da conta']] },
-  { title: 'BI e auditoria', emoji: '📊', links: [['/bi/executivo', '📈', 'BI Executivo'], ['/bi/financeiro', '💰', 'BI Financeiro'], ['/bi/tecnicos', '🧑‍🔧', 'BI Técnicos'], ['/bi/auditoria', '🛡️', 'BI Auditoria'], ['/historico-movimentacoes', '🧾', 'Histórico'], ['/auditoria', '🔎', 'Auditoria']] },
+  { title: 'Comando', links: [['/', 'OP', 'Cockpit'], ['/aprovacoes', 'AP', 'Aprovações'], ['/dashboard', 'DB', 'Dashboard legado']] },
+  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa']] },
+  { title: 'Cadastros e estoque', links: [['/estoque', 'MT', 'Materiais/Estoque'], ['/patrimonio', 'PA', 'Patrimônio'], ['/tecnicos', 'TE', 'Técnicos']] },
+  { title: 'Administração', adminOnly: true, links: [['/usuarios', 'US', 'Usuários e permissões']] },
+  { title: 'Minha conta', links: [['/minha-conta', 'CO', 'Configurações da conta']] },
+  { title: 'BI e auditoria', links: [['/bi/executivo', 'BE', 'BI Executivo'], ['/bi/financeiro', 'BF', 'BI Financeiro'], ['/bi/tecnicos', 'BT', 'BI Técnicos'], ['/bi/auditoria', 'BA', 'BI Auditoria'], ['/historico-movimentacoes', 'HM', 'Histórico'], ['/auditoria', 'AU', 'Auditoria']] },
 ];
 const technicianGroups = [
-  { title: 'Minha operação', emoji: '📲', links: [['/caixa-tecnico', '🧰', 'Minha caixa'], ['/minha-conta', '⚙️', 'Minha conta']] },
+  { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/minha-conta', 'CO', 'Minha conta']] },
 ];
 
 export default function Layout() {
@@ -35,7 +35,7 @@ export default function Layout() {
             return (
               <div className={`menu-group ${isOpen ? 'open' : 'closed'}`} key={group.title}>
                 <button type="button" className="menu-group-toggle" onClick={() => toggle(group.title)}>
-                  <span>{group.emoji} {group.title}</span><b>{isOpen ? '−' : '+'}</b>
+                  <span>{group.title}</span><b>{isOpen ? '−' : '+'}</b>
                 </button>
                 {isOpen && group.links.map(([to, icon, label]) => (
                   <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'active' : '')}>
@@ -63,7 +63,7 @@ export default function Layout() {
           <div className="top-actions">
             <NotificationBell />
             <div className="system-status"><i /> Online</div>
-            <NavLink to="/minha-conta" className="account-chip">👤 {user?.name?.split(' ')?.[0] || 'Conta'}</NavLink>
+            <NavLink to="/minha-conta" className="account-chip">{user?.name?.split(' ')?.[0] || 'Conta'}</NavLink>
             <button className="ghost" onClick={logout}>Sair</button>
           </div>
         </header>
@@ -75,25 +75,25 @@ export default function Layout() {
 }
 
 function titleFor(path) {
-  if (path.includes('/aprovacoes')) return '✅ Central de aprovações';
-  if (path.includes('/solicitacoes-material')) return '📋 Workflow de solicitações';
-  if (path.includes('/central-caixa-tecnico')) return '🧑‍💼 Central administrativa da caixa do técnico';
-  if (path.includes('/caixa-tecnico')) return '🧰 Caixa do técnico';
-  if (path.includes('/historico-movimentacoes')) return '🧾 Histórico de movimentações';
-  if (path.includes('/entrada')) return '📥 Entrada quinzenal de material';
-  if (path.includes('/transferencias')) return '🔁 Transferências e guias de assinatura';
-  if (path.includes('/portal-tecnico')) return '📲 Portal mobile do técnico';
-  if (path.includes('/bi/financeiro')) return '💰 BI financeiro';
-  if (path.includes('/bi/tecnicos')) return '🧑‍🔧 BI por técnico';
-  if (path.includes('/bi/auditoria')) return '🛡️ BI de auditoria e patrimônio';
-  if (path.includes('/bi')) return '📊 BI gerencial';
-  if (path.includes('/patrimonio')) return '🏷️ Patrimônio serializado';
-  if (path.includes('/tecnicos')) return '👷 Técnicos e terceirizadas';
-  if (path.includes('/os')) return '📲 Ordens de serviço';
-  if (path.includes('/usuarios')) return '🔐 Usuários e permissões';
-  if (path.includes('/minha-conta')) return '👤 Minha conta';
-  if (path.includes('/auditoria')) return '🔎 Auditoria completa';
-  if (path.includes('/estoque')) return '📦 Estoque geral';
-  if (path.includes('/dashboard')) return '📌 Dashboard legado';
-  return '🎛️ Cockpit operacional';
+  if (path.includes('/aprovacoes')) return 'Central de aprovações';
+  if (path.includes('/solicitacoes-material')) return 'Workflow de solicitações';
+  if (path.includes('/central-caixa-tecnico')) return 'Central administrativa da caixa do técnico';
+  if (path.includes('/caixa-tecnico')) return 'Caixa do técnico';
+  if (path.includes('/historico-movimentacoes')) return 'Histórico de movimentações';
+  if (path.includes('/entrada')) return 'Entrada quinzenal de material';
+  if (path.includes('/transferencias')) return 'Transferências e guias de assinatura';
+  if (path.includes('/portal-tecnico')) return 'Portal mobile do técnico';
+  if (path.includes('/bi/financeiro')) return 'BI financeiro';
+  if (path.includes('/bi/tecnicos')) return 'BI por técnico';
+  if (path.includes('/bi/auditoria')) return 'BI de auditoria e patrimônio';
+  if (path.includes('/bi')) return 'BI gerencial';
+  if (path.includes('/patrimonio')) return 'Patrimônio serializado';
+  if (path.includes('/tecnicos')) return 'Técnicos e terceirizadas';
+  if (path.includes('/os')) return 'Ordens de serviço';
+  if (path.includes('/usuarios')) return 'Usuários e permissões';
+  if (path.includes('/minha-conta')) return 'Minha conta';
+  if (path.includes('/auditoria')) return 'Auditoria completa';
+  if (path.includes('/estoque')) return 'Estoque geral';
+  if (path.includes('/dashboard')) return 'Dashboard legado';
+  return 'Cockpit operacional';
 }

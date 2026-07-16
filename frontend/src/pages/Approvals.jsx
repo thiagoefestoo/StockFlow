@@ -6,6 +6,61 @@ import KpiCard from '../components/KpiCard';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
+function approvalTypeLabel(type) {
+  const labels = {
+    material_request: 'Solicitação de material',
+    transfer: 'Transferência de material',
+    service_order: 'Ordem de serviço',
+    stock_adjustment: 'Ajuste de estoque',
+  };
+  return labels[type] || String(type || '-').replace(/_/g, ' ');
+}
+function payloadLabel(key) {
+  const labels = {
+    requestId: 'Código interno',
+    requestNumber: 'Número da solicitação',
+    technicianId: 'ID do técnico',
+    technicianName: 'Técnico responsável',
+    serviceOrderNumber: 'Número da OS',
+    customerName: 'Cliente',
+    customerCpf: 'CPF do cliente',
+    transferNumber: 'Guia de transferência',
+    materialName: 'Material',
+    serialNumber: 'Número de série',
+    quantity: 'Quantidade',
+  };
+  return labels[key] || String(key || '').replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
+function payloadValue(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '-';
+  if (typeof value === 'object') return Object.entries(value).map(([key, item]) => `${payloadLabel(key)}: ${payloadValue(item)}`).join(' • ');
+  return String(value);
+}
+function OperationalInfo({ payload }) {
+  if (!payload) return null;
+  const priority = ['requestNumber', 'technicianName', 'transferNumber', 'serviceOrderNumber', 'customerName', 'customerCpf', 'materialName', 'serialNumber', 'quantity'];
+  const entries = Object.entries(payload).filter(([, value]) => value !== null && value !== undefined && value !== '');
+  const ordered = [
+    ...priority.filter((key) => Object.prototype.hasOwnProperty.call(payload, key)).map((key) => [key, payload[key]]),
+    ...entries.filter(([key]) => !priority.includes(key)),
+  ];
+  if (!ordered.length) return null;
+  return (
+    <div className="detail-section">
+      <h4>Informações operacionais</h4>
+      <p className="detail-helper">Resumo legível dos dados usados pelo sistema para localizar e processar esta aprovação.</p>
+      <div className="detail-grid compact">
+        {ordered.map(([key, value]) => (
+          <div className="detail-card" key={key}>
+            <span>{payloadLabel(key)}</span>
+            <strong>{payloadValue(value)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Approvals() {
   const [approvals, setApprovals] = useState([]);
@@ -67,7 +122,7 @@ export default function Approvals() {
       </section>
 
       <DetailsModal open={!!details} title={`Detalhes da aprovação ${details?.title || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details?.status === 'pendente' && <button onClick={() => { setDecision({ open: true, type: 'approve', item: details, notes: '' }); setDetails(null); }}>Aprovar</button>}</>}>
-        {details && <><DetailGrid fields={[["Título", details.title], ["Descrição", details.description], ["Status", details.status], ["Prioridade", details.priority], ["Valor", brl(details.amount)], ["Tipo", details.entityType], ["ID entidade", details.entityId], ["Solicitado por", details.requestedBy?.name], ["Solicitado em", details.requestedAt], ["Decidido em", details.decidedAt], ["Decidido por", details.decidedBy?.name], ["Observação", details.decisionNotes]]} />{details.payload && <div className="detail-section"><h4>Payload operacional</h4><pre className="event compact">{JSON.stringify(details.payload, null, 2)}</pre></div>}</>}
+        {details && <><DetailGrid fields={[["Título", details.title], ["Descrição", details.description], ["Status", details.status], ["Prioridade", details.priority], ["Valor", brl(details.amount)], ["Tipo", approvalTypeLabel(details.entityType)], ["Código interno", details.entityId], ["Solicitado por", details.requestedBy?.name], ["Solicitado em", dt(details.requestedAt)], ["Decidido em", dt(details.decidedAt)], ["Decidido por", details.decidedBy?.name], ["Observação", details.decisionNotes]]} /><OperationalInfo payload={details.payload} /></>}
       </DetailsModal>
       <Modal open={decision.open} title={decision.type === 'approve' ? 'Aprovar item' : 'Reprovar item'} onClose={() => setDecision({ open: false, type: '', item: null, notes: '' })} footer={<><button className="ghost" onClick={() => setDecision({ open: false, type: '', item: null, notes: '' })}>Cancelar</button><button onClick={decide}>Registrar decisão</button></>}>
         <p><strong>{decision.item?.title}</strong></p>
