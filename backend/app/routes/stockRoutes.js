@@ -1,0 +1,11 @@
+const router = require('express').Router();
+const controller = require('../controllers/stockController');
+const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
+router.use(authenticate);
+router.get('/overview', requireRoles('admin', 'supervisor'), controller.overview);
+router.get('/assets', requireRoles('admin', 'supervisor'), controller.assets);
+router.get('/movements', requireRoles('admin', 'supervisor'), controller.movements);
+router.get('/technician-box/:id', requireRoles('admin', 'supervisor'), controller.technicianBox);
+router.post('/technician-box/move-to-client', requireRoles('admin', 'supervisor', 'tecnico'), controller.moveFromTechnicianToClient);
+router.post('/technician-box/return-to-stock', requireRoles('admin', 'supervisor'), controller.returnFromTechnician);
+module.exports = router;

@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: telecomstock-backend
+    env: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DB_SSL
+        value: true
+      - key: DB_SYNC
+        value: true
+      - key: DB_LOG
+        value: false
+      - key: DB_POOL_MAX
+        value: 5
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 12h
+      - key: SETUP_ADMIN_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ALLOW_VERCEL_PREVIEWS
+        value: false
+      - key: TELECOMSTOCK_AUTO_INTELLIGENCE_MINUTES
+        value: 60
+      - key: UPLOAD_PUBLIC_BASE_URL
+        sync: false

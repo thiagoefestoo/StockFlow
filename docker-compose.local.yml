@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: telecomstock-postgres-local
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: telecomstock
+      POSTGRES_PASSWORD: telecomstock
+      POSTGRES_DB: telecomstock
+    ports:
+      - "5432:5432"
+    volumes:
+      - telecomstock_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telecomstock -d telecomstock"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  telecomstock_pgdata:

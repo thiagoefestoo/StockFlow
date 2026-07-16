@@ -1,0 +1,13 @@
+{
+  "name": "stockflow-local-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Workspace local do StockFlow.",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "backend": "npm start --prefix backend",
+    "frontend": "npm start --prefix frontend",
+    "check": "npm run check --prefix backend && npm run build --prefix frontend",
+    "create-local-admin": "npm run create-local-admin --prefix backend"
+  }
+}

@@ -1,0 +1,10 @@
+const router = require('express').Router();
+const controller = require('../controllers/biController');
+const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
+router.use(authenticate, requireRoles('admin', 'supervisor'));
+router.get('/filter-options', controller.filterOptions);
+router.get('/executive', controller.executive);
+router.get('/technicians', controller.technicians);
+router.get('/audit', controller.audit);
+router.get('/financial', controller.financial);
+module.exports = router;

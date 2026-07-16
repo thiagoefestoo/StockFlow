@@ -1,0 +1,12 @@
+const router = require('express').Router();
+const controller = require('../controllers/materialRequestController');
+const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
+router.use(authenticate);
+router.get('/', controller.list);
+router.get('/summary', controller.summary);
+router.get('/:id', controller.get);
+router.post('/', controller.create);
+router.post('/:id/approve', requireRoles('admin', 'supervisor'), controller.approve);
+router.post('/:id/reject', requireRoles('admin', 'supervisor'), controller.reject);
+router.post('/:id/deliver', requireRoles('admin', 'supervisor'), controller.deliver);
+module.exports = router;

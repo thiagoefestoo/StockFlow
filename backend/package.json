@@ -1,0 +1,35 @@
+{
+  "name": "stockflow-backend",
+  "version": "1.0.0",
+  "description": "Backend do StockFlow - controle de estoque, patrimonio, tecnicos e BI para prestadoras de telecom.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node scripts/check-syntax.js",
+    "render-start": "npm start",
+    "dev": "node server.js",
+    "create-local-admin": "node scripts/create-local-admin.js"
+  },
+  "keywords": [
+    "telecom",
+    "estoque",
+    "patrimonio",
+    "onu",
+    "bi"
+  ],
+  "author": "StockFlow",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.21.0",
+    "sequelize": "^6.37.8"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}
