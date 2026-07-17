@@ -67,6 +67,14 @@ export default function Users() {
   const [message, setMessage] = useState('');
 
   const filteredUsers = useMemo(() => users, [users]);
+  const cityOptions = useMemo(() => {
+    const values = new Set();
+    warehouses.forEach((w) => { if (w.city) values.add(String(w.city).trim()); });
+    technicians.forEach((t) => (t.serviceCities || []).forEach((city) => { if (city) values.add(String(city).trim()); }));
+    users.forEach((u) => (u.cityAccess || []).forEach((city) => { if (city) values.add(String(city).trim()); }));
+    String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean).forEach((city) => values.add(city));
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [warehouses, technicians, users, form.cityAccessText]);
 
   async function load() {
     const params = new URLSearchParams(filters).toString();
@@ -91,6 +99,22 @@ export default function Users() {
     const next = { ...form, ...patch };
     if (patch.role && patch.role !== 'tecnico') next.technicianId = '';
     setForm(next);
+  }
+  function selectedCitiesFromForm() {
+    return String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean);
+  }
+  function toggleCityAccess(city) {
+    const selected = new Set(selectedCitiesFromForm());
+    if (selected.has(city)) selected.delete(city);
+    else selected.add(city);
+    patchForm({ cityAccessText: Array.from(selected).join(', ') });
+  }
+  function addManualCity(value) {
+    const city = String(value || '').trim();
+    if (!city) return;
+    const selected = new Set(selectedCitiesFromForm());
+    selected.add(city);
+    patchForm({ cityAccessText: Array.from(selected).join(', '), newCityText: '' });
   }
   async function saveUser() {
     try {
@@ -288,9 +312,15 @@ export default function Users() {
               </select>
               <small>Use Ctrl para selecionar mais de um estoque.</small>
             </label>}
-            {['estoquista', 'tecnico'].includes(form.role) && <label>Cidades autorizadas
-              <input value={form.cityAccessText || ''} onChange={(e) => patchForm({ cityAccessText: e.target.value })} placeholder="Joinville, Araquari, São Francisco" />
-            </label>}
+            {['estoquista', 'tecnico'].includes(form.role) && <div className="form-field full-span">
+              <span className="field-label">Cidades autorizadas</span>
+              <div className="city-checkbox-list">
+                {cityOptions.map((city) => <label className="check-pill" key={city}><input type="checkbox" checked={selectedCitiesFromForm().includes(city)} onChange={() => toggleCityAccess(city)} /><span>{city}</span></label>)}
+                {cityOptions.length === 0 && <small>Nenhuma cidade cadastrada em estoques ou técnicos. Adicione manualmente abaixo.</small>}
+              </div>
+              <div className="input-with-button"><input value={form.newCityText || ''} onChange={(e) => patchForm({ newCityText: e.target.value })} placeholder="Adicionar cidade manualmente" /><button type="button" className="ghost" onClick={() => addManualCity(form.newCityText)}>Adicionar cidade</button></div>
+              <small>As cidades marcadas limitam o login a operações e visões autorizadas pela administração.</small>
+            </div>}
             {form.role === 'estoquista' && <label>Limite de aprovação do usuário
               <input type="number" value={form.approvalLimit || 0} onChange={(e) => patchForm({ approvalLimit: e.target.value })} />
             </label>}
@@ -329,8 +359,9 @@ export default function Users() {
             ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle], ['Técnico vinculado', details.data.user.Technician?.name || '-'], ['Documento técnico', details.data.user.Technician?.document || '-'],
             ['Último login', dt(details.data.user.lastLoginAt)], ['Senha alterada em', dt(details.data.user.passwordChangedAt)], ['Criado em', dt(details.data.user.createdAt)], ['Atualizado em', dt(details.data.user.updatedAt)],
             ['Bloqueado em', dt(details.data.user.blockedAt)], ['Motivo bloqueio', details.data.user.blockedReason], ['Excluído em', dt(details.data.user.deletedAt)], ['Motivo exclusão', details.data.user.deletedReason],
-            ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).join(', ') || '-'], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],
+            ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).length ? `${(details.data.user.cityAccess || []).length} cidade(s)` : '-'], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],
           ]} />
+          <div className="detail-section"><h4>Cidades autorizadas</h4><div className="city-chip-list">{(details.data.user.cityAccess || []).length ? details.data.user.cityAccess.map((city) => <span className="city-chip" key={city}>{city}</span>) : <span className="muted">Nenhuma cidade definida.</span>}</div></div>
           <DetailList title="🧾 Histórico de alterações do usuário" items={details.data.audits || []} render={(audit) => <><b>{audit.action} • {dt(audit.createdAt)}</b><span>{audit.message}</span><small>Operador: {audit.actor?.name || 'Sistema'} • IP: {audit.ip || '-'}</small></>} />
         </>}
       </DetailsModal>

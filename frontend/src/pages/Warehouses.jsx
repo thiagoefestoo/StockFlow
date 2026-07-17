@@ -137,7 +137,7 @@ export default function Warehouses() {
       setTransferModal(false);
       setTransferForm(emptyTransfer());
       await load();
-      setMessage('Transferência entre estoques registrada com sucesso.');
+      setMessage('Solicitação enviada para aprovação do administrador. O saldo será movimentado somente após aprovação.');
     } catch (e) {
       setMessage(e.response?.data?.message || e.message || 'Erro ao transferir entre estoques.');
     }
@@ -203,8 +203,9 @@ export default function Warehouses() {
       </div>
     </Modal>
 
-    <Modal open={transferModal} title="Transferir materiais entre estoques" onClose={() => setTransferModal(false)} footer={<><button className="ghost" onClick={() => setTransferModal(false)}>Cancelar</button><button onClick={submitWarehouseTransfer}>Confirmar transferência</button></>}>
+    <Modal open={transferModal} title="Solicitar transferência entre estoques" onClose={() => setTransferModal(false)} footer={<><button className="ghost" onClick={() => setTransferModal(false)}>Cancelar</button><button onClick={submitWarehouseTransfer}>Solicitar aprovação do admin</button></>}>
       <div className="form-stack warehouse-transfer-form">
+        <div className="alert warning">A transferência entre estoques ficará pendente na Central de aprovações. Somente o admin executa a movimentação do saldo.</div>
         <div className="form-grid">
           <label>Estoque de origem<select value={transferForm.fromWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, fromWarehouseId: e.target.value, items: transferForm.items.map((item) => ({ ...item, serialNumbers: [] })) })}><option value="">Selecione</option>{rows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
           <label>Estoque de destino<select value={transferForm.toWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, toWarehouseId: e.target.value })}><option value="">Selecione</option>{rows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>

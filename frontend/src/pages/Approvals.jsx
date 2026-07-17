@@ -10,6 +10,7 @@ function approvalTypeLabel(type) {
   const labels = {
     material_request: 'Solicitação de material',
     transfer: 'Transferência de material',
+    warehouse_transfer: 'Transferência entre estoques',
     service_order: 'Ordem de serviço',
     stock_adjustment: 'Ajuste de estoque',
   };
@@ -30,6 +31,8 @@ function payloadLabel(key) {
     quantity: 'Quantidade',
     items: 'Itens solicitados',
     warehouseName: 'Estoque/região',
+    fromWarehouseName: 'Estoque origem',
+    toWarehouseName: 'Estoque destino',
   };
   return labels[key] || String(key || '').replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
@@ -53,12 +56,12 @@ function OperationalInfo({ payload, requestDetails, operationalSummary }) {
   }));
   return (
     <div className="detail-section">
-      <h4>Itens solicitados para aprovação</h4>
-      <p className="detail-helper">Confira os materiais antes de aprovar ou reprovar. Esta informação substitui o antigo payload técnico.</p>
+      <h4>Itens da aprovação</h4>
+      <p className="detail-helper">Confira origem, destino, materiais, quantidades e seriais antes de aprovar ou reprovar.</p>
       <div className="detail-grid compact">
-        <div className="detail-card"><span>Solicitação</span><strong>{summary.requestNumber || payload?.requestNumber || '-'}</strong></div>
-        <div className="detail-card"><span>Técnico</span><strong>{summary.technicianName || payload?.technicianName || '-'}</strong></div>
-        <div className="detail-card"><span>Estoque/região</span><strong>{summary.warehouseName || requestDetails?.Warehouse?.name || '-'}</strong></div>
+        <div className="detail-card"><span>Referência</span><strong>{summary.requestNumber || payload?.requestNumber || payload?.reference || '-'}</strong></div>
+        <div className="detail-card"><span>Origem</span><strong>{summary.fromWarehouseName || payload?.fromWarehouse?.name || summary.technicianName || payload?.technicianName || '-'}</strong></div>
+        <div className="detail-card"><span>Destino</span><strong>{summary.toWarehouseName || payload?.toWarehouse?.name || summary.warehouseName || requestDetails?.Warehouse?.name || '-'}</strong></div>
         <div className="detail-card"><span>Itens</span><strong>{rows.length}</strong></div>
       </div>
       <div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Categoria</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th><th>Seriais</th><th>Observação</th></tr></thead><tbody>{rows.map((item, idx) => <tr key={idx}><td><strong>{item.material}</strong></td><td>{item.category}</td><td>{item.quantity}</td><td>{brl(item.unitCost)}</td><td>{brl(item.totalCost)}</td><td>{item.serialNumbers?.length ? item.serialNumbers.join(', ') : '-'}</td><td>{item.notes}</td></tr>)}</tbody></table></div>
@@ -88,6 +91,8 @@ export default function Approvals() {
     try {
       if (decision.item.entityType === 'material_request') {
         await api.post(`/material-requests/${decision.item.entityId}/${decision.type === 'approve' ? 'approve' : 'reject'}`, { approvalNotes: decision.notes });
+      } else if (decision.item.entityType === 'warehouse_transfer') {
+        await api.post(`/approvals/${decision.item.id}/${decision.type === 'approve' ? 'approve' : 'reject'}`, { notes: decision.notes });
       }
       setMessage('Decisão registrada com sucesso.');
       setDecision({ open: false, type: '', item: null, notes: '' });

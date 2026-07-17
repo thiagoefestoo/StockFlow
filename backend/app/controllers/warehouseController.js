@@ -8,12 +8,14 @@ const {
   SerializedAsset,
   Material,
   StockMovement,
+  ApprovalRequest,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
 const { adjustBalance } = require('../services/stockService');
-const { qty, money } = require('../utils/number');
+const { money } = require('../utils/number');
+const { buildWarehouseTransferPlan } = require('../services/warehouseTransferService');
 const {
   warehouseListWhere,
   assertWarehouseAccess,
@@ -143,101 +145,51 @@ exports.update = asyncHandler(async (req, res) => {
 
 exports.transferStock = asyncHandler(async (req, res) => {
   const { fromWarehouseId, toWarehouseId, reference, notes, items = [] } = req.body;
-  if (!fromWarehouseId || !toWarehouseId) return fail(res, 400, 'Informe estoque de origem e destino.');
-  if (Number(fromWarehouseId) === Number(toWarehouseId)) return fail(res, 400, 'Origem e destino precisam ser diferentes.');
-  if (!Array.isArray(items) || !items.length) return fail(res, 400, 'Informe ao menos um item para transferir.');
 
   try {
-    assertWarehouseAccess(req.user, fromWarehouseId, 'Você não tem acesso ao estoque de origem.');
-    assertWarehouseAccess(req.user, toWarehouseId, 'Você não tem acesso ao estoque de destino.');
+    // Administrador e supervisor podem solicitar entre quaisquer estoques ativos.
+    // Estoquista pode solicitar reposição para estoque ao qual tem acesso, mas a execução só ocorre após aprovação do admin.
+    if (!isPrivileged(req.user)) {
+      assertWarehouseAccess(req.user, toWarehouseId, 'Você só pode solicitar reposição para um estoque vinculado ao seu usuário.');
+    }
   } catch (error) {
     return fail(res, error.statusCode || 403, error.message);
   }
 
-  const [fromWarehouse, toWarehouse] = await Promise.all([
-    Warehouse.findByPk(fromWarehouseId),
-    Warehouse.findByPk(toWarehouseId),
-  ]);
-  if (!fromWarehouse || !toWarehouse) return fail(res, 404, 'Estoque de origem ou destino não encontrado.');
-  if (fromWarehouse.status !== 'ativo' || toWarehouse.status !== 'ativo') return fail(res, 400, 'Só é possível transferir entre estoques ativos.');
+  let plan;
+  try {
+    plan = await buildWarehouseTransferPlan({ fromWarehouseId, toWarehouseId, reference, notes, items });
+  } catch (error) {
+    return fail(res, 400, error.message);
+  }
 
-  const result = await sequelize.transaction(async (transaction) => {
-    const movementReference = reference || nextWarehouseTransferNumber();
-    let totalQuantity = 0;
-    let totalValue = 0;
-    const affected = [];
-
-    for (const item of items) {
-      const material = await Material.findByPk(item.materialId, { transaction });
-      if (!material) throw new Error('Material não encontrado.');
-      const unitCost = money(item.unitCost ?? material.unitCost);
-
-      if (material.requiresSerial) {
-        const serials = parseSerials(item.serialNumbers);
-        if (!serials.length) throw new Error(`Selecione ao menos um serial de ${material.name}.`);
-        for (const serialNumber of serials) {
-          const asset = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
-          if (!asset || asset.ownerType !== 'estoque' || Number(asset.warehouseId) !== Number(fromWarehouseId)) {
-            throw new Error(`Serial ${serialNumber} não está disponível no estoque de origem.`);
-          }
-          const before = asset.toJSON();
-          asset.warehouseId = Number(toWarehouseId);
-          asset.lastMovementAt = new Date();
-          asset.notes = [asset.notes, `Transferência entre estoques ${fromWarehouse.code} → ${toWarehouse.code}`].filter(Boolean).join(' | ');
-          await asset.save({ transaction });
-          await StockMovement.create({
-            type: 'ajuste',
-            materialId: material.id,
-            assetId: asset.id,
-            quantity: 1,
-            serialNumber,
-            fromOwnerType: 'estoque',
-            toOwnerType: 'estoque',
-            fromWarehouseId: fromWarehouse.id,
-            toWarehouseId: toWarehouse.id,
-            reference: movementReference,
-            notes: notes || `Transferência entre estoques: ${fromWarehouse.name} para ${toWarehouse.name}.`,
-            createdById: req.user.id,
-          }, { transaction });
-          totalQuantity += 1;
-          totalValue += Number(asset.acquisitionCost || unitCost);
-          affected.push({ materialId: material.id, serialNumber, beforeWarehouseId: before.warehouseId, afterWarehouseId: toWarehouse.id });
-        }
-      } else {
-        const quantity = qty(item.quantity);
-        if (quantity <= 0) throw new Error(`Quantidade inválida para ${material.name}.`);
-        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: fromWarehouse.id, delta: -quantity, transaction });
-        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: toWarehouse.id, delta: quantity, transaction });
-        await StockMovement.create({
-          type: 'ajuste',
-          materialId: material.id,
-          quantity,
-          fromOwnerType: 'estoque',
-          toOwnerType: 'estoque',
-          fromWarehouseId: fromWarehouse.id,
-          toWarehouseId: toWarehouse.id,
-          reference: movementReference,
-          notes: notes || `Transferência entre estoques: ${fromWarehouse.name} para ${toWarehouse.name}.`,
-          createdById: req.user.id,
-        }, { transaction });
-        totalQuantity += quantity;
-        totalValue += Number(quantity) * Number(unitCost);
-        affected.push({ materialId: material.id, quantity, fromWarehouseId: fromWarehouse.id, toWarehouseId: toWarehouse.id });
-      }
-    }
-
-    await writeAudit({
-      req,
-      action: 'warehouse_transfer',
-      entity: 'Warehouse',
-      entityId: String(toWarehouse.id),
-      message: `Transferência ${movementReference} de ${fromWarehouse.name} para ${toWarehouse.name}.`,
-      afterData: { reference: movementReference, fromWarehouseId, toWarehouseId, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
-      transaction,
-    });
-
-    return { reference: movementReference, fromWarehouse, toWarehouse, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affectedCount: affected.length };
+  const approval = await ApprovalRequest.create({
+    workflowCode: plan.reference,
+    entityType: 'warehouse_transfer',
+    entityId: plan.reference,
+    title: `Aprovar transferência ${plan.reference}`,
+    description: `Transferência de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`,
+    status: 'pendente',
+    priority: Number(plan.totalValue || 0) >= 500 ? 'alta' : 'media',
+    amount: plan.totalValue,
+    requestedById: req.user.id,
+    payload: {
+      ...plan,
+      requestedByName: req.user.name,
+      requestedByEmail: req.user.email,
+      approvalRequired: true,
+      approvalReason: 'Transferência entre estoques exige aprovação do administrador antes de movimentar saldo.',
+    },
   });
 
-  return created(res, result, 'Transferência entre estoques registrada com sucesso.');
+  await writeAudit({
+    req,
+    action: 'warehouse_transfer_requested',
+    entity: 'ApprovalRequest',
+    entityId: approval.id,
+    message: `Solicitada aprovação para transferência ${plan.reference} de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`,
+    afterData: approval.toJSON(),
+  });
+
+  return created(res, { approval, plan }, 'Transferência enviada para aprovação do administrador. O saldo só será movimentado após aprovação.');
 });
