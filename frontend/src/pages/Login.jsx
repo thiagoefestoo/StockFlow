@@ -3,13 +3,12 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import SuperInfraLogo from '../components/SuperInfraLogo';
 
-const defaultAdminEmail = process.env.REACT_APP_DEFAULT_ADMIN_EMAIL || (process.env.NODE_ENV !== 'production' ? 'admin@local.com' : '');
-const defaultAdminPassword = process.env.REACT_APP_DEFAULT_ADMIN_PASSWORD || (process.env.NODE_ENV !== 'production' ? 'admin123' : '');
+const loginExample = 'usuario@exemplo.com';
 
 export default function Login() {
   const { user, login, loading } = useAuth();
-  const [email, setEmail] = useState(defaultAdminEmail);
-  const [password, setPassword] = useState(defaultAdminPassword);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   if (user) return <Navigate to={user.role === 'tecnico' ? '/caixa-tecnico' : '/'} replace />;
 
@@ -35,10 +34,10 @@ export default function Login() {
         <p>Feito para controlar ONUs por número de série, materiais de campo, guias de entrega, baixas por OS e auditoria completa.</p>
         <div className="hero-grid"><b>Alertas vivos</b><b>Portal técnico</b><b>BI gerencial</b><b>Guia assinada</b></div>
       </div>
-      <form className="login-card" onSubmit={submit}>
+      <form className="login-card" onSubmit={submit} autoComplete="off">
         <h1>Entrar</h1>
-        <label>E-mail ou usuário<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@empresa.com ou nome do usuário" autoComplete="username" /></label>
-        <label>Senha<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" /></label>
+        <label>E-mail ou usuário<input value={email} onChange={(e) => setEmail(e.target.value)} name="superinfra_login_identifier" placeholder={loginExample} autoComplete="off" /></label>
+        <label>Senha<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} name="superinfra_login_password" placeholder="Digite sua senha" autoComplete="new-password" /></label>
         {error && <div className="alert danger">{error}</div>}
         <button disabled={loading}>{loading ? 'Entrando...' : 'Acessar sistema'}</button>
       </form>
