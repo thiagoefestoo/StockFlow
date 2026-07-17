@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
@@ -39,6 +40,26 @@ function tokenFor(user) {
   return jwt.sign({ id: user.id, role: user.role }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 }
 
+function normalizeIdentifier(value) {
+  return String(value || '').trim();
+}
+
+async function findLoginUser(identifier) {
+  const value = normalizeIdentifier(identifier);
+  if (!value) return null;
+
+  const where = value.includes('@')
+    ? { email: value.toLowerCase() }
+    : {
+      [Op.or]: [
+        { name: { [Op.iLike]: value } },
+        { email: { [Op.iLike]: value } },
+      ],
+    };
+
+  return User.findOne({ where, include: [Technician] });
+}
+
 exports.setupAdmin = asyncHandler(async (req, res) => {
   const { key, name, email, password } = req.body;
   if (key !== env.setupAdminKey) return fail(res, 403, 'Chave de criação inválida.');
@@ -55,12 +76,13 @@ exports.setupAdmin = asyncHandler(async (req, res) => {
 });
 
 exports.login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ where: { email }, include: [Technician] });
-  if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) return fail(res, 401, 'E-mail ou senha inválidos.');
+  const identifier = normalizeIdentifier(req.body.email || req.body.login || req.body.username);
+  const user = await findLoginUser(identifier);
+  if (!user || !(await bcrypt.compare(req.body.password || '', user.passwordHash))) return fail(res, 401, 'Usuário ou senha inválidos.');
   if (user.deletedAt) return fail(res, 403, 'Usuário excluído.');
   if (user.blockedAt) return fail(res, 403, 'Usuário bloqueado.');
   if (user.status !== 'ativo') return fail(res, 403, 'Usuário inativo.');
+  if (user.role === 'tecnico' && user.Technician?.status && user.Technician.status !== 'ativo') return fail(res, 403, 'Técnico vinculado está inativo ou bloqueado.');
   user.lastLoginAt = new Date();
   await user.save();
   return ok(res, { user: publicUser(user), token: tokenFor(user) }, 'Login realizado.');

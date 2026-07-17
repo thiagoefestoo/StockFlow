@@ -37,11 +37,10 @@ export default function Login() {
       </div>
       <form className="login-card" onSubmit={submit}>
         <h1>Entrar</h1>
-        <label>E-mail<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@empresa.com" /></label>
-        <label>Senha<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" /></label>
+        <label>E-mail ou usuário<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@empresa.com ou nome do usuário" autoComplete="username" /></label>
+        <label>Senha<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" /></label>
         {error && <div className="alert danger">{error}</div>}
         <button disabled={loading}>{loading ? 'Entrando...' : 'Acessar sistema'}</button>
-        <small>Primeiro acesso local: o backend pode criar automaticamente o admin do .env com <code>AUTO_CREATE_ADMIN=true</code>.</small>
       </form>
     </div>
   );
