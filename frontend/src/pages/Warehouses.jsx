@@ -143,6 +143,25 @@ export default function Warehouses() {
     }
   }
 
+
+  async function requestWarehouseDelete(row) {
+    const hasItems = Number(row.totalValue || 0) > 0 || Number(row.assetCount || 0) > 0 || Number(row.consumableLines || 0) > 0;
+    if (hasItems) {
+      setMessage('Este estoque possui materiais/equipamentos. Transfira todos os itens para outro estoque antes de solicitar exclusão.');
+      return;
+    }
+    const confirmed = window.confirm(`Solicitar exclusão do estoque ${row.code} • ${row.name}? A exclusão só será executada após aprovação do admin e o sistema irá validar novamente se o estoque está vazio.`);
+    if (!confirmed) return;
+    try {
+      setMessage('');
+      await api.post(`/warehouses/${row.id}/request-delete`, { notes: 'Solicitação de exclusão enviada pela tela de estoques.' });
+      setMessage('Sucesso: solicitação de exclusão enviada para aprovação do administrador.');
+      await load();
+    } catch (e) {
+      setMessage(e.response?.data?.message || 'Não foi possível solicitar exclusão do estoque. Transfira os itens para outro estoque e tente novamente.');
+    }
+  }
+
   return <div className="page-grid erp-page warehouse-page">
     <section className="toolbar">
       <div>
@@ -168,7 +187,7 @@ export default function Warehouses() {
 
     <section className="panel">
       <div className="panel-title">
-        <div><h3>Unidades de estoque</h3><p>Estoquistas veem apenas os estoques vinculados em Usuários e permissões.</p></div>
+        <div><h3>Unidades de estoque</h3><p>Estoquistas veem apenas os estoques vinculados em Usuários e permissões. Estoques só podem ser excluídos quando estiverem vazios e após aprovação do admin.</p></div>
       </div>
       <div className="table-wrap">
         <table>
@@ -180,7 +199,7 @@ export default function Warehouses() {
             <td>{r.responsibleName || '-'}</td>
             <td>{brl(r.totalValue)}</td>
             <td><span className={`badge ${r.status}`}>{r.status === 'ativo' ? 'Ativo' : r.status}</span></td>
-            <td><div className="row-actions"><button className="info" onClick={() => openDetails(r)}>Detalhes/BI</button><button className="ghost" onClick={() => openTransfer(r)}>Receber transferência</button>{canManageStructure && <button className="ghost" onClick={() => { setForm(r); setModal(true); }}>Editar</button>}</div></td>
+            <td><div className="row-actions"><button className="info" onClick={() => openDetails(r)}>Detalhes/BI</button><button className="ghost" onClick={() => openTransfer(r)}>Receber transferência</button>{canManageStructure && <button className="ghost" onClick={() => { setForm(r); setModal(true); }}>Editar</button>}{canManageStructure && <button className="ghost danger-outline" onClick={() => requestWarehouseDelete(r)}>Solicitar exclusão</button>}</div></td>
           </tr>)}</tbody>
         </table>
       </div>

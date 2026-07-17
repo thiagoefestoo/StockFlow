@@ -11,6 +11,7 @@ function approvalTypeLabel(type) {
     material_request: 'Solicitação de material',
     transfer: 'Transferência de material',
     warehouse_transfer: 'Transferência entre estoques',
+    warehouse_delete: 'Exclusão de estoque',
     service_order: 'Ordem de serviço',
     stock_adjustment: 'Ajuste de estoque',
   };
@@ -33,6 +34,7 @@ function payloadLabel(key) {
     warehouseName: 'Estoque/região',
     fromWarehouseName: 'Estoque origem',
     toWarehouseName: 'Estoque destino',
+    approvalReason: 'Motivo da aprovação',
   };
   return labels[key] || String(key || '').replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
@@ -91,7 +93,7 @@ export default function Approvals() {
     try {
       if (decision.item.entityType === 'material_request') {
         await api.post(`/material-requests/${decision.item.entityId}/${decision.type === 'approve' ? 'approve' : 'reject'}`, { approvalNotes: decision.notes });
-      } else if (decision.item.entityType === 'warehouse_transfer') {
+      } else if (['warehouse_transfer', 'warehouse_delete'].includes(decision.item.entityType)) {
         await api.post(`/approvals/${decision.item.id}/${decision.type === 'approve' ? 'approve' : 'reject'}`, { notes: decision.notes });
       }
       setMessage('Decisão registrada com sucesso.');

@@ -35,14 +35,58 @@ function nextWarehouseTransferNumber() {
   return `TE-${stamp}`;
 }
 
+function nextWarehouseDeleteNumber() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  return `EXE-${stamp}`;
+}
+
+async function warehouseInventorySnapshot(warehouseId, options = {}) {
+  const transaction = options.transaction || null;
+  const [balances, assets] = await Promise.all([
+    StockBalance.findAll({ where: { warehouseId, ownerType: 'estoque' }, include: [Material], transaction }),
+    SerializedAsset.findAll({ where: { warehouseId, ownerType: 'estoque' }, include: [Material], transaction }),
+  ]);
+
+  const positiveBalances = balances.filter((balance) => Number(balance.quantity || 0) > 0);
+  const assetValue = assets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0);
+  const consumableValue = positiveBalances.reduce((sum, balance) => sum + Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0), 0);
+
+  return {
+    hasItems: positiveBalances.length > 0 || assets.length > 0,
+    consumableLines: positiveBalances.length,
+    assetCount: assets.length,
+    totalValue: money(assetValue + consumableValue),
+    balances: positiveBalances.map((balance) => ({
+      materialId: balance.materialId,
+      materialName: balance.Material?.name || 'Material',
+      category: balance.Material?.category || '-',
+      quantity: Number(balance.quantity || 0),
+      unit: balance.Material?.unit || '',
+      unitCost: Number(balance.Material?.unitCost || 0),
+      totalCost: money(Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0)),
+    })),
+    assets: assets.map((asset) => ({
+      assetId: asset.id,
+      materialId: asset.materialId,
+      materialName: asset.Material?.name || 'Equipamento',
+      category: asset.Material?.category || '-',
+      serialNumber: asset.serialNumber,
+      status: asset.status,
+      value: Number(asset.acquisitionCost || asset.Material?.unitCost || 0),
+    })),
+  };
+}
+
 async function warehouseStats(warehouse) {
   const [balances, assets] = await Promise.all([
     StockBalance.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material] }),
     SerializedAsset.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material] }),
   ]);
-  const consumableValue = balances.reduce((s, b) => s + Number(b.quantity || 0) * Number(b.Material?.unitCost || 0), 0);
+  const positiveBalances = balances.filter((b) => Number(b.quantity || 0) > 0);
+  const consumableValue = positiveBalances.reduce((s, b) => s + Number(b.quantity || 0) * Number(b.Material?.unitCost || 0), 0);
   const assetValue = assets.reduce((s, a) => s + Number(a.acquisitionCost || a.Material?.unitCost || 0), 0);
-  return { consumableLines: balances.length, assetCount: assets.length, totalValue: money(consumableValue + assetValue) };
+  return { consumableLines: positiveBalances.length, assetCount: assets.length, totalValue: money(consumableValue + assetValue) };
 }
 
 exports.list = asyncHandler(async (req, res) => {
@@ -141,6 +185,57 @@ exports.update = asyncHandler(async (req, res) => {
   await record.save();
   await writeAudit({ req, action: 'update', entity: 'Warehouse', entityId: record.id, message: `Estoque ${record.name} atualizado.`, beforeData: before, afterData: record.toJSON() });
   return ok(res, record, 'Estoque atualizado.');
+});
+
+
+exports.requestDelete = asyncHandler(async (req, res) => {
+  const warehouse = await Warehouse.findByPk(req.params.id);
+  if (!warehouse) return fail(res, 404, 'Estoque não encontrado.');
+
+  const inventory = await warehouseInventorySnapshot(warehouse.id);
+  if (inventory.hasItems) {
+    return fail(res, 409, 'Não é possível solicitar exclusão: este estoque ainda possui materiais ou equipamentos. Transfira todos os itens para outro estoque antes de pedir a exclusão.', { data: { inventory, suggestion: 'Use Transferir entre estoques para mover o saldo e os seriais para outra unidade.' } });
+  }
+
+  const pending = await ApprovalRequest.findOne({
+    where: { entityType: 'warehouse_delete', entityId: String(warehouse.id), status: 'pendente' },
+  });
+  if (pending) return fail(res, 409, 'Já existe uma solicitação de exclusão pendente para este estoque.');
+
+  const approvalCode = nextWarehouseDeleteNumber();
+  const approval = await ApprovalRequest.create({
+    workflowCode: approvalCode,
+    entityType: 'warehouse_delete',
+    entityId: String(warehouse.id),
+    title: `Aprovar exclusão do estoque ${warehouse.code}`,
+    description: `Exclusão solicitada para o estoque vazio ${warehouse.name} (${warehouse.city || warehouse.region || warehouse.code}).`,
+    status: 'pendente',
+    priority: 'alta',
+    amount: 0,
+    requestedById: req.user.id,
+    payload: {
+      operation: 'warehouse_delete',
+      approvalRequired: true,
+      approvalReason: 'A exclusão de estoque exige aprovação do administrador e só pode ocorrer quando o estoque estiver vazio.',
+      warehouseId: warehouse.id,
+      warehouse: warehouse.get({ plain: true }),
+      inventory,
+      requestedByName: req.user.name,
+      requestedByEmail: req.user.email,
+      notes: req.body?.notes || '',
+    },
+  });
+
+  await writeAudit({
+    req,
+    action: 'warehouse_delete_requested',
+    entity: 'ApprovalRequest',
+    entityId: approval.id,
+    message: `Solicitada aprovação para exclusão do estoque ${warehouse.name}.`,
+    afterData: approval.toJSON(),
+  });
+
+  return created(res, { approval, inventory }, 'Solicitação de exclusão enviada para aprovação do administrador.');
 });
 
 exports.transferStock = asyncHandler(async (req, res) => {

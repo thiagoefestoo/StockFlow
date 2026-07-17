@@ -4,6 +4,7 @@ const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
 router.use(authenticate);
 router.get('/', controller.list);
 router.post('/transfer-stock', requireRoles('admin', 'supervisor', 'estoquista'), controller.transferStock);
+router.post('/:id/request-delete', requireRoles('admin', 'supervisor'), controller.requestDelete);
 router.get('/:id', controller.get);
 router.post('/', requireRoles('admin', 'supervisor'), controller.create);
 router.put('/:id', requireRoles('admin', 'supervisor'), controller.update);
