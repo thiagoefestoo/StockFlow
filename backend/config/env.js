@@ -54,4 +54,5 @@ module.exports = {
   corsAllowVercelPreviews: bool(process.env.CORS_ALLOW_VERCEL_PREVIEWS, false),
   autoIntelligenceMinutes: Number(process.env.TELECOMSTOCK_AUTO_INTELLIGENCE_MINUTES || 0),
   uploadPublicBaseUrl: process.env.UPLOAD_PUBLIC_BASE_URL || '',
+  approvalAdminMinAmount: Number(process.env.APPROVAL_ADMIN_MIN_AMOUNT || 500),
 };

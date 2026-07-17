@@ -1,5 +1,5 @@
 const sequelize = require('../../config/db');
-const { StockBatch, StockBatchItem, Material, SerializedAsset, StockMovement, User } = require('../models');
+const { StockBatch, StockBatchItem, Material, SerializedAsset, StockMovement, User, Warehouse } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
@@ -11,6 +11,7 @@ exports.list = asyncHandler(async (req, res) => {
     include: [
       { model: StockBatchItem, include: [Material] },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
+      Warehouse,
     ],
     order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
     limit: 400,
@@ -33,6 +34,7 @@ exports.create = asyncHandler(async (req, res) => {
     receivedByName,
     conferenceStatus = 'conferido',
     warehouseLocation,
+    warehouseId,
     proofAttachmentName,
     proofAttachmentData,
     items = [],
@@ -41,6 +43,11 @@ exports.create = asyncHandler(async (req, res) => {
   if (!receiptNumber || !receivedAt || !items.length) return fail(res, 400, 'Número de recebimento, data e itens são obrigatórios.');
   if (!proofAttachmentName || !proofAttachmentData) return fail(res, 400, 'Anexe um comprovante da entrada, como nota fiscal, termo de entrega, romaneio ou recibo.');
   if (!fiscalDocumentNumber && !invoiceAccessKey) return fail(res, 400, 'Informe o número do documento fiscal/termo ou a chave de acesso da nota.');
+  let targetWarehouseId = warehouseId || null;
+  if (targetWarehouseId) {
+    const warehouse = await Warehouse.findByPk(targetWarehouseId);
+    if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque/região informado não existe ou está inativo.');
+  }
 
   const result = await sequelize.transaction(async (transaction) => {
     let totalItems = 0;
@@ -61,6 +68,7 @@ exports.create = asyncHandler(async (req, res) => {
       warehouseLocation,
       proofAttachmentName,
       proofAttachmentData,
+      warehouseId: targetWarehouseId,
       createdById: req.user.id,
     }, { transaction });
 
@@ -88,6 +96,7 @@ exports.create = asyncHandler(async (req, res) => {
         condition: item.condition || 'novo',
         warehouseLocation: item.warehouseLocation || warehouseLocation || null,
         itemNotes: item.itemNotes || null,
+        warehouseId: targetWarehouseId,
       }, { transaction });
 
       if (material.requiresSerial) {
@@ -104,6 +113,7 @@ exports.create = asyncHandler(async (req, res) => {
             status: 'em_estoque',
             ownerType: 'estoque',
             lastMovementAt: new Date(),
+            warehouseId: targetWarehouseId,
             notes: [
               item.itemNotes,
               item.manufacturerLot ? `Lote fabricante: ${item.manufacturerLot}` : null,
@@ -119,18 +129,20 @@ exports.create = asyncHandler(async (req, res) => {
             quantity: 1,
             serialNumber,
             toOwnerType: 'estoque',
+            toWarehouseId: targetWarehouseId,
             reference: receiptNumber,
             notes: `Entrada por lote ${receiptNumber}. Documento: ${fiscalDocumentNumber || invoiceAccessKey}.`,
             createdById: req.user.id,
           }, { transaction });
         }
       } else {
-        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, delta: quantity, transaction });
+        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: targetWarehouseId, delta: quantity, transaction });
         await StockMovement.create({
           type: 'entrada',
           materialId: material.id,
           quantity,
           toOwnerType: 'estoque',
+          toWarehouseId: targetWarehouseId,
           reference: receiptNumber,
           notes: `Entrada por lote ${receiptNumber}. Documento: ${fiscalDocumentNumber || invoiceAccessKey}.`,
           createdById: req.user.id,

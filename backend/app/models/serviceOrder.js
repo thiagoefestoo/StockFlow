@@ -12,6 +12,7 @@ const ServiceOrder = sequelize.define('ServiceOrder', {
   status: { type: DataTypes.ENUM('aberta', 'concluida', 'cancelada', 'pendente'), allowNull: false, defaultValue: 'concluida' },
   completedAt: { type: DataTypes.DATE, allowNull: true },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  warehouseId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'service_orders' });
 
 module.exports = ServiceOrder;

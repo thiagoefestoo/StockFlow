@@ -10,6 +10,9 @@ const {
   User,
   ServiceOrder,
   ServiceOrderMaterial,
+  Warehouse,
+  Transfer,
+  TransferItem,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -49,7 +52,7 @@ exports.assets = asyncHandler(async (req, res) => {
   if (req.query.technicianId) where.technicianId = req.query.technicianId;
   if (req.query.serial) where.serialNumber = { [Op.iLike]: `%${req.query.serial}%` };
   const limit = Math.min(Number(req.query.limit || 800), 2000);
-  const assets = await SerializedAsset.findAll({ where, include: [Material, Technician], order: [['updatedAt', 'DESC']], limit });
+  const assets = await SerializedAsset.findAll({ where, include: [Material, Technician, Warehouse], order: [['updatedAt', 'DESC']], limit });
   return ok(res, assets.map((asset) => ({ ...asset.toJSON(), custodyDays: daysBetween(asset.custodyStartedAt) })));
 });
 
@@ -88,15 +91,16 @@ exports.movements = asyncHandler(async (req, res) => {
 exports.technicianBox = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  const targetWarehouseId = warehouseId || technician.defaultWarehouseId || null;
 
   const assets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
-    include: [Material],
+    include: [Material, Warehouse],
     order: [['custodyStartedAt', 'ASC'], ['serialNumber', 'ASC']],
   });
   const balances = await StockBalance.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
-    include: [Material],
+    include: [Material, Warehouse],
     order: [[Material, 'name', 'ASC']],
   });
   const movements = await StockMovement.findAll({
@@ -151,8 +155,13 @@ exports.technicianBox = asyncHandler(async (req, res) => {
 });
 
 exports.returnFromTechnician = asyncHandler(async (req, res) => {
-  const { technicianId, reference, notes, items = [] } = req.body;
-  if (!technicianId || !items.length) return fail(res, 400, 'Técnico e itens são obrigatórios.');
+  const { technicianId, reference, notes, warehouseId, items = [] } = req.body;
+  if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
+  if (!items.length) {
+    const defaults = await StockBalance.findAll({ where: { technicianId, ownerType: 'tecnico' }, include: [Material] });
+    items = defaults.filter((row) => ['drop', 'cabo', 'conector', 'esticador'].includes(String(row.Material?.category || '').toLowerCase())).map((row) => ({ materialId: row.materialId, quantity: Math.min(Number(row.quantity || 0), row.Material?.category === 'drop' || row.Material?.category === 'cabo' ? 50 : 2) })).filter((item) => item.quantity > 0);
+    if (!items.length) return fail(res, 400, 'Informe itens ou mantenha materiais padrão disponíveis na caixa do técnico.');
+  }
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
 
@@ -176,11 +185,12 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
           asset.ownerType = 'estoque';
           asset.status = 'em_estoque';
           asset.technicianId = null;
+          asset.warehouseId = targetWarehouseId;
           asset.custodyStartedAt = null;
           asset.lastMovementAt = new Date();
           asset.notes = [asset.notes, notes ? `Retorno ao estoque: ${notes}` : null].filter(Boolean).join(' | ');
           await asset.save({ transaction });
-          await StockMovement.create({ type: 'retorno_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'tecnico', toOwnerType: 'estoque', fromTechnicianId: technicianId, reference: movementReference, notes: notes || 'Retorno administrativo da caixa do técnico.', createdById: req.user.id }, { transaction });
+          await StockMovement.create({ type: 'retorno_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'tecnico', toOwnerType: 'estoque', fromTechnicianId: technicianId, toWarehouseId: targetWarehouseId, reference: movementReference, notes: notes || 'Retorno administrativo da caixa do técnico.', createdById: req.user.id }, { transaction });
           totalQuantity += 1;
           totalValue += Number(asset.acquisitionCost || unitCost);
           affected.push({ serialNumber, before: beforeAsset, after: asset.toJSON() });
@@ -189,8 +199,8 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
         const quantity = qty(item.quantity);
         if (quantity <= 0) continue;
         await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
-        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, delta: quantity, transaction });
-        await StockMovement.create({ type: 'retorno_tecnico', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'estoque', fromTechnicianId: technicianId, reference: movementReference, notes: notes || 'Retorno administrativo da caixa do técnico.', createdById: req.user.id }, { transaction });
+        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: targetWarehouseId, delta: quantity, transaction });
+        await StockMovement.create({ type: 'retorno_tecnico', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'estoque', fromTechnicianId: technicianId, toWarehouseId: targetWarehouseId, reference: movementReference, notes: notes || 'Retorno administrativo da caixa do técnico.', createdById: req.user.id }, { transaction });
         totalQuantity += quantity;
         totalValue += quantity * unitCost;
         affected.push({ materialId: material.id, quantity });
@@ -215,7 +225,12 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
 exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
   let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'outro', completedAt, reference, notes, items = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
-  if (!technicianId || !items.length) return fail(res, 400, 'Técnico e itens são obrigatórios.');
+  if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
+  if (!items.length) {
+    const defaults = await StockBalance.findAll({ where: { technicianId, ownerType: 'tecnico' }, include: [Material] });
+    items = defaults.filter((row) => ['drop', 'cabo', 'conector', 'esticador'].includes(String(row.Material?.category || '').toLowerCase())).map((row) => ({ materialId: row.materialId, quantity: Math.min(Number(row.quantity || 0), row.Material?.category === 'drop' || row.Material?.category === 'cabo' ? 50 : 2) })).filter((item) => item.quantity > 0);
+    if (!items.length) return fail(res, 400, 'Informe itens ou mantenha materiais padrão disponíveis na caixa do técnico.');
+  }
   if (!customerName || !customerCpf) return fail(res, 400, 'Nome e CPF do cliente são obrigatórios.');
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
@@ -294,4 +309,36 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
   });
 
   return created(res, result, 'Material movimentado da caixa do técnico para o cliente.');
+});
+
+
+exports.serialLife = asyncHandler(async (req, res) => {
+  const serial = String(req.params.serial || req.query.serial || '').trim();
+  if (!serial) return fail(res, 400, 'Informe o serial para consulta.');
+  const asset = await SerializedAsset.findOne({ where: { serialNumber: serial }, include: [Material, Technician, Warehouse] });
+  if (!asset) return fail(res, 404, 'Serial não encontrado no patrimônio.');
+  const [movements, transferItems, osItems] = await Promise.all([
+    StockMovement.findAll({ where: { serialNumber: serial }, include: [Material, SerializedAsset, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }, { model: Warehouse, as: 'fromWarehouse' }, { model: Warehouse, as: 'toWarehouse' }, { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }], order: [['movementAt', 'ASC']] }),
+    TransferItem.findAll({ where: { serialNumber: serial }, include: [{ model: Transfer, include: [Technician, Warehouse] }, Material], order: [['createdAt', 'ASC']] }),
+    ServiceOrderMaterial.findAll({ where: { serialNumber: serial }, include: [{ model: ServiceOrder, include: [Technician, Warehouse] }, Material], order: [['createdAt', 'ASC']] }),
+  ]);
+  return ok(res, {
+    asset: { ...asset.toJSON(), custodyDays: daysBetween(asset.custodyStartedAt) },
+    lifecycle: movements,
+    transfers: transferItems,
+    serviceOrders: osItems,
+    summary: {
+      serial,
+      material: asset.Material?.name,
+      currentOwner: asset.ownerType,
+      status: asset.status,
+      technician: asset.Technician?.name || null,
+      warehouse: asset.Warehouse?.name || null,
+      customerName: asset.customerName || null,
+      acquisitionCost: asset.acquisitionCost || asset.Material?.unitCost || 0,
+      movementCount: movements.length,
+      firstMovement: movements[0]?.movementAt || null,
+      lastMovement: movements[movements.length - 1]?.movementAt || null,
+    },
+  });
 });

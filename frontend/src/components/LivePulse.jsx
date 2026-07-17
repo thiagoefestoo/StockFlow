@@ -41,7 +41,7 @@ export default function LivePulse() {
     <section className="live-pulse" aria-live="polite">
       <div className="pulse-dot" />
       <div className="live-content">
-        <strong>StockFlow ao vivo</strong>
+        <strong>Operação ao vivo</strong>
         <div className="live-ticker">
           {tips.map((tip, index) => <span key={index}>{tip}</span>)}
         </div>

@@ -3,18 +3,18 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import NotificationBell from './NotificationBell';
 import LivePulse from './LivePulse';
-import StockFlowLogo from './StockFlowLogo';
+import SuperInfraLogo from './SuperInfraLogo';
 
 const adminGroups = [
   { title: 'Comando', links: [['/', 'OP', 'Cockpit'], ['/aprovacoes', 'AP', 'Aprovações'], ['/dashboard', 'DB', 'Dashboard legado']] },
-  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa']] },
-  { title: 'Cadastros e estoque', links: [['/estoque', 'MT', 'Materiais/Estoque'], ['/patrimonio', 'PA', 'Patrimônio'], ['/tecnicos', 'TE', 'Técnicos']] },
+  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa']] },
+  { title: 'Cadastros e estoque', links: [['/estoque', 'MT', 'Materiais/Estoque'], ['/patrimonio', 'PA', 'Patrimônio'], ['/vida-serial', 'VS', 'Vida do serial'], ['/tecnicos', 'TE', 'Técnicos']] },
   { title: 'Administração', adminOnly: true, links: [['/usuarios', 'US', 'Usuários e permissões']] },
   { title: 'Minha conta', links: [['/minha-conta', 'CO', 'Configurações da conta']] },
   { title: 'BI e auditoria', links: [['/bi/executivo', 'BE', 'BI Executivo'], ['/bi/financeiro', 'BF', 'BI Financeiro'], ['/bi/tecnicos', 'BT', 'BI Técnicos'], ['/bi/auditoria', 'BA', 'BI Auditoria'], ['/historico-movimentacoes', 'HM', 'Histórico'], ['/auditoria', 'AU', 'Auditoria']] },
 ];
 const technicianGroups = [
-  { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/minha-conta', 'CO', 'Minha conta']] },
+  { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/vida-serial', 'VS', 'Vida do serial'], ['/minha-conta', 'CO', 'Minha conta']] },
 ];
 
 export default function Layout() {
@@ -26,9 +26,9 @@ export default function Layout() {
   function toggle(title) { setOpenGroups((current) => ({ ...current, [title]: !current[title] })); }
 
   return (
-    <div className="shell erp-shell stockflow-shell">
+    <div className="shell erp-shell superinfra-shell">
       <aside className="sidebar erp-sidebar">
-        <div className="brand"><StockFlowLogo /><div><strong>StockFlow</strong><small>ERP vivo de estoque telecom</small></div></div>
+        <div className="brand superinfra-brand"><SuperInfraLogo /></div>
         <nav className="accordion-menu">
           {groups.map((group) => {
             const isOpen = openGroups[group.title] ?? true;
@@ -54,9 +54,9 @@ export default function Layout() {
       <main className="main">
         <header className="topbar erp-topbar">
           <div className="topbar-title-wrap">
-            <StockFlowLogo compact />
+            <SuperInfraLogo compact />
             <div>
-              <small>StockFlow Business Suite</small>
+              <small>Super Infra Business Suite</small>
               <h1>{titleFor(location.pathname)}</h1>
             </div>
           </div>
@@ -80,6 +80,8 @@ function titleFor(path) {
   if (path.includes('/central-caixa-tecnico')) return 'Central administrativa da caixa do técnico';
   if (path.includes('/caixa-tecnico')) return 'Caixa do técnico';
   if (path.includes('/historico-movimentacoes')) return 'Histórico de movimentações';
+  if (path.includes('/estoques-regionais')) return 'Estoques regionais';
+  if (path.includes('/vida-serial')) return 'Vida útil do serial';
   if (path.includes('/entrada')) return 'Entrada quinzenal de material';
   if (path.includes('/transferencias')) return 'Transferências e guias de assinatura';
   if (path.includes('/portal-tecnico')) return 'Portal mobile do técnico';

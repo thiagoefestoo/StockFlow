@@ -12,6 +12,7 @@ const StockBatchItem = sequelize.define('StockBatchItem', {
   condition: { type: DataTypes.ENUM('novo', 'usado', 'recondicionado', 'defeito', 'outro'), allowNull: false, defaultValue: 'novo' },
   warehouseLocation: { type: DataTypes.STRING(120), allowNull: true },
   itemNotes: { type: DataTypes.TEXT, allowNull: true },
+  warehouseId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'stock_batch_items' });
 
 module.exports = StockBatchItem;

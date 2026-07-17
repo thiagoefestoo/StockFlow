@@ -11,6 +11,7 @@ const MaterialRequest = sequelize.define('MaterialRequest', {
   requesterNotes: { type: DataTypes.TEXT, allowNull: true },
   approvalNotes: { type: DataTypes.TEXT, allowNull: true },
   logisticsNotes: { type: DataTypes.TEXT, allowNull: true },
+  warehouseId: { type: DataTypes.INTEGER, allowNull: true },
   totalQuantity: { type: DataTypes.DECIMAL(12, 3), allowNull: false, defaultValue: 0 },
   totalValue: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
   approvedAt: { type: DataTypes.DATE, allowNull: true },

@@ -11,6 +11,8 @@ const Technician = sequelize.define('Technician', {
   status: { type: DataTypes.ENUM('ativo', 'inativo', 'bloqueado'), allowNull: false, defaultValue: 'ativo' },
   vehiclePlate: { type: DataTypes.STRING(20), allowNull: true },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  serviceCities: { type: DataTypes.JSONB, allowNull: true, defaultValue: [] },
+  defaultWarehouseId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'technicians' });
 
 module.exports = Technician;

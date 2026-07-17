@@ -64,7 +64,7 @@ export default function Audit() {
   function exportExcel() {
     const header = ['Data', 'Acao', 'Entidade', 'ID entidade', 'Mensagem', 'Operador', 'Email', 'Perfil', 'IP'];
     const body = filtered.map((log) => [dt(log.createdAt), log.action, log.entity, log.entityId, log.message, log.actor?.name || 'Sistema', log.actor?.email || '', log.actor?.role || '', log.ip || '']);
-    downloadExcelLike('stockflow-auditoria-completa.xls', [header, ...body]);
+    downloadExcelLike('superinfra-auditoria-completa.xls', [header, ...body]);
   }
 
   function exportCsv() {
@@ -75,7 +75,7 @@ export default function Audit() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'stockflow-auditoria-completa.csv';
+    a.download = 'superinfra-auditoria-completa.csv';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -83,7 +83,7 @@ export default function Audit() {
   return (
     <div className="page-grid audit-page">
       <div className="toolbar">
-        <div><span className="eyebrow">🔎 Auditoria avançada</span><h2>Auditoria completa do StockFlow</h2><p>Consulta corporativa de alterações, aprovações, transferências, anexos, baixas, edições e eventos do sistema.</p></div>
+        <div><span className="eyebrow">Auditoria avançada</span><h2>Auditoria completa da operação</h2><p>Consulta corporativa de alterações, aprovações, transferências, anexos, baixas, edições e eventos do sistema.</p></div>
         <div className="row-actions"><button className="ghost" onClick={load}>🔄 Atualizar</button><button className="ghost" onClick={exportCsv}>⬇️ CSV</button><button onClick={exportExcel}>📗 Excel</button></div>
       </div>
       {message && <div className="alert danger">{message}</div>}

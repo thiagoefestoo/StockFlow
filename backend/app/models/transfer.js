@@ -13,6 +13,8 @@ const Transfer = sequelize.define('Transfer', {
   attachmentData: { type: DataTypes.TEXT('long'), allowNull: true },
   signatureResponsible: { type: DataTypes.STRING(160), allowNull: true },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  warehouseId: { type: DataTypes.INTEGER, allowNull: true },
+  stampText: { type: DataTypes.TEXT, allowNull: true },
 }, { tableName: 'transfers' });
 
 module.exports = Transfer;

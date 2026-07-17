@@ -25,6 +25,8 @@ import OperationsCockpit from './pages/OperationsCockpit';
 import MovementHistory from './pages/MovementHistory';
 import Users from './pages/Users';
 import Account from './pages/Account';
+import Warehouses from './pages/Warehouses';
+import SerialLife from './pages/SerialLife';
 
 
 export default function App() {
@@ -35,27 +37,29 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
             <Route index element={<Home />} />
-            <Route path="dashboard" element={<PrivateRoute roles={['admin', 'supervisor']}><Dashboard /></PrivateRoute>} />
-            <Route path="estoque" element={<PrivateRoute roles={['admin', 'supervisor']}><Stock /></PrivateRoute>} />
-            <Route path="entrada" element={<PrivateRoute roles={['admin', 'supervisor']}><Receiving /></PrivateRoute>} />
-            <Route path="transferencias" element={<PrivateRoute roles={['admin', 'supervisor']}><Transfers /></PrivateRoute>} />
-            <Route path="solicitacoes-material" element={<PrivateRoute roles={['admin', 'supervisor']}><MaterialRequests /></PrivateRoute>} />
-            <Route path="aprovacoes" element={<PrivateRoute roles={['admin', 'supervisor']}><Approvals /></PrivateRoute>} />
-            <Route path="transferencias/:id" element={<PrivateRoute roles={['admin', 'supervisor']}><TransferPrint /></PrivateRoute>} />
-            <Route path="portal-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor']}><TechnicianPortal /></PrivateRoute>} />
-            <Route path="caixa-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor']}><TechnicianInbox /></PrivateRoute>} />
-            <Route path="central-caixa-tecnico" element={<PrivateRoute roles={['admin', 'supervisor']}><TechnicianBoxControl /></PrivateRoute>} />
-            <Route path="tecnicos" element={<PrivateRoute roles={['admin', 'supervisor']}><Technicians /></PrivateRoute>} />
+            <Route path="dashboard" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Dashboard /></PrivateRoute>} />
+            <Route path="estoque" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Stock /></PrivateRoute>} />
+            <Route path="entrada" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Receiving /></PrivateRoute>} />
+            <Route path="transferencias" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Transfers /></PrivateRoute>} />
+            <Route path="solicitacoes-material" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><MaterialRequests /></PrivateRoute>} />
+            <Route path="aprovacoes" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Approvals /></PrivateRoute>} />
+            <Route path="transferencias/:id" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><TransferPrint /></PrivateRoute>} />
+            <Route path="portal-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor', 'estoquista']}><TechnicianPortal /></PrivateRoute>} />
+            <Route path="caixa-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor', 'estoquista']}><TechnicianInbox /></PrivateRoute>} />
+            <Route path="central-caixa-tecnico" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><TechnicianBoxControl /></PrivateRoute>} />
+            <Route path="tecnicos" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Technicians /></PrivateRoute>} />
             <Route path="usuarios" element={<PrivateRoute roles={['admin']}><Users /></PrivateRoute>} />
             <Route path="minha-conta" element={<Account />} />
-            <Route path="os" element={<PrivateRoute roles={['admin', 'supervisor']}><ServiceOrders /></PrivateRoute>} />
-            <Route path="patrimonio" element={<PrivateRoute roles={['admin', 'supervisor']}><Patrimony /></PrivateRoute>} />
-            <Route path="bi/executivo" element={<PrivateRoute roles={['admin', 'supervisor']}><BIExecutive /></PrivateRoute>} />
-            <Route path="bi/tecnicos" element={<PrivateRoute roles={['admin', 'supervisor']}><BITechnicians /></PrivateRoute>} />
-            <Route path="bi/auditoria" element={<PrivateRoute roles={['admin', 'supervisor']}><BIAudit /></PrivateRoute>} />
-            <Route path="bi/financeiro" element={<PrivateRoute roles={['admin', 'supervisor']}><BIFinancial /></PrivateRoute>} />
-            <Route path="auditoria" element={<PrivateRoute roles={['admin', 'supervisor']}><Audit /></PrivateRoute>} />
-            <Route path="historico-movimentacoes" element={<PrivateRoute roles={['admin', 'supervisor']}><MovementHistory /></PrivateRoute>} />
+            <Route path="os" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><ServiceOrders /></PrivateRoute>} />
+            <Route path="estoques-regionais" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Warehouses /></PrivateRoute>} />
+            <Route path="vida-serial" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista', 'tecnico']}><SerialLife /></PrivateRoute>} />
+            <Route path="patrimonio" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Patrimony /></PrivateRoute>} />
+            <Route path="bi/executivo" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><BIExecutive /></PrivateRoute>} />
+            <Route path="bi/tecnicos" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><BITechnicians /></PrivateRoute>} />
+            <Route path="bi/auditoria" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><BIAudit /></PrivateRoute>} />
+            <Route path="bi/financeiro" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><BIFinancial /></PrivateRoute>} />
+            <Route path="auditoria" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Audit /></PrivateRoute>} />
+            <Route path="historico-movimentacoes" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><MovementHistory /></PrivateRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

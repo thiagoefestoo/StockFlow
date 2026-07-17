@@ -2,17 +2,22 @@ const { Op } = require('sequelize');
 const { StockBalance, Material, SerializedAsset, Technician } = require('../models');
 const { qty } = require('../utils/number');
 
-async function getOrCreateBalance({ materialId, ownerType = 'estoque', technicianId = null, transaction }) {
+function normalizeWarehouseId(value) {
+  return value === undefined || value === '' ? null : value;
+}
+
+async function getOrCreateBalance({ materialId, ownerType = 'estoque', technicianId = null, warehouseId = null, transaction }) {
+  const normalizedWarehouseId = normalizeWarehouseId(warehouseId);
   const [balance] = await StockBalance.findOrCreate({
-    where: { materialId, ownerType, technicianId },
-    defaults: { quantity: 0 },
+    where: { materialId, ownerType, technicianId, warehouseId: normalizedWarehouseId },
+    defaults: { quantity: 0, warehouseId: normalizedWarehouseId },
     transaction,
   });
   return balance;
 }
 
-async function adjustBalance({ materialId, ownerType = 'estoque', technicianId = null, delta, transaction }) {
-  const balance = await getOrCreateBalance({ materialId, ownerType, technicianId, transaction });
+async function adjustBalance({ materialId, ownerType = 'estoque', technicianId = null, warehouseId = null, delta, transaction }) {
+  const balance = await getOrCreateBalance({ materialId, ownerType, technicianId, warehouseId, transaction });
   const nextQuantity = qty(Number(balance.quantity || 0) + Number(delta || 0));
   if (nextQuantity < -0.0001) {
     const material = await Material.findByPk(materialId, { transaction });
@@ -23,9 +28,12 @@ async function adjustBalance({ materialId, ownerType = 'estoque', technicianId =
   return balance;
 }
 
-async function getMainStock() {
-  const balances = await StockBalance.findAll({ where: { ownerType: 'estoque' }, include: [Material], order: [[Material, 'name', 'ASC']] });
-  const serialized = await SerializedAsset.findAll({ where: { ownerType: 'estoque' }, include: [Material] });
+async function getMainStock(warehouseId = null) {
+  const where = { ownerType: 'estoque' };
+  const assetWhere = { ownerType: 'estoque' };
+  if (warehouseId) { where.warehouseId = warehouseId; assetWhere.warehouseId = warehouseId; }
+  const balances = await StockBalance.findAll({ where, include: [Material], order: [[Material, 'name', 'ASC']] });
+  const serialized = await SerializedAsset.findAll({ where: assetWhere, include: [Material] });
   return { balances, serialized };
 }
 
@@ -35,11 +43,10 @@ async function getTechnicianStock(technicianId) {
   return { balances, serialized };
 }
 
-async function availableAssetsByMaterial(materialId) {
-  return SerializedAsset.findAll({
-    where: { materialId, ownerType: 'estoque', status: 'em_estoque' },
-    order: [['serialNumber', 'ASC']],
-  });
+async function availableAssetsByMaterial(materialId, warehouseId = null) {
+  const where = { materialId, ownerType: 'estoque', status: 'em_estoque' };
+  if (warehouseId) where.warehouseId = warehouseId;
+  return SerializedAsset.findAll({ where, order: [['serialNumber', 'ASC']] });
 }
 
 async function assetsInCustodyOlderThan(days) {
@@ -51,11 +58,4 @@ async function assetsInCustodyOlderThan(days) {
   });
 }
 
-module.exports = {
-  getOrCreateBalance,
-  adjustBalance,
-  getMainStock,
-  getTechnicianStock,
-  availableAssetsByMaterial,
-  assetsInCustodyOlderThan,
-};
+module.exports = { getOrCreateBalance, adjustBalance, getMainStock, getTechnicianStock, availableAssetsByMaterial, assetsInCustodyOlderThan };

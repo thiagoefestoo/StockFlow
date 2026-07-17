@@ -58,7 +58,7 @@ export default function MovementHistory() {
   function exportExcel() {
     const header = ['Data', 'Tipo', 'Material', 'Quantidade', 'Serial', 'Origem', 'Destino', 'Referencia', 'Operador', 'Observacao'];
     const body = filtered.map((m) => [dt(m.movementAt), m.type, m.Material?.name || '', m.quantity, m.serialNumber || '', m.fromTechnician?.name || m.fromOwnerType || '', m.toTechnician?.name || m.toOwnerType || '', m.reference || '', m.createdBy?.name || 'Sistema', m.notes || '']);
-    downloadExcelLike('stockflow-historico-movimentacoes.xls', [header, ...body]);
+    downloadExcelLike('superinfra-historico-movimentacoes.xls', [header, ...body]);
   }
 
   function exportCsv() {
@@ -69,7 +69,7 @@ export default function MovementHistory() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'stockflow-historico-movimentacoes.csv';
+    a.download = 'superinfra-historico-movimentacoes.csv';
     a.click();
     URL.revokeObjectURL(url);
   }

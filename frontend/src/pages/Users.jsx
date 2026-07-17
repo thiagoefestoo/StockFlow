@@ -16,10 +16,13 @@ const emptyUser = {
   jobTitle: '',
   notes: '',
   mustChangePassword: false,
+  warehouseIds: [],
+  cityAccessText: '',
+  approvalLimit: 0,
 };
 
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
-function roleLabel(role) { return ({ admin: 'Administrador', supervisor: 'Supervisor', tecnico: 'Técnico' }[role] || role); }
+function roleLabel(role) { return ({ admin: 'Administrador', supervisor: 'Supervisor', estoquista: 'Estoquista', tecnico: 'Técnico' }[role] || role); }
 function statusLabel(user) {
   const value = user?.accessStatus || user?.status;
   return ({ ativo: 'Ativo', inativo: 'Inativo', bloqueado: 'Bloqueado', excluido: 'Excluído' }[value] || value || '-');
@@ -40,7 +43,7 @@ function exportUsers(users) {
   const blob = new Blob([rows.map((r) => r.map(csvCell).join(';')).join('\n')], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `stockflow-usuarios-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `superinfra-usuarios-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 }
 function randomPassword() {
@@ -54,6 +57,7 @@ export default function Users() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState({});
   const [technicians, setTechnicians] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [filters, setFilters] = useState({ q: '', role: '', status: '', includeDeleted: 'true' });
   const [form, setForm] = useState(emptyUser);
   const [modal, setModal] = useState(false);
@@ -66,10 +70,11 @@ export default function Users() {
 
   async function load() {
     const params = new URLSearchParams(filters).toString();
-    const [u, t] = await Promise.all([api.get(`/users?${params}`), api.get('/technicians')]);
+    const [u, t, w] = await Promise.all([api.get(`/users?${params}`), api.get('/technicians'), api.get('/warehouses').catch(() => ({ data: { data: [] } }))]);
     setUsers(u.data.data.users || []);
     setStats(u.data.data.stats || {});
     setTechnicians(t.data.data || []);
+    setWarehouses(w.data.data || []);
   }
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -79,7 +84,7 @@ export default function Users() {
     setModal(true);
   }
   function openEdit(user) {
-    setForm({ ...emptyUser, ...user, password: '', technicianId: user.technicianId || '', mustChangePassword: !!user.mustChangePassword });
+    setForm({ ...emptyUser, ...user, password: '', technicianId: user.technicianId || '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0 });
     setModal(true);
   }
   function patchForm(patch) {
@@ -90,7 +95,7 @@ export default function Users() {
   async function saveUser() {
     try {
       setMessage('');
-      const payload = { ...form, technicianId: form.role === 'tecnico' ? form.technicianId || null : null };
+      const payload = { ...form, technicianId: form.role === 'tecnico' ? form.technicianId || null : null, warehouseIds: form.warehouseIds || [], cityAccess: String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean), approvalLimit: Number(form.approvalLimit || 0) };
       if (form.id) {
         if (!payload.password) delete payload.password;
         await api.put(`/users/${form.id}`, payload);
@@ -182,6 +187,7 @@ export default function Users() {
               <option value="">Todos</option>
               <option value="admin">Administrador</option>
               <option value="supervisor">Supervisor</option>
+              <option value="estoquista">Estoquista</option>
               <option value="tecnico">Técnico</option>
             </select>
           </label>
@@ -252,6 +258,7 @@ export default function Users() {
               <select value={form.role} onChange={(e) => patchForm({ role: e.target.value })}>
                 <option value="admin">Administrador</option>
                 <option value="supervisor">Supervisor</option>
+                <option value="estoquista">Estoquista</option>
                 <option value="tecnico">Técnico</option>
               </select>
             </label>
@@ -266,6 +273,18 @@ export default function Users() {
                 <option value="">Selecione o técnico</option>
                 {technicians.map((t) => <option key={t.id} value={t.id}>{t.name} {t.document ? `• ${t.document}` : ''}</option>)}
               </select>
+            </label>}
+            {form.role === 'estoquista' && <label>Estoques autorizados
+              <select multiple value={form.warehouseIds || []} onChange={(e) => patchForm({ warehouseIds: Array.from(e.target.selectedOptions).map((option) => Number(option.value)) })}>
+                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}
+              </select>
+              <small>Use Ctrl para selecionar mais de um estoque.</small>
+            </label>}
+            {['estoquista', 'tecnico'].includes(form.role) && <label>Cidades autorizadas
+              <input value={form.cityAccessText || ''} onChange={(e) => patchForm({ cityAccessText: e.target.value })} placeholder="Joinville, Araquari, São Francisco" />
+            </label>}
+            {form.role === 'estoquista' && <label>Limite de aprovação do usuário
+              <input type="number" value={form.approvalLimit || 0} onChange={(e) => patchForm({ approvalLimit: e.target.value })} />
             </label>}
             <label>{form.id ? 'Nova senha opcional' : 'Senha inicial'}
               <div className="input-with-button"><input type="text" value={form.password || ''} onChange={(e) => patchForm({ password: e.target.value })} placeholder={form.id ? 'Deixe vazio para manter' : 'Senha obrigatória'} /><button type="button" className="ghost" onClick={() => patchForm({ password: randomPassword() })}>Gerar</button></div>
@@ -301,7 +320,7 @@ export default function Users() {
             ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle], ['Técnico vinculado', details.data.user.Technician?.name || '-'], ['Documento técnico', details.data.user.Technician?.document || '-'],
             ['Último login', dt(details.data.user.lastLoginAt)], ['Senha alterada em', dt(details.data.user.passwordChangedAt)], ['Criado em', dt(details.data.user.createdAt)], ['Atualizado em', dt(details.data.user.updatedAt)],
             ['Bloqueado em', dt(details.data.user.blockedAt)], ['Motivo bloqueio', details.data.user.blockedReason], ['Excluído em', dt(details.data.user.deletedAt)], ['Motivo exclusão', details.data.user.deletedReason],
-            ['Observações', details.data.user.notes],
+            ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).join(', ') || '-'], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],
           ]} />
           <DetailList title="🧾 Histórico de alterações do usuário" items={details.data.audits || []} render={(audit) => <><b>{audit.action} • {dt(audit.createdAt)}</b><span>{audit.message}</span><small>Operador: {audit.actor?.name || 'Sistema'} • IP: {audit.ip || '-'}</small></>} />
         </>}

@@ -19,6 +19,9 @@ function hide(user) {
     name: raw.name,
     email: raw.email,
     role: raw.role,
+    warehouseIds: raw.warehouseIds || [],
+    cityAccess: raw.cityAccess || [],
+    approvalLimit: raw.approvalLimit,
     status: raw.status,
     accessStatus: computedStatus(raw),
     technicianId: raw.technicianId,
@@ -80,6 +83,7 @@ exports.list = asyncHandler(async (req, res) => {
     tecnicos: users.filter((u) => u.role === 'tecnico').length,
     admins: users.filter((u) => u.role === 'admin').length,
     supervisores: users.filter((u) => u.role === 'supervisor').length,
+    estoquistas: users.filter((u) => u.role === 'estoquista').length,
   };
 
   return ok(res, { users: list, stats });
@@ -98,9 +102,9 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false } = req.body;
+  const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false, warehouseIds = [], cityAccess = [], approvalLimit = 0 } = req.body;
   if (!name || !email || !password) return fail(res, 400, 'Nome, e-mail e senha são obrigatórios.');
-  if (!['admin', 'supervisor', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
+  if (!['admin', 'supervisor', 'estoquista', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
   await assertEmailAvailable(email);
   await validateTechnicianLink(role, technicianId);
   const user = await User.create({
@@ -112,6 +116,9 @@ exports.create = asyncHandler(async (req, res) => {
     phone: phone || null,
     jobTitle: jobTitle || null,
     notes: notes || null,
+    warehouseIds: Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [],
+    cityAccess: Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [],
+    approvalLimit: Number(approvalLimit || 0),
     mustChangePassword: !!mustChangePassword,
     passwordChangedAt: new Date(),
     passwordHash: await bcrypt.hash(password, 10),
@@ -126,7 +133,7 @@ exports.update = asyncHandler(async (req, res) => {
   if (user.deletedAt) return fail(res, 409, 'Usuário excluído. Restaure antes de editar.');
 
   const before = hide(user);
-  const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword } = req.body;
+  const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword, warehouseIds, cityAccess, approvalLimit } = req.body;
   const nextRole = role || user.role;
   if (email && email !== user.email) await assertEmailAvailable(String(email).toLowerCase().trim(), user.id);
   await validateTechnicianLink(nextRole, technicianId === undefined ? user.technicianId : technicianId);
@@ -140,6 +147,9 @@ exports.update = asyncHandler(async (req, res) => {
     phone: phone === undefined ? user.phone : phone || null,
     jobTitle: jobTitle === undefined ? user.jobTitle : jobTitle || null,
     notes: notes === undefined ? user.notes : notes || null,
+    warehouseIds: warehouseIds === undefined ? user.warehouseIds : (Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : []),
+    cityAccess: cityAccess === undefined ? user.cityAccess : (Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : []),
+    approvalLimit: approvalLimit === undefined ? user.approvalLimit : Number(approvalLimit || 0),
     mustChangePassword: mustChangePassword === undefined ? user.mustChangePassword : !!mustChangePassword,
   });
   if (password) {

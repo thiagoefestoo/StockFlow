@@ -25,7 +25,7 @@ const EMPTY_FILTERS = {
   search: '',
 };
 
-const FILTER_STORAGE_KEY = 'stockflow.bi.filters.collapsed';
+const FILTER_STORAGE_KEY = 'superinfra.bi.filters.collapsed';
 
 const FIELD_LABELS = {
   periodPreset: 'Período',

@@ -31,7 +31,7 @@ app.use(cors({
 app.use(express.json({ limit: '20mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.get('/', (req, res) => res.json({ success: true, message: 'StockFlow API online.', environment: env.nodeEnv }));
+app.get('/', (req, res) => res.json({ success: true, message: 'Super Infra API online.', environment: env.nodeEnv }));
 app.get('/api/health', async (req, res) => {
   try {
     await sequelize.authenticate();
@@ -45,6 +45,7 @@ app.use('/api/auth', require('./app/routes/authRoutes'));
 app.use('/api/users', require('./app/routes/userRoutes'));
 app.use('/api/materials', require('./app/routes/materialRoutes'));
 app.use('/api/companies', require('./app/routes/companyRoutes'));
+app.use('/api/warehouses', require('./app/routes/warehouseRoutes'));
 app.use('/api/technicians', require('./app/routes/technicianRoutes'));
 app.use('/api/batches', require('./app/routes/batchRoutes'));
 app.use('/api/stock', require('./app/routes/stockRoutes'));
@@ -71,7 +72,7 @@ async function start() {
     await ensureBootstrapAdmin();
     startAutoIntelligence(env.autoIntelligenceMinutes);
     app.listen(env.port, () => {
-      console.log(`🚀 StockFlow API na porta ${env.port}`);
+      console.log(`🚀 Super Infra API na porta ${env.port}`);
       console.log(`🔗 Health: http://localhost:${env.port}/api/health`);
     });
   } catch (error) {

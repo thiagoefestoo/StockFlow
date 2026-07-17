@@ -150,7 +150,7 @@ export default function NotificationBell() {
           <div className="bell-title">
             <div>
               <strong>Central viva</strong>
-              <small>Alertas, tarefas e dicas do StockFlow</small>
+              <small>Alertas, tarefas e dicas operacionais</small>
             </div>
             <div className="bell-title-actions">
               <span>{data.unread || 0} novas</span>

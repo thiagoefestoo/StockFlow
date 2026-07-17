@@ -10,16 +10,17 @@ const {
   ServiceOrder,
   StockMovement,
   User,
+  Warehouse,
 } = require('../models');
 const { crudController } = require('./crudHelpers');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, fail } = require('../utils/response');
 const { money, daysBetween } = require('../utils/number');
 
-const base = crudController(Technician, 'Técnico', [ContractorCompany]);
+const base = crudController(Technician, 'Técnico', [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }]);
 
 exports.list = asyncHandler(async (req, res) => {
-  const technicians = await Technician.findAll({ include: [ContractorCompany], order: [['name', 'ASC']] });
+  const technicians = await Technician.findAll({ include: [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }], order: [['name', 'ASC']] });
   const data = [];
   for (const technician of technicians) {
     const assetCount = await SerializedAsset.count({ where: { technicianId: technician.id, ownerType: 'tecnico' } });
@@ -42,7 +43,7 @@ exports.create = base.create;
 exports.update = base.update;
 
 exports.stock = asyncHandler(async (req, res) => {
-  const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany] });
+  const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
 
   const assets = await SerializedAsset.findAll({

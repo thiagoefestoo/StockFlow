@@ -40,7 +40,7 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
-  const value = useMemo(() => ({ user, login, logout, updateUser, refreshUser, loading, isAdmin: user?.role === 'admin', isSupervisor: ['admin', 'supervisor'].includes(user?.role), isTechnician: user?.role === 'tecnico' }), [user, loading]);
+  const value = useMemo(() => ({ user, login, logout, updateUser, refreshUser, loading, isAdmin: user?.role === 'admin', isSupervisor: ['admin', 'supervisor', 'estoquista'].includes(user?.role), isTechnician: user?.role === 'tecnico' }), [user, loading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

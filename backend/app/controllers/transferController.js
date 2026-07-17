@@ -1,5 +1,5 @@
 const sequelize = require('../../config/db');
-const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement } = require('../models');
+const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
@@ -13,12 +13,12 @@ function nextNumber() {
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const transfers = await Transfer.findAll({ include: [Technician, { model: TransferItem, include: [Material, SerializedAsset] }], order: [['deliveredAt', 'DESC']], limit: 300 });
+  const transfers = await Transfer.findAll({ include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }], order: [['deliveredAt', 'DESC']], limit: 300 });
   return ok(res, transfers);
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, { model: TransferItem, include: [Material, SerializedAsset] }] });
+  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }] });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
   return ok(res, transfer);
 });
@@ -75,7 +75,7 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, { model: TransferItem, include: [Material, SerializedAsset] }] });
+  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }] });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
   const before = transfer.toJSON();
   const { notes, status, deliveredAt, signatureResponsible } = req.body;

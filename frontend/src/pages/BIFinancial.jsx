@@ -157,11 +157,11 @@ export default function BIFinancial() {
       ...(data.recentTransfers || []).map((row) => ({ tipo: 'transferencia', ...row })),
       ...(data.recentConsumption || []).map((row) => ({ tipo: 'baixa_os', ...row })),
     ];
-    downloadFile('stockflow-bi-financeiro.csv', rowsToCsv(rows));
+    downloadFile('superinfra-bi-financeiro.csv', rowsToCsv(rows));
   }
 
   function exportExcel() {
-    exportExcelLike('stockflow-bi-financeiro.xls', {
+    exportExcelLike('superinfra-bi-financeiro.xls', {
       'Resumo financeiro': [cards],
       'Materiais': safeRows(data.materialFinance),
       'Técnicos': safeRows(data.technicianFinance),
@@ -287,7 +287,7 @@ export default function BIFinancial() {
       )}
 
       <section className="finance-footer panel">
-        <strong>🧮 Leitura financeira do StockFlow</strong>
+        <strong>Leitura financeira da operação</strong>
         <span>Os valores são calculados a partir de custo unitário, documentos de entrada, guias, baixas por OS, materiais em estoque, materiais em carga de técnico e patrimônio serializado. Atualizado em {new Date(data.generatedAt).toLocaleString('pt-BR')}.</span>
       </section>
     </div>

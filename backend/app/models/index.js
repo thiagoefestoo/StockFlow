@@ -17,9 +17,12 @@ const Task = require('./task');
 const MaterialRequest = require('./materialRequest');
 const MaterialRequestItem = require('./materialRequestItem');
 const ApprovalRequest = require('./approvalRequest');
+const Warehouse = require('./warehouse');
 
 ContractorCompany.hasMany(Technician, { foreignKey: 'companyId' });
 Technician.belongsTo(ContractorCompany, { foreignKey: 'companyId' });
+Technician.belongsTo(Warehouse, { as: 'defaultWarehouse', foreignKey: 'defaultWarehouseId' });
+Warehouse.hasMany(Technician, { foreignKey: 'defaultWarehouseId' });
 
 Technician.hasOne(User, { foreignKey: 'technicianId' });
 User.belongsTo(Technician, { foreignKey: 'technicianId' });
@@ -28,25 +31,34 @@ Material.hasMany(SerializedAsset, { foreignKey: 'materialId' });
 SerializedAsset.belongsTo(Material, { foreignKey: 'materialId' });
 Technician.hasMany(SerializedAsset, { foreignKey: 'technicianId' });
 SerializedAsset.belongsTo(Technician, { foreignKey: 'technicianId' });
+SerializedAsset.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
+Warehouse.hasMany(SerializedAsset, { foreignKey: 'warehouseId' });
 
 Material.hasMany(StockBalance, { foreignKey: 'materialId' });
 StockBalance.belongsTo(Material, { foreignKey: 'materialId' });
 Technician.hasMany(StockBalance, { foreignKey: 'technicianId' });
 StockBalance.belongsTo(Technician, { foreignKey: 'technicianId' });
+StockBalance.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
+Warehouse.hasMany(StockBalance, { foreignKey: 'warehouseId' });
 
 StockBatch.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+StockBatch.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
 StockBatch.hasMany(StockBatchItem, { foreignKey: 'batchId' });
 StockBatchItem.belongsTo(StockBatch, { foreignKey: 'batchId' });
 StockBatchItem.belongsTo(Material, { foreignKey: 'materialId' });
+StockBatchItem.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
 
 StockMovement.belongsTo(Material, { foreignKey: 'materialId' });
 StockMovement.belongsTo(SerializedAsset, { foreignKey: 'assetId' });
 StockMovement.belongsTo(Technician, { as: 'fromTechnician', foreignKey: 'fromTechnicianId' });
 StockMovement.belongsTo(Technician, { as: 'toTechnician', foreignKey: 'toTechnicianId' });
 StockMovement.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+StockMovement.belongsTo(Warehouse, { as: 'fromWarehouse', foreignKey: 'fromWarehouseId' });
+StockMovement.belongsTo(Warehouse, { as: 'toWarehouse', foreignKey: 'toWarehouseId' });
 
 Transfer.belongsTo(Technician, { foreignKey: 'technicianId' });
 Transfer.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+Transfer.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
 Transfer.hasMany(TransferItem, { foreignKey: 'transferId' });
 TransferItem.belongsTo(Transfer, { foreignKey: 'transferId' });
 TransferItem.belongsTo(Material, { foreignKey: 'materialId' });
@@ -54,6 +66,7 @@ TransferItem.belongsTo(SerializedAsset, { foreignKey: 'assetId' });
 
 ServiceOrder.belongsTo(Technician, { foreignKey: 'technicianId' });
 ServiceOrder.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+ServiceOrder.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
 ServiceOrder.hasMany(ServiceOrderMaterial, { foreignKey: 'serviceOrderId' });
 ServiceOrderMaterial.belongsTo(ServiceOrder, { foreignKey: 'serviceOrderId' });
 ServiceOrderMaterial.belongsTo(Material, { foreignKey: 'materialId' });
@@ -70,6 +83,7 @@ MaterialRequest.belongsTo(User, { as: 'requestedBy', foreignKey: 'requestedById'
 MaterialRequest.belongsTo(User, { as: 'approvedBy', foreignKey: 'approvedById' });
 MaterialRequest.belongsTo(User, { as: 'deliveredBy', foreignKey: 'deliveredById' });
 MaterialRequest.belongsTo(Transfer, { foreignKey: 'transferId' });
+MaterialRequest.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
 MaterialRequest.hasMany(MaterialRequestItem, { foreignKey: 'requestId' });
 MaterialRequestItem.belongsTo(MaterialRequest, { foreignKey: 'requestId' });
 MaterialRequestItem.belongsTo(Material, { foreignKey: 'materialId' });
@@ -98,4 +112,5 @@ module.exports = {
   MaterialRequest,
   MaterialRequestItem,
   ApprovalRequest,
+  Warehouse,
 };

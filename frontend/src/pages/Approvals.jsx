@@ -28,6 +28,8 @@ function payloadLabel(key) {
     materialName: 'Material',
     serialNumber: 'Número de série',
     quantity: 'Quantidade',
+    items: 'Itens solicitados',
+    warehouseName: 'Estoque/região',
   };
   return labels[key] || String(key || '').replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
@@ -37,30 +39,34 @@ function payloadValue(value) {
   if (typeof value === 'object') return Object.entries(value).map(([key, item]) => `${payloadLabel(key)}: ${payloadValue(item)}`).join(' • ');
   return String(value);
 }
-function OperationalInfo({ payload }) {
-  if (!payload) return null;
-  const priority = ['requestNumber', 'technicianName', 'transferNumber', 'serviceOrderNumber', 'customerName', 'customerCpf', 'materialName', 'serialNumber', 'quantity'];
-  const entries = Object.entries(payload).filter(([, value]) => value !== null && value !== undefined && value !== '');
-  const ordered = [
-    ...priority.filter((key) => Object.prototype.hasOwnProperty.call(payload, key)).map((key) => [key, payload[key]]),
-    ...entries.filter(([key]) => !priority.includes(key)),
-  ];
-  if (!ordered.length) return null;
+function OperationalInfo({ payload, requestDetails, operationalSummary }) {
+  const summary = operationalSummary || {};
+  const items = summary.items || requestDetails?.MaterialRequestItems || payload?.items || [];
+  const rows = items.map((item) => ({
+    material: item.material || item.materialName || item.Material?.name || 'Material',
+    category: item.category || item.Material?.category || '-',
+    quantity: item.quantity || item.approvedQuantity || 0,
+    unitCost: item.unitCost || item.Material?.unitCost || 0,
+    totalCost: item.totalCost || (Number(item.quantity || 0) * Number(item.unitCost || item.Material?.unitCost || 0)),
+    serialNumbers: item.serialNumbers || [],
+    notes: item.notes || '-',
+  }));
   return (
     <div className="detail-section">
-      <h4>Informações operacionais</h4>
-      <p className="detail-helper">Resumo legível dos dados usados pelo sistema para localizar e processar esta aprovação.</p>
+      <h4>Itens solicitados para aprovação</h4>
+      <p className="detail-helper">Confira os materiais antes de aprovar ou reprovar. Esta informação substitui o antigo payload técnico.</p>
       <div className="detail-grid compact">
-        {ordered.map(([key, value]) => (
-          <div className="detail-card" key={key}>
-            <span>{payloadLabel(key)}</span>
-            <strong>{payloadValue(value)}</strong>
-          </div>
-        ))}
+        <div className="detail-card"><span>Solicitação</span><strong>{summary.requestNumber || payload?.requestNumber || '-'}</strong></div>
+        <div className="detail-card"><span>Técnico</span><strong>{summary.technicianName || payload?.technicianName || '-'}</strong></div>
+        <div className="detail-card"><span>Estoque/região</span><strong>{summary.warehouseName || requestDetails?.Warehouse?.name || '-'}</strong></div>
+        <div className="detail-card"><span>Itens</span><strong>{rows.length}</strong></div>
       </div>
+      <div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Categoria</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th><th>Seriais</th><th>Observação</th></tr></thead><tbody>{rows.map((item, idx) => <tr key={idx}><td><strong>{item.material}</strong></td><td>{item.category}</td><td>{item.quantity}</td><td>{brl(item.unitCost)}</td><td>{brl(item.totalCost)}</td><td>{item.serialNumbers?.length ? item.serialNumbers.join(', ') : '-'}</td><td>{item.notes}</td></tr>)}</tbody></table></div>
+      {!rows.length && <div className="empty-state">Nenhum item detalhado vinculado a esta aprovação.</div>}
     </div>
   );
 }
+
 
 export default function Approvals() {
   const [approvals, setApprovals] = useState([]);
@@ -122,7 +128,7 @@ export default function Approvals() {
       </section>
 
       <DetailsModal open={!!details} title={`Detalhes da aprovação ${details?.title || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details?.status === 'pendente' && <button onClick={() => { setDecision({ open: true, type: 'approve', item: details, notes: '' }); setDetails(null); }}>Aprovar</button>}</>}>
-        {details && <><DetailGrid fields={[["Título", details.title], ["Descrição", details.description], ["Status", details.status], ["Prioridade", details.priority], ["Valor", brl(details.amount)], ["Tipo", approvalTypeLabel(details.entityType)], ["Código interno", details.entityId], ["Solicitado por", details.requestedBy?.name], ["Solicitado em", dt(details.requestedAt)], ["Decidido em", dt(details.decidedAt)], ["Decidido por", details.decidedBy?.name], ["Observação", details.decisionNotes]]} /><OperationalInfo payload={details.payload} /></>}
+        {details && <><DetailGrid fields={[["Título", details.title], ["Descrição", details.description], ["Status", details.status], ["Prioridade", details.priority], ["Valor", brl(details.amount)], ["Tipo", approvalTypeLabel(details.entityType)], ["Código interno", details.entityId], ["Solicitado por", details.requestedBy?.name], ["Solicitado em", dt(details.requestedAt)], ["Decidido em", dt(details.decidedAt)], ["Decidido por", details.decidedBy?.name], ["Observação", details.decisionNotes]]} /><OperationalInfo payload={details.payload} requestDetails={details.requestDetails} operationalSummary={details.operationalSummary} /></>}
       </DetailsModal>
       <Modal open={decision.open} title={decision.type === 'approve' ? 'Aprovar item' : 'Reprovar item'} onClose={() => setDecision({ open: false, type: '', item: null, notes: '' })} footer={<><button className="ghost" onClick={() => setDecision({ open: false, type: '', item: null, notes: '' })}>Cancelar</button><button onClick={decide}>Registrar decisão</button></>}>
         <p><strong>{decision.item?.title}</strong></p>

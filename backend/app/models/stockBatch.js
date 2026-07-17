@@ -21,6 +21,7 @@ const StockBatch = sequelize.define('StockBatch', {
   totalItems: { type: DataTypes.DECIMAL(12, 3), allowNull: false, defaultValue: 0 },
   totalValue: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  warehouseId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'stock_batches' });
 
 module.exports = StockBatch;

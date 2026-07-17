@@ -17,6 +17,9 @@ async function authenticate(req, res, next) {
       role: user.role,
       technicianId: user.technicianId,
       technician: user.Technician,
+      warehouseIds: user.warehouseIds || [],
+      cityAccess: user.cityAccess || [],
+      approvalLimit: user.approvalLimit,
       accessStatus: user.deletedAt ? 'excluido' : user.blockedAt ? 'bloqueado' : user.status,
       mustChangePassword: !!user.mustChangePassword,
     };

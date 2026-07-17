@@ -14,6 +14,8 @@ const StockMovement = sequelize.define('StockMovement', {
   movementAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   reference: { type: DataTypes.STRING(140), allowNull: true },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  fromWarehouseId: { type: DataTypes.INTEGER, allowNull: true },
+  toWarehouseId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'stock_movements' });
 
 module.exports = StockMovement;

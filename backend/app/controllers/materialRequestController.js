@@ -11,6 +11,7 @@ const {
   StockMovement,
   Notification,
   User,
+  Warehouse,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -37,6 +38,7 @@ function includeFull() {
     { model: User, as: 'approvedBy', attributes: ['id', 'name', 'email', 'role'] },
     { model: User, as: 'deliveredBy', attributes: ['id', 'name', 'email', 'role'] },
     Transfer,
+    Warehouse,
     { model: MaterialRequestItem, include: [Material, SerializedAsset] },
   ];
 }
@@ -70,12 +72,17 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  let { technicianId, requestType, priority, neededBy, requesterNotes, items = [] } = req.body;
+  let { technicianId, requestType, priority, neededBy, requesterNotes, warehouseId, items = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
   if (!items.length) return fail(res, 400, 'Inclua ao menos um item solicitado.');
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  warehouseId = warehouseId || technician.defaultWarehouseId || null;
+  if (warehouseId) {
+    const warehouse = await Warehouse.findByPk(warehouseId);
+    if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque/região não encontrado ou inativo.');
+  }
 
   const request = await sequelize.transaction(async (transaction) => {
     const record = await MaterialRequest.create({
@@ -87,11 +94,13 @@ exports.create = asyncHandler(async (req, res) => {
       neededBy: neededBy || null,
       requesterNotes,
       requestedById: req.user.id,
+      warehouseId: warehouseId || null,
     }, { transaction });
 
     let totalQuantity = 0;
     let totalValue = 0;
     const cleanItems = [];
+    const approvalItems = [];
 
     for (const item of items) {
       const material = await Material.findByPk(item.materialId, { transaction });
@@ -101,7 +110,7 @@ exports.create = asyncHandler(async (req, res) => {
       const unitCost = money(item.unitCost ?? material.unitCost);
       const totalCost = money(quantity * unitCost);
       const serialNumbers = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
-      cleanItems.push(await MaterialRequestItem.create({
+      const createdItem = await MaterialRequestItem.create({
         requestId: record.id,
         materialId: material.id,
         quantity,
@@ -110,7 +119,9 @@ exports.create = asyncHandler(async (req, res) => {
         totalCost,
         serialNumbers,
         notes: item.notes,
-      }, { transaction }));
+      }, { transaction });
+      cleanItems.push(createdItem);
+      approvalItems.push({ materialId: material.id, materialName: material.name, category: material.category, quantity, unitCost, totalCost, serialNumbers, notes: item.notes });
       totalQuantity += quantity;
       totalValue += totalCost;
     }
@@ -131,7 +142,7 @@ exports.create = asyncHandler(async (req, res) => {
       priority: record.priority,
       amount: record.totalValue,
       requestedById: req.user.id,
-      payload: { requestId: record.id, requestNumber: record.requestNumber, technicianId, technicianName: technician.name },
+      payload: { requestId: record.id, requestNumber: record.requestNumber, technicianId, technicianName: technician.name, warehouseId: warehouseId || null, items: approvalItems },
     }, { transaction });
 
     await Notification.create({
@@ -155,6 +166,11 @@ exports.approve = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
   if (request.status !== 'pendente_aprovacao') return fail(res, 400, 'A solicitação não está pendente de aprovação.');
+  const adminMinAmount = Number(process.env.APPROVAL_ADMIN_MIN_AMOUNT || 500);
+  const amount = Number(request.totalValue || 0);
+  if (amount >= adminMinAmount && req.user.role !== 'admin') {
+    return fail(res, 403, `Esta solicitação soma ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} e exige aprovação de administrador a partir de ${adminMinAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`);
+  }
 
   const before = request.toJSON();
   await sequelize.transaction(async (transaction) => {
@@ -213,6 +229,8 @@ exports.deliver = asyncHandler(async (req, res) => {
       deliveredAt: new Date(),
       notes: `Gerada pela solicitação ${request.requestNumber}. ${req.body.logisticsNotes || ''}`.trim(),
       createdById: req.user.id,
+      warehouseId: request.warehouseId || null,
+      stampText: `CARIMBO STOCKFLOW | ${technician.name} | ${request.requestNumber} | ${new Date().toLocaleDateString('pt-BR')} | Assinatura: ______________________________`,
     }, { transaction });
 
     let totalQuantity = 0;
@@ -233,9 +251,9 @@ exports.deliver = asyncHandler(async (req, res) => {
 
         let assets;
         if (serials.length) {
-          assets = await SerializedAsset.findAll({ where: { serialNumber: serials, materialId: material.id, ownerType: 'estoque', status: 'em_estoque' }, transaction });
+          assets = await SerializedAsset.findAll({ where: { serialNumber: serials, materialId: material.id, ownerType: 'estoque', status: 'em_estoque', ...(request.warehouseId ? { warehouseId: request.warehouseId } : {}) }, transaction });
         } else {
-          assets = await SerializedAsset.findAll({ where: { materialId: material.id, ownerType: 'estoque', status: 'em_estoque' }, order: [['serialNumber', 'ASC']], limit: Math.ceil(quantity), transaction });
+          assets = await SerializedAsset.findAll({ where: { materialId: material.id, ownerType: 'estoque', status: 'em_estoque', ...(request.warehouseId ? { warehouseId: request.warehouseId } : {}) }, order: [['serialNumber', 'ASC']], limit: Math.ceil(quantity), transaction });
         }
         if (assets.length < quantity) throw new Error(`Estoque serializado insuficiente para ${material.name}.`);
         const deliveredSerials = [];
@@ -249,18 +267,18 @@ exports.deliver = asyncHandler(async (req, res) => {
           asset.custodyStartedAt = new Date();
           asset.lastMovementAt = new Date();
           await asset.save({ transaction });
-          await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber: asset.serialNumber, fromOwnerType: 'estoque', toOwnerType: 'tecnico', toTechnicianId: request.technicianId, reference: record.transferNumber, notes: `Expedição pela solicitação ${request.requestNumber}.`, createdById: req.user.id }, { transaction });
+          await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber: asset.serialNumber, fromOwnerType: 'estoque', toOwnerType: 'tecnico', fromWarehouseId: request.warehouseId || asset.warehouseId || null, toTechnicianId: request.technicianId, reference: record.transferNumber, notes: `Expedição pela solicitação ${request.requestNumber}.`, createdById: req.user.id }, { transaction });
           totalQuantity += 1;
           totalValue += assetCost;
         }
         requestItem.deliverySerials = deliveredSerials;
         await requestItem.save({ transaction });
       } else {
-        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, delta: -quantity, transaction });
+        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: request.warehouseId || null, delta: -quantity, transaction });
         await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId: request.technicianId, delta: quantity, transaction });
         const totalCost = money(quantity * unitCost);
         await TransferItem.create({ transferId: record.id, materialId: material.id, quantity, unitCost, totalCost }, { transaction });
-        await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, quantity, fromOwnerType: 'estoque', toOwnerType: 'tecnico', toTechnicianId: request.technicianId, reference: record.transferNumber, notes: `Expedição pela solicitação ${request.requestNumber}.`, createdById: req.user.id }, { transaction });
+        await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, quantity, fromOwnerType: 'estoque', toOwnerType: 'tecnico', fromWarehouseId: request.warehouseId || null, toTechnicianId: request.technicianId, reference: record.transferNumber, notes: `Expedição pela solicitação ${request.requestNumber}.`, createdById: req.user.id }, { transaction });
         totalQuantity += quantity;
         totalValue += totalCost;
       }

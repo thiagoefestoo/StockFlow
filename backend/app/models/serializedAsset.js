@@ -20,6 +20,7 @@ const SerializedAsset = sequelize.define('SerializedAsset', {
   customerCpf: { type: DataTypes.STRING(32), allowNull: true },
   lastMovementAt: { type: DataTypes.DATE, allowNull: true },
   notes: { type: DataTypes.TEXT, allowNull: true },
+  warehouseId: { type: DataTypes.INTEGER, allowNull: true },
 }, { tableName: 'serialized_assets' });
 
 module.exports = SerializedAsset;

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import StockFlowLogo from '../components/StockFlowLogo';
+import SuperInfraLogo from '../components/SuperInfraLogo';
 
 const defaultAdminEmail = process.env.REACT_APP_DEFAULT_ADMIN_EMAIL || (process.env.NODE_ENV !== 'production' ? 'admin@local.com' : '');
 const defaultAdminPassword = process.env.REACT_APP_DEFAULT_ADMIN_PASSWORD || (process.env.NODE_ENV !== 'production' ? 'admin123' : '');
@@ -30,10 +30,10 @@ export default function Login() {
   return (
     <div className="login-screen">
       <div className="login-hero">
-        <div className="brand big"><StockFlowLogo /><div><strong>StockFlow</strong><small>Controle vivo para prestadoras de telecom</small></div></div>
+        <div className="brand big superinfra-brand"><SuperInfraLogo big /></div>
         <h2>Estoque, patrimônio, técnicos, assinatura e BI em uma única operação.</h2>
         <p>Feito para controlar ONUs por número de série, materiais de campo, guias de entrega, baixas por OS e auditoria completa.</p>
-        <div className="hero-grid"><b>🔔 Alertas vivos</b><b>📱 Portal técnico</b><b>📊 BI gerencial</b><b>🧾 Guia assinada</b></div>
+        <div className="hero-grid"><b>Alertas vivos</b><b>Portal técnico</b><b>BI gerencial</b><b>Guia assinada</b></div>
       </div>
       <form className="login-card" onSubmit={submit}>
         <h1>Entrar</h1>
