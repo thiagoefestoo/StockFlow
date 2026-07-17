@@ -257,17 +257,56 @@ exports.stock = asyncHandler(async (req, res) => {
   const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
   const grouped = {};
   for (const asset of assets) {
-    const key = asset.Material?.name || 'Equipamento serializado';
-    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
+    const material = asset.Material || {};
+    const key = material.name || 'Equipamento serializado';
+
+    grouped[key] = grouped[key] || {
+      materialId: material.id || asset.materialId,
+      material: key,
+      category: material.category || 'equipamento',
+      unit: material.unit || 'un',
+      requiresSerial: true,
+      quantity: 0,
+      value: 0,
+      serials: [],
+      serialDetails: [],
+    };
+
     grouped[key].quantity += 1;
-    grouped[key].value += Number(asset.acquisitionCost || 0);
-    grouped[key].serials.push(asset.serialNumber);
+    grouped[key].value += Number(asset.acquisitionCost || material.unitCost || 0);
+
+    if (asset.serialNumber) {
+      grouped[key].serials.push(asset.serialNumber);
+    }
+
+    grouped[key].serialDetails.push({
+      id: asset.id,
+      serialNumber: asset.serialNumber,
+      status: asset.status,
+      acquisitionCost: asset.acquisitionCost || material.unitCost || 0,
+      custodyStartedAt: asset.custodyStartedAt,
+      lastMovementAt: asset.lastMovementAt,
+    });
   }
+
   for (const balance of balances) {
-    const key = balance.Material?.name || 'Material consumível';
-    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
+    const material = balance.Material || {};
+    const key = material.name || 'Material consumível';
+
+    grouped[key] = grouped[key] || {
+      materialId: material.id || balance.materialId,
+      material: key,
+      category: material.category || 'consumivel',
+      unit: material.unit || '',
+      requiresSerial: Boolean(material.requiresSerial),
+      quantity: 0,
+      value: 0,
+      serials: [],
+      serialDetails: [],
+    };
+
     grouped[key].quantity += Number(balance.quantity || 0);
-    grouped[key].value += Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0);
+    grouped[key].value += Number(balance.quantity || 0) * Number(material.unitCost || 0);
   }
 
   return ok(res, {
