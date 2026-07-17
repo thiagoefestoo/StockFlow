@@ -95,6 +95,10 @@ export default function Users() {
   async function saveUser() {
     try {
       setMessage('');
+      if (form.password && String(form.password).length < 6) {
+        setMessage('A senha precisa ter pelo menos 6 caracteres.');
+        return;
+      }
       const payload = { ...form, technicianId: form.role === 'tecnico' ? form.technicianId || null : null, warehouseIds: form.warehouseIds || [], cityAccess: String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean), approvalLimit: Number(form.approvalLimit || 0) };
       if (form.id) {
         if (!payload.password) delete payload.password;
@@ -123,7 +127,11 @@ export default function Users() {
   }
   async function resetPassword() {
     try {
-      await api.patch(`/users/${passwordModal.user.id}/password`, { password: passwordModal.password, mustChangePassword: passwordModal.mustChangePassword });
+      if (!passwordModal.password || String(passwordModal.password).length < 6) {
+        setMessage('Informe uma nova senha manual com pelo menos 6 caracteres.');
+        return;
+      }
+      await api.patch(`/users/${passwordModal.user.id}/password`, { password: String(passwordModal.password), mustChangePassword: passwordModal.mustChangePassword });
       setMessage(`✅ Senha redefinida para ${passwordModal.user.email}.`);
       setPasswordModal({ open: false, user: null, password: '', mustChangePassword: false });
       await load();
@@ -231,7 +239,7 @@ export default function Users() {
                     <div className="action-toolbar">
                       <button className="info" onClick={() => openDetails(u)}>🔎 Detalhes</button>
                       {!u.deletedAt && <button className="ghost" onClick={() => openEdit(u)}>✏️ Editar</button>}
-                      {!u.deletedAt && <button className="soft" onClick={() => setPasswordModal({ open: true, user: u, password: randomPassword(), mustChangePassword: true })}>🔑 Senha</button>}
+                      {!u.deletedAt && <button className="soft" onClick={() => setPasswordModal({ open: true, user: u, password: '', mustChangePassword: true })}>🔑 Senha</button>}
                       {u.accessStatus === 'ativo' && Number(u.id) !== Number(loggedUser?.id) && <button className="danger-outline" onClick={() => askStatus(u, 'block')}>🚫 Bloquear</button>}
                       {u.accessStatus === 'bloqueado' && <button className="success-btn" onClick={() => askStatus(u, 'unblock')}>✅ Desbloquear</button>}
                       {u.accessStatus === 'inativo' && <button className="success-btn" onClick={() => askStatus(u, 'activate')}>✅ Ativar</button>}
@@ -286,8 +294,9 @@ export default function Users() {
             {form.role === 'estoquista' && <label>Limite de aprovação do usuário
               <input type="number" value={form.approvalLimit || 0} onChange={(e) => patchForm({ approvalLimit: e.target.value })} />
             </label>}
-            <label>{form.id ? 'Nova senha opcional' : 'Senha inicial'}
-              <div className="input-with-button"><input type="text" value={form.password || ''} onChange={(e) => patchForm({ password: e.target.value })} placeholder={form.id ? 'Deixe vazio para manter' : 'Senha obrigatória'} /><button type="button" className="ghost" onClick={() => patchForm({ password: randomPassword() })}>Gerar</button></div>
+            <label>{form.id ? 'Nova senha manual opcional' : 'Senha inicial'}
+              <div className="input-with-button"><input type="text" value={form.password || ''} onChange={(e) => patchForm({ password: e.target.value })} placeholder={form.id ? 'Digite uma nova senha ou deixe vazio para manter' : 'Digite uma senha ou gere automaticamente'} /><button type="button" className="ghost" onClick={() => patchForm({ password: randomPassword() })}>Gerar</button></div>
+              <small>Ao preencher manualmente e clicar em Salvar usuário, exatamente essa senha será gravada no banco Neon.</small>
             </label>
           </div>
           <label className="form-check"><input className="form-check-input" type="checkbox" checked={!!form.mustChangePassword} onChange={(e) => patchForm({ mustChangePassword: e.target.checked })} /><span className="form-check-label">Solicitar troca de senha no próximo acesso</span></label>
@@ -298,7 +307,7 @@ export default function Users() {
 
       <Modal open={passwordModal.open} title={`🔑 Redefinir senha: ${passwordModal.user?.name || ''}`} onClose={() => setPasswordModal({ open: false, user: null, password: '', mustChangePassword: false })} footer={<><button className="ghost" onClick={() => setPasswordModal({ open: false, user: null, password: '', mustChangePassword: false })}>Cancelar</button><button onClick={resetPassword}>Salvar nova senha</button></>}>
         <div className="form-stack">
-          <label>Nova senha<div className="input-with-button"><input type="text" value={passwordModal.password} onChange={(e) => setPasswordModal({ ...passwordModal, password: e.target.value })} /><button type="button" className="ghost" onClick={() => setPasswordModal({ ...passwordModal, password: randomPassword() })}>Gerar senha</button></div></label>
+          <label>Nova senha manual<div className="input-with-button"><input type="text" value={passwordModal.password} onChange={(e) => setPasswordModal({ ...passwordModal, password: e.target.value })} placeholder="Digite a senha desejada" /><button type="button" className="ghost" onClick={() => setPasswordModal({ ...passwordModal, password: randomPassword() })}>Gerar senha</button></div><small>A senha digitada manualmente será a senha salva ao clicar em Salvar nova senha.</small></label>
           <label className="form-check"><input className="form-check-input" type="checkbox" checked={passwordModal.mustChangePassword} onChange={(e) => setPasswordModal({ ...passwordModal, mustChangePassword: e.target.checked })} /><span className="form-check-label">Marcar para troca de senha no próximo acesso</span></label>
           <div className="alert warning">Guarde a senha antes de fechar esta janela. Por segurança, ela não ficará visível depois.</div>
         </div>

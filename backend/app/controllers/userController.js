@@ -104,6 +104,7 @@ exports.get = asyncHandler(async (req, res) => {
 exports.create = asyncHandler(async (req, res) => {
   const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false, warehouseIds = [], cityAccess = [], approvalLimit = 0 } = req.body;
   if (!name || !email || !password) return fail(res, 400, 'Nome, e-mail e senha são obrigatórios.');
+  if (String(password).length < 6) return fail(res, 400, 'A senha precisa ter pelo menos 6 caracteres.');
   if (!['admin', 'supervisor', 'estoquista', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
   await assertEmailAvailable(email);
   await validateTechnicianLink(role, technicianId);
@@ -152,10 +153,11 @@ exports.update = asyncHandler(async (req, res) => {
     approvalLimit: approvalLimit === undefined ? user.approvalLimit : Number(approvalLimit || 0),
     mustChangePassword: mustChangePassword === undefined ? user.mustChangePassword : !!mustChangePassword,
   });
-  if (password) {
-    user.passwordHash = await bcrypt.hash(password, 10);
+  if (password !== undefined && password !== null && String(password).length > 0) {
+    if (String(password).length < 6) return fail(res, 400, 'A nova senha precisa ter pelo menos 6 caracteres.');
+    user.passwordHash = await bcrypt.hash(String(password), 10);
     user.passwordChangedAt = new Date();
-    user.mustChangePassword = !!mustChangePassword;
+    user.mustChangePassword = mustChangePassword === undefined ? user.mustChangePassword : !!mustChangePassword;
   }
   await user.save();
   const updated = await User.findByPk(user.id, { include: [Technician] });

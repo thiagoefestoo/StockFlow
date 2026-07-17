@@ -80,7 +80,13 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
   }
 
   let user = await findPortalUserForTechnician(technician);
-  const hasPassword = password && String(password).length >= 6;
+  const rawPassword = password === undefined || password === null ? '' : String(password);
+  if (rawPassword && rawPassword.length < 6) {
+    const error = new Error('Informe uma senha com pelo menos 6 caracteres para o acesso do técnico.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const hasPassword = rawPassword.length >= 6;
   if (!user && !hasPassword) {
     const error = new Error('Informe uma senha inicial com pelo menos 6 caracteres para criar o acesso do técnico.');
     error.statusCode = 400;
@@ -104,7 +110,7 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
       ...common,
       mustChangePassword: !!mustChangePassword,
       passwordChangedAt: new Date(),
-      passwordHash: await bcrypt.hash(String(password), 10),
+      passwordHash: await bcrypt.hash(rawPassword, 10),
     });
     await writeAudit({ req, action: 'create_technician_portal_user', entity: 'User', entityId: user.id, message: `Acesso do técnico ${technician.name} criado no banco de dados.`, afterData: publicPortalUser(user) });
     return user;
@@ -113,7 +119,7 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
   const before = publicPortalUser(user);
   Object.assign(user, common);
   if (hasPassword) {
-    user.passwordHash = await bcrypt.hash(String(password), 10);
+    user.passwordHash = await bcrypt.hash(rawPassword, 10);
     user.passwordChangedAt = new Date();
     user.mustChangePassword = !!mustChangePassword;
   }
@@ -156,7 +162,8 @@ exports.create = asyncHandler(async (req, res) => {
   const technician = await Technician.create(payload);
 
   let portalUser = null;
-  if (req.body.createPortalUser === true || req.body.createPortalUser === 'true') {
+  const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
+  if (wantsPortalUser) {
     portalUser = await syncPortalUser({
       req,
       technician,
@@ -177,7 +184,8 @@ exports.update = asyncHandler(async (req, res) => {
   await technician.update(technicianPayload({ ...technician.toJSON(), ...req.body }));
 
   let portalUser = await findPortalUserForTechnician(technician);
-  if (req.body.createPortalUser === true || req.body.createPortalUser === 'true') {
+  const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
+  if (wantsPortalUser) {
     portalUser = await syncPortalUser({
       req,
       technician,

@@ -32,9 +32,9 @@ function formFromTechnician(technician) {
     companyId: technician.companyId || '',
     defaultWarehouseId: technician.defaultWarehouseId || '',
     serviceCitiesText: citiesToText(technician.serviceCities),
-    createPortalUser: false,
+    createPortalUser: !!technician.portalUser,
     portalPassword: '',
-    mustChangePassword: true,
+    mustChangePassword: technician.portalUser ? !!technician.portalUser.mustChangePassword : true,
   };
 }
 
@@ -83,12 +83,12 @@ export default function Technicians() {
         companyId: form.companyId || null,
         defaultWarehouseId: form.defaultWarehouseId || null,
         serviceCities: textToCities(form.serviceCitiesText),
-        createPortalUser: !!form.createPortalUser,
-        portalPassword: form.portalPassword || undefined,
+        createPortalUser: !!form.createPortalUser || !!String(form.portalPassword || '').trim(),
+        portalPassword: String(form.portalPassword || '') || undefined,
         mustChangePassword: !!form.mustChangePassword,
       };
       delete payload.serviceCitiesText;
-      if (!payload.createPortalUser) {
+      if (!payload.createPortalUser && !payload.portalPassword) {
         delete payload.portalPassword;
         delete payload.mustChangePassword;
       }
@@ -181,7 +181,7 @@ export default function Technicians() {
             <label className="check-line"><input type="checkbox" checked={!!form.createPortalUser} onChange={(e) => setForm({ ...form, createPortalUser: e.target.checked })} /> Criar ou sincronizar conta de login no banco Neon</label>
             {form.createPortalUser && (
               <div className="form-grid">
-                <label>Senha inicial<input type="password" value={form.portalPassword || ''} onChange={(e) => setForm({ ...form, portalPassword: e.target.value })} placeholder={form.id ? 'Opcional para manter senha atual' : 'Mínimo 6 caracteres'} /></label>
+                <label>{form.id ? 'Nova senha manual' : 'Senha inicial'}<input type="password" value={form.portalPassword || ''} onChange={(e) => setForm({ ...form, portalPassword: e.target.value, createPortalUser: true })} placeholder={form.id ? 'Digite para alterar; vazio mantém a atual' : 'Mínimo 6 caracteres'} /></label>
                 <label>Trocar senha no primeiro acesso<select value={String(form.mustChangePassword)} onChange={(e) => setForm({ ...form, mustChangePassword: e.target.value === 'true' })}><option value="true">Sim</option><option value="false">Não</option></select></label>
               </div>
             )}
