@@ -211,6 +211,10 @@ exports.stock = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
 
+  if (req.user.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
+    return fail(res, 403, 'Você só pode consultar a sua própria caixa.');
+  }
+
   const assets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material],

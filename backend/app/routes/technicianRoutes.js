@@ -4,7 +4,7 @@ const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
 router.use(authenticate);
 router.get('/', requireRoles('admin', 'supervisor'), controller.list);
 router.get('/:id', requireRoles('admin', 'supervisor'), controller.get);
-router.get('/:id/stock', requireRoles('admin', 'supervisor'), controller.stock);
+router.get('/:id/stock', requireRoles('admin', 'supervisor', 'estoquista', 'tecnico'), controller.stock);
 router.post('/', requireRoles('admin', 'supervisor'), controller.create);
 router.put('/:id', requireRoles('admin', 'supervisor'), controller.update);
 module.exports = router;
