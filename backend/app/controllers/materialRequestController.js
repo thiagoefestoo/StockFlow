@@ -18,11 +18,13 @@ const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
+const { userWarehouseIds, assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { Op } = require('sequelize');
 
-function nextRequestNumber() {
+function nextRequestNumber(prefix = 'REQ') {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-  return `REQ-${stamp}`;
+  return `${prefix}-${stamp}`;
 }
 
 function nextTransferNumber() {
@@ -43,23 +45,80 @@ function includeFull() {
   ];
 }
 
+function isStockRecharge(requestType) {
+  return String(requestType || '').toLowerCase() === 'recarga_estoque';
+}
+
+function allowedWarehouseWhere(user) {
+  if (['admin', 'supervisor'].includes(user?.role)) return null;
+  const ids = userWarehouseIds(user);
+  if (!ids.length) return { warehouseId: -1 };
+  return { warehouseId: { [Op.in]: ids } };
+}
+
+async function resolveRequestWarehouse({ req, warehouseId, technicianId, requestType }) {
+  let selectedWarehouseId = Number(warehouseId || 0) || null;
+
+  if (isStockRecharge(requestType)) {
+    if (!selectedWarehouseId && req.user.role === 'estoquista') {
+      const ids = userWarehouseIds(req.user);
+      if (ids.length === 1) selectedWarehouseId = ids[0];
+    }
+    if (!selectedWarehouseId) {
+      const error = new Error('Selecione o estoque regional que receberá a recarga.');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  if (!selectedWarehouseId && technicianId) {
+    const technician = await Technician.findByPk(technicianId);
+    selectedWarehouseId = technician?.defaultWarehouseId || null;
+  }
+
+  if (selectedWarehouseId) {
+    if (!['admin', 'supervisor'].includes(req.user.role)) {
+      assertWarehouseAccess(req.user, selectedWarehouseId, 'Você só pode solicitar material para estoques autorizados ao seu usuário.');
+    }
+    const warehouse = await Warehouse.findByPk(selectedWarehouseId);
+    if (!warehouse || warehouse.status !== 'ativo') {
+      const error = new Error('Estoque regional não encontrado ou inativo.');
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  return selectedWarehouseId;
+}
+
 exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
+  if (req.user.role === 'estoquista') {
+    const warehouseFilter = allowedWarehouseWhere(req.user);
+    if (warehouseFilter) Object.assign(where, warehouseFilter);
+  }
   if (req.query.status) where.status = req.query.status;
+  if (req.query.requestType) where.requestType = req.query.requestType;
   if (req.query.technicianId) where.technicianId = req.query.technicianId;
+  if (req.query.warehouseId) where.warehouseId = req.query.warehouseId;
   const requests = await MaterialRequest.findAll({ where, include: includeFull(), order: [['createdAt', 'DESC']], limit: 500 });
   return ok(res, requests);
 });
 
 exports.summary = asyncHandler(async (req, res) => {
-  const technicianFilter = req.user.role === 'tecnico' ? { technicianId: req.user.technicianId || -1 } : {};
+  const filter = {};
+  if (req.user.role === 'tecnico') filter.technicianId = req.user.technicianId || -1;
+  if (req.user.role === 'estoquista') {
+    const warehouseFilter = allowedWarehouseWhere(req.user);
+    if (warehouseFilter) Object.assign(filter, warehouseFilter);
+  }
   const [pending, approved, delivered, rejected, total] = await Promise.all([
-    MaterialRequest.count({ where: { ...technicianFilter, status: 'pendente_aprovacao' } }),
-    MaterialRequest.count({ where: { ...technicianFilter, status: 'aprovado' } }),
-    MaterialRequest.count({ where: { ...technicianFilter, status: 'entregue' } }),
-    MaterialRequest.count({ where: { ...technicianFilter, status: 'reprovado' } }),
-    MaterialRequest.count({ where: technicianFilter }),
+    MaterialRequest.count({ where: { ...filter, status: 'pendente_aprovacao' } }),
+    MaterialRequest.count({ where: { ...filter, status: 'aprovado' } }),
+    MaterialRequest.count({ where: { ...filter, status: 'entregue' } }),
+    MaterialRequest.count({ where: { ...filter, status: 'reprovado' } }),
+    MaterialRequest.count({ where: filter }),
   ]);
   return ok(res, { pending, approved, delivered, rejected, total });
 });
@@ -68,33 +127,49 @@ exports.get = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
   if (req.user.role === 'tecnico' && Number(request.technicianId) !== Number(req.user.technicianId)) return fail(res, 403, 'Você só pode consultar suas próprias solicitações.');
+  if (req.user.role === 'estoquista' && request.warehouseId) assertWarehouseAccess(req.user, request.warehouseId, 'Você só pode consultar solicitações dos seus estoques autorizados.');
   return ok(res, request);
 });
 
 exports.create = asyncHandler(async (req, res) => {
   let { technicianId, requestType, priority, neededBy, requesterNotes, warehouseId, items = [] } = req.body;
-  if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
-  if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
-  if (!items.length) return fail(res, 400, 'Inclua ao menos um item solicitado.');
-  const technician = await Technician.findByPk(technicianId);
-  if (!technician) return fail(res, 404, 'Técnico não encontrado.');
-  warehouseId = warehouseId || technician.defaultWarehouseId || null;
-  if (warehouseId) {
-    const warehouse = await Warehouse.findByPk(warehouseId);
-    if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque/região não encontrado ou inativo.');
+
+  if (req.user.role === 'tecnico') {
+    requestType = 'reposicao_carga';
+    technicianId = req.user.technicianId;
   }
+  if (req.user.role === 'estoquista' && !requestType) requestType = 'recarga_estoque';
+  requestType = requestType || 'reposicao_carga';
+
+  if (!Array.isArray(items) || !items.length) return fail(res, 400, 'Inclua ao menos um item solicitado.');
+
+  let technician = null;
+  if (!isStockRecharge(requestType)) {
+    if (!technicianId) return fail(res, 400, 'Técnico é obrigatório para solicitação de carga técnica.');
+    technician = await Technician.findByPk(technicianId);
+    if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  }
+
+  try {
+    warehouseId = await resolveRequestWarehouse({ req, warehouseId, technicianId, requestType });
+  } catch (error) {
+    return fail(res, error.statusCode || 400, error.message);
+  }
+
+  const warehouse = warehouseId ? await Warehouse.findByPk(warehouseId) : null;
 
   const request = await sequelize.transaction(async (transaction) => {
     const record = await MaterialRequest.create({
-      requestNumber: nextRequestNumber(),
-      technicianId,
-      requestType: requestType || 'reposicao_carga',
+      requestNumber: nextRequestNumber(isStockRecharge(requestType) ? 'REC' : 'REQ'),
+      technicianId: isStockRecharge(requestType) ? null : technicianId,
+      requestType,
       status: 'pendente_aprovacao',
       priority: priority || 'media',
       neededBy: neededBy || null,
       requesterNotes,
       requestedById: req.user.id,
       warehouseId: warehouseId || null,
+      metadata: isStockRecharge(requestType) ? { rechargeForWarehouse: true } : null,
     }, { transaction });
 
     let totalQuantity = 0;
@@ -109,7 +184,14 @@ exports.create = asyncHandler(async (req, res) => {
       if (quantity <= 0) continue;
       const unitCost = money(item.unitCost ?? material.unitCost);
       const totalCost = money(quantity * unitCost);
-      const serialNumbers = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
+      const serialNumbers = Array.isArray(item.serialNumbers)
+        ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean)
+        : String(item.serialNumbersText || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean);
+
+      if (isStockRecharge(requestType) && material.requiresSerial && serialNumbers.length && serialNumbers.length < Math.ceil(quantity)) {
+        throw new Error(`Informe ${Math.ceil(quantity)} serial(is) para ${material.name}, ou deixe os seriais para preenchimento no recebimento.`);
+      }
+
       const createdItem = await MaterialRequestItem.create({
         requestId: record.id,
         materialId: material.id,
@@ -132,40 +214,69 @@ exports.create = asyncHandler(async (req, res) => {
     record.totalValue = money(totalValue);
     await record.save({ transaction });
 
+    const title = isStockRecharge(requestType) ? `Aprovar recarga ${record.requestNumber}` : `Aprovar ${record.requestNumber}`;
+    const description = isStockRecharge(requestType)
+      ? `Solicitação de recarga para o estoque ${warehouse?.name || warehouseId}.`
+      : `Solicitação de material para ${technician.name}.`;
+
     await ApprovalRequest.create({
-      workflowCode: 'material_request',
+      workflowCode: isStockRecharge(requestType) ? 'stock_recharge' : 'material_request',
       entityType: 'material_request',
       entityId: String(record.id),
-      title: `Aprovar ${record.requestNumber}`,
-      description: `Solicitação de material para ${technician.name}.`,
+      title,
+      description,
       status: 'pendente',
       priority: record.priority,
       amount: record.totalValue,
       requestedById: req.user.id,
-      payload: { requestId: record.id, requestNumber: record.requestNumber, technicianId, technicianName: technician.name, warehouseId: warehouseId || null, items: approvalItems },
+      payload: {
+        requestId: record.id,
+        requestNumber: record.requestNumber,
+        requestType,
+        technicianId: record.technicianId,
+        technicianName: technician?.name,
+        warehouseId: warehouseId || null,
+        warehouseName: warehouse?.name,
+        items: approvalItems,
+      },
     }, { transaction });
 
     await Notification.create({
-      role: 'supervisor',
+      role: 'admin',
       type: 'tarefa',
       severity: record.priority === 'critica' ? 'danger' : 'warning',
-      title: `Nova solicitação ${record.requestNumber}`,
-      message: `${technician.name} solicitou ${record.totalQuantity} item(ns) para a carga técnica.`,
+      title: isStockRecharge(requestType) ? `Nova recarga ${record.requestNumber}` : `Nova solicitação ${record.requestNumber}`,
+      message: isStockRecharge(requestType)
+        ? `${req.user.name} solicitou recarga de ${record.totalQuantity} item(ns) para ${warehouse?.name || 'estoque regional'}.`
+        : `${technician.name} solicitou ${record.totalQuantity} item(ns) para a carga técnica.`,
       route: '/aprovacoes',
-      metadata: { requestId: record.id, requestNumber: record.requestNumber },
+      metadata: { requestId: record.id, requestNumber: record.requestNumber, warehouseId },
     }, { transaction });
 
-    await writeAudit({ req, action: 'request', entity: 'MaterialRequest', entityId: record.id, message: `Solicitação ${record.requestNumber} aberta para ${technician.name}.`, afterData: record.toJSON(), transaction });
+    await writeAudit({
+      req,
+      action: isStockRecharge(requestType) ? 'stock_recharge_request' : 'request',
+      entity: 'MaterialRequest',
+      entityId: record.id,
+      message: isStockRecharge(requestType) ? `Recarga ${record.requestNumber} aberta para ${warehouse?.name || warehouseId}.` : `Solicitação ${record.requestNumber} aberta para ${technician.name}.`,
+      afterData: record.toJSON(),
+      transaction,
+    });
     return record;
   });
 
-  return created(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), 'Solicitação enviada para aprovação.');
+  return created(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), isStockRecharge(requestType) ? 'Solicitação de recarga enviada para aprovação do admin.' : 'Solicitação enviada para aprovação.');
 });
 
 exports.approve = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
   if (request.status !== 'pendente_aprovacao') return fail(res, 400, 'A solicitação não está pendente de aprovação.');
+
+  if (request.requestType === 'recarga_estoque' && req.user.role !== 'admin') {
+    return fail(res, 403, 'Recarga de estoque precisa ser aprovada por administrador.');
+  }
+
   const adminMinAmount = Number(process.env.APPROVAL_ADMIN_MIN_AMOUNT || 500);
   const amount = Number(request.totalValue || 0);
   if (amount >= adminMinAmount && req.user.role !== 'admin') {
@@ -181,13 +292,13 @@ exports.approve = asyncHandler(async (req, res) => {
     await request.save({ transaction });
     await ApprovalRequest.update({ status: 'aprovado', decidedAt: new Date(), decidedById: req.user.id, decisionNotes: request.approvalNotes }, { where: { entityType: 'material_request', entityId: String(request.id) }, transaction });
     await Notification.create({
-      role: 'admin',
+      role: request.requestType === 'recarga_estoque' ? 'estoquista' : 'admin',
       type: 'estoque',
       severity: 'success',
       title: `Solicitação aprovada ${request.requestNumber}`,
-      message: `A solicitação foi aprovada e está pronta para separação/entrega ao técnico.`,
+      message: request.requestType === 'recarga_estoque' ? 'A recarga foi aprovada e está pronta para recebimento no estoque.' : 'A solicitação foi aprovada e está pronta para separação/entrega ao técnico.',
       route: '/solicitacoes-material',
-      metadata: { requestId: request.id },
+      metadata: { requestId: request.id, warehouseId: request.warehouseId },
     }, { transaction });
     await writeAudit({ req, action: 'approve', entity: 'MaterialRequest', entityId: request.id, message: `Solicitação ${request.requestNumber} aprovada.`, beforeData: before, afterData: request.toJSON(), transaction });
   });
@@ -214,10 +325,100 @@ exports.reject = asyncHandler(async (req, res) => {
   return ok(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), 'Solicitação reprovada.');
 });
 
+async function deliverStockRecharge({ req, request, transaction, deliveryOverrides }) {
+  if (!request.warehouseId) throw new Error('A recarga precisa estar vinculada a um estoque regional.');
+  if (!['admin', 'supervisor'].includes(req.user.role)) assertWarehouseAccess(req.user, request.warehouseId, 'Você só pode receber recarga nos seus estoques autorizados.');
+
+  let totalQuantity = 0;
+  let totalValue = 0;
+
+  for (const requestItem of request.MaterialRequestItems || []) {
+    const material = requestItem.Material || await Material.findByPk(requestItem.materialId, { transaction });
+    const override = deliveryOverrides.find((item) => Number(item.requestItemId) === Number(requestItem.id));
+    const quantity = qty(override?.approvedQuantity ?? requestItem.approvedQuantity ?? requestItem.quantity);
+    if (quantity <= 0) continue;
+    const unitCost = money(requestItem.unitCost ?? material.unitCost);
+
+    if (material.requiresSerial) {
+      const serials = (override?.serialNumbers?.length ? override.serialNumbers : requestItem.serialNumbers || [])
+        .map((serial) => String(serial).trim())
+        .filter(Boolean);
+      if (serials.length < Math.ceil(quantity)) throw new Error(`Informe ${Math.ceil(quantity)} serial(is) para receber ${material.name}.`);
+      const deliveredSerials = [];
+      for (const serialNumber of serials.slice(0, Math.ceil(quantity))) {
+        const existing = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
+        if (existing) throw new Error(`Serial ${serialNumber} já existe no sistema.`);
+        const asset = await SerializedAsset.create({
+          materialId: material.id,
+          serialNumber,
+          ownerType: 'estoque',
+          status: 'em_estoque',
+          warehouseId: request.warehouseId,
+          acquisitionCost: unitCost,
+          lastMovementAt: new Date(),
+          notes: `Recebido por recarga ${request.requestNumber}.`,
+        }, { transaction });
+        await StockMovement.create({
+          type: 'entrada_recarga_estoque',
+          materialId: material.id,
+          assetId: asset.id,
+          quantity: 1,
+          serialNumber,
+          toOwnerType: 'estoque',
+          toWarehouseId: request.warehouseId,
+          reference: request.requestNumber,
+          notes: `Recarga de estoque ${request.requestNumber}.`,
+          createdById: req.user.id,
+        }, { transaction });
+        deliveredSerials.push(serialNumber);
+        totalQuantity += 1;
+        totalValue += unitCost;
+      }
+      requestItem.deliverySerials = deliveredSerials;
+      await requestItem.save({ transaction });
+    } else {
+      await adjustBalance({ materialId: material.id, ownerType: 'estoque', warehouseId: request.warehouseId, technicianId: null, delta: quantity, transaction });
+      const totalCost = money(quantity * unitCost);
+      await StockMovement.create({
+        type: 'entrada_recarga_estoque',
+        materialId: material.id,
+        quantity,
+        toOwnerType: 'estoque',
+        toWarehouseId: request.warehouseId,
+        reference: request.requestNumber,
+        notes: `Recarga de estoque ${request.requestNumber}.`,
+        createdById: req.user.id,
+      }, { transaction });
+      totalQuantity += quantity;
+      totalValue += totalCost;
+    }
+  }
+
+  return { totalQuantity, totalValue };
+}
+
 exports.deliver = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
-  if (request.status !== 'aprovado') return fail(res, 400, 'A solicitação precisa estar aprovada para ser entregue.');
+  if (request.status !== 'aprovado') return fail(res, 400, 'A solicitação precisa estar aprovada para ser entregue/recebida.');
+
+  const deliveryOverrides = Array.isArray(req.body.items) ? req.body.items : [];
+
+  if (request.requestType === 'recarga_estoque') {
+    const before = request.toJSON();
+    await sequelize.transaction(async (transaction) => {
+      const result = await deliverStockRecharge({ req, request, transaction, deliveryOverrides });
+      request.status = 'entregue';
+      request.deliveredAt = new Date();
+      request.deliveredById = req.user.id;
+      request.logisticsNotes = req.body.logisticsNotes || request.logisticsNotes;
+      request.totalQuantity = qty(result.totalQuantity || request.totalQuantity);
+      request.totalValue = money(result.totalValue || request.totalValue);
+      await request.save({ transaction });
+      await writeAudit({ req, action: 'stock_recharge_delivered', entity: 'MaterialRequest', entityId: request.id, message: `Recarga ${request.requestNumber} recebida no estoque.`, beforeData: before, afterData: request.toJSON(), transaction });
+    });
+    return created(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), 'Recarga recebida no estoque regional.');
+  }
 
   const transfer = await sequelize.transaction(async (transaction) => {
     const technician = await Technician.findByPk(request.technicianId, { transaction });
@@ -230,12 +431,11 @@ exports.deliver = asyncHandler(async (req, res) => {
       notes: `Gerada pela solicitação ${request.requestNumber}. ${req.body.logisticsNotes || ''}`.trim(),
       createdById: req.user.id,
       warehouseId: request.warehouseId || null,
-      stampText: `CARIMBO STOCKFLOW | ${technician.name} | ${request.requestNumber} | ${new Date().toLocaleDateString('pt-BR')} | Assinatura: ______________________________`,
+      stampText: `CARIMBO SUPER INFRA | ${technician.name} | ${request.requestNumber} | ${new Date().toLocaleDateString('pt-BR')} | Assinatura: ______________________________`,
     }, { transaction });
 
     let totalQuantity = 0;
     let totalValue = 0;
-    const deliveryOverrides = Array.isArray(req.body.items) ? req.body.items : [];
 
     for (const requestItem of request.MaterialRequestItems || []) {
       const material = requestItem.Material || await Material.findByPk(requestItem.materialId, { transaction });
@@ -264,10 +464,11 @@ exports.deliver = asyncHandler(async (req, res) => {
           asset.ownerType = 'tecnico';
           asset.status = 'com_tecnico';
           asset.technicianId = request.technicianId;
+          asset.warehouseId = null;
           asset.custodyStartedAt = new Date();
           asset.lastMovementAt = new Date();
           await asset.save({ transaction });
-          await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber: asset.serialNumber, fromOwnerType: 'estoque', toOwnerType: 'tecnico', fromWarehouseId: request.warehouseId || asset.warehouseId || null, toTechnicianId: request.technicianId, reference: record.transferNumber, notes: `Expedição pela solicitação ${request.requestNumber}.`, createdById: req.user.id }, { transaction });
+          await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber: asset.serialNumber, fromOwnerType: 'estoque', toOwnerType: 'tecnico', fromWarehouseId: request.warehouseId || null, toTechnicianId: request.technicianId, reference: record.transferNumber, notes: `Expedição pela solicitação ${request.requestNumber}.`, createdById: req.user.id }, { transaction });
           totalQuantity += 1;
           totalValue += assetCost;
         }

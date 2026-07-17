@@ -41,7 +41,7 @@ export default function App() {
             <Route path="estoque" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Stock /></PrivateRoute>} />
             <Route path="entrada" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Receiving /></PrivateRoute>} />
             <Route path="transferencias" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Transfers /></PrivateRoute>} />
-            <Route path="solicitacoes-material" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><MaterialRequests /></PrivateRoute>} />
+            <Route path="solicitacoes-material" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista', 'tecnico']}><MaterialRequests /></PrivateRoute>} />
             <Route path="aprovacoes" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Approvals /></PrivateRoute>} />
             <Route path="transferencias/:id" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><TransferPrint /></PrivateRoute>} />
             <Route path="portal-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor', 'estoquista']}><TechnicianPortal /></PrivateRoute>} />

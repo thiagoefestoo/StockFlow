@@ -14,7 +14,7 @@ const adminGroups = [
   { title: 'BI e auditoria', links: [['/bi/executivo', 'BE', 'BI Executivo'], ['/bi/financeiro', 'BF', 'BI Financeiro'], ['/bi/tecnicos', 'BT', 'BI Técnicos'], ['/bi/auditoria', 'BA', 'BI Auditoria'], ['/historico-movimentacoes', 'HM', 'Histórico'], ['/auditoria', 'AU', 'Auditoria']] },
 ];
 const technicianGroups = [
-  { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/vida-serial', 'VS', 'Vida do serial'], ['/minha-conta', 'CO', 'Minha conta']] },
+  { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/solicitacoes-material', 'SM', 'Solicitar material'], ['/vida-serial', 'VS', 'Vida do serial'], ['/minha-conta', 'CO', 'Minha conta']] },
 ];
 
 export default function Layout() {
