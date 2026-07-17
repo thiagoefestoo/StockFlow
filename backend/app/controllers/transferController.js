@@ -31,10 +31,13 @@ exports.create = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   const sourceWarehouseId = warehouseId || technician.defaultWarehouseId || null;
-  if (!sourceWarehouseId && !isPrivileged(req.user)) return fail(res, 400, 'Selecione um estoque autorizado para transferir ao técnico.');
+  if (!sourceWarehouseId) return fail(res, 400, 'Selecione o estoque de origem da transferência.');
   if (sourceWarehouseId) {
     try { assertWarehouseAccess(req.user, sourceWarehouseId, 'Você não tem acesso ao estoque de origem.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   }
+  const sourceWarehouse = await Warehouse.findByPk(sourceWarehouseId);
+  if (!sourceWarehouse) return fail(res, 404, 'Estoque de origem não encontrado.');
+  if (sourceWarehouse.status && sourceWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de origem precisa estar ativo para transferir material.');
 
   const transfer = await sequelize.transaction(async (transaction) => {
     const record = await Transfer.create({ transferNumber: nextNumber(), technicianId, deliveredAt: deliveredAt || new Date(), notes, createdById: req.user.id, warehouseId: sourceWarehouseId }, { transaction });
@@ -74,7 +77,15 @@ exports.create = asyncHandler(async (req, res) => {
     record.totalQuantity = qty(totalQuantity);
     record.totalValue = money(totalValue);
     await record.save({ transaction });
-    await writeAudit({ req, action: 'create', entity: 'Transfer', entityId: record.id, message: `Guia ${record.transferNumber} entregue para ${technician.name}.`, afterData: record.toJSON(), transaction });
+    await writeAudit({
+      req,
+      action: 'create',
+      entity: 'Transfer',
+      entityId: record.id,
+      message: `Guia ${record.transferNumber} transferiu material do estoque ${sourceWarehouse.name} para ${technician.name}.`,
+      afterData: { ...record.toJSON(), sourceWarehouse: sourceWarehouse.toJSON(), items },
+      transaction,
+    });
     return record;
   });
 
