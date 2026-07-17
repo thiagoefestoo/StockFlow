@@ -4,10 +4,6 @@ import KpiCard from '../components/KpiCard';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
-function previewJson(value) {
-  if (!value) return '-';
-  try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
-}
 function downloadExcelLike(filename, rows) {
   const htmlRows = rows.map((row) => `<tr>${row.map((cell) => `<td>${String(cell ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')}</td>`).join('')}</tr>`).join('');
   const blob = new Blob([`<html><head><meta charset="utf-8" /></head><body><table>${htmlRows}</table></body></html>`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
@@ -19,6 +15,165 @@ function downloadExcelLike(filename, rows) {
   URL.revokeObjectURL(url);
 }
 function csvEscape(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+
+const FIELD_LABELS = {
+  id: 'ID',
+  name: 'Nome',
+  email: 'E-mail',
+  role: 'Perfil',
+  status: 'Status',
+  phone: 'Telefone',
+  notes: 'Observações',
+  jobTitle: 'Cargo/função',
+  cityAccess: 'Cidades autorizadas',
+  warehouseIds: 'Estoques autorizados',
+  approvalLimit: 'Limite de aprovação',
+  mustChangePassword: 'Trocar senha no próximo acesso',
+  passwordChangedAt: 'Senha alterada em',
+  createdAt: 'Criado em',
+  updatedAt: 'Atualizado em',
+  deletedAt: 'Excluído em',
+  blockedAt: 'Bloqueado em',
+  technicianId: 'Técnico vinculado',
+  'Technician.id': 'Técnico - ID',
+  'Technician.name': 'Técnico - Nome',
+  'Technician.email': 'Técnico - e-mail',
+  'Technician.phone': 'Técnico - telefone',
+  'Technician.status': 'Técnico - status',
+  'Technician.type': 'Técnico - tipo',
+  'Technician.serviceCities': 'Técnico - cidades atendidas',
+  'Technician.defaultWarehouseId': 'Técnico - estoque padrão',
+  'Technician.notes': 'Técnico - observações',
+};
+
+const HIDDEN_FIELDS = new Set([
+  'password',
+  'passwordHash',
+  'token',
+  'accessToken',
+  'refreshToken',
+  'resetToken',
+]);
+
+function labelFor(path) {
+  if (FIELD_LABELS[path]) return FIELD_LABELS[path];
+  const last = String(path).split('.').pop();
+  if (FIELD_LABELS[last]) return FIELD_LABELS[last];
+  return String(path)
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (l) => l.toUpperCase())
+    .trim();
+}
+
+function isPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date);
+}
+
+function looksLikeDate(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value);
+}
+
+function formatValue(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
+  if (looksLikeDate(value)) return dt(value);
+  if (Array.isArray(value)) {
+    if (!value.length) return '-';
+    if (value.every((item) => !isPlainObject(item))) return value.join(', ');
+    return `${value.length} registro(s)`;
+  }
+  if (isPlainObject(value)) {
+    if (value.name) return value.name;
+    if (value.email) return value.email;
+    if (value.serialNumber) return value.serialNumber;
+    if (value.id) return `Registro #${value.id}`;
+    return 'Registro relacionado';
+  }
+  return String(value);
+}
+
+function flattenObject(obj, prefix = '', result = {}, depth = 0) {
+  if (!isPlainObject(obj) || depth > 4) return result;
+
+  Object.entries(obj).forEach(([key, value]) => {
+    if (HIDDEN_FIELDS.has(key)) return;
+    const path = prefix ? `${prefix}.${key}` : key;
+
+    if (HIDDEN_FIELDS.has(path)) return;
+
+    if (isPlainObject(value)) {
+      flattenObject(value, path, result, depth + 1);
+    } else {
+      result[path] = value;
+    }
+  });
+
+  return result;
+}
+
+function normalized(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (Array.isArray(value)) return JSON.stringify(value.map((item) => isPlainObject(item) ? flattenObject(item) : item));
+  if (isPlainObject(value)) return JSON.stringify(flattenObject(value));
+  return String(value);
+}
+
+function buildChangeRows(beforeData, afterData) {
+  const before = flattenObject(beforeData || {});
+  const after = flattenObject(afterData || {});
+  const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+
+  return keys
+    .filter((key) => normalized(before[key]) !== normalized(after[key]))
+    .map((key) => ({
+      key,
+      label: labelFor(key),
+      before: formatValue(before[key]),
+      after: formatValue(after[key]),
+    }));
+}
+
+function AuditChangeView({ beforeData, afterData }) {
+  const rows = buildChangeRows(beforeData, afterData);
+
+  if (!beforeData && !afterData) {
+    return <div className="empty-state small">Este evento não possui dados anteriores ou posteriores registrados.</div>;
+  }
+
+  if (!rows.length) {
+    return <div className="empty-state small">Nenhuma diferença relevante foi encontrada neste evento.</div>;
+  }
+
+  return (
+    <div className="audit-readable">
+      <div className="panel-soft audit-readable-head">
+        <h4>Resumo legível da alteração</h4>
+        <p className="muted">Os dados técnicos foram convertidos para uma visão de conferência. Senhas e tokens não são exibidos.</p>
+      </div>
+      <div className="table-wrap compact">
+        <table>
+          <thead>
+            <tr>
+              <th>Campo</th>
+              <th>Antes</th>
+              <th>Depois</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key}>
+                <td><strong>{row.label}</strong></td>
+                <td>{row.before}</td>
+                <td>{row.after}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function Audit() {
   const [logs, setLogs] = useState([]);
@@ -106,7 +261,7 @@ export default function Audit() {
         </aside>
       </section>
       <DetailsModal open={!!details} title="🔎 Detalhes do evento de auditoria" onClose={() => setDetails(null)}>
-        {details && <div className="audit-detail-grid"><DetailGrid fields={[["Data", dt(details.createdAt)], ["Ação", details.action], ["Entidade", details.entity], ["ID", details.entityId], ["Mensagem", details.message], ["Operador", details.actor?.name || 'Sistema'], ["E-mail", details.actor?.email], ["Perfil", details.actor?.role], ["IP", details.ip || '-']]} /><div className="json-compare"><article><h4>Antes</h4><pre>{previewJson(details.beforeData)}</pre></article><article><h4>Depois</h4><pre>{previewJson(details.afterData)}</pre></article></div></div>}
+        {details && <div className="audit-detail-grid"><DetailGrid fields={[["Data", dt(details.createdAt)], ["Ação", details.action], ["Entidade", details.entity], ["ID", details.entityId], ["Mensagem", details.message], ["Operador", details.actor?.name || 'Sistema'], ["E-mail", details.actor?.email], ["Perfil", details.actor?.role], ["IP", details.ip || '-']]} /><AuditChangeView beforeData={details.beforeData} afterData={details.afterData} /></div>}
       </DetailsModal>
     </div>
   );
