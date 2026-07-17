@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 function normalizeApiUrl(value) {
-  const fallback = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000/api';
+  const fallback = process.env.NODE_ENV === 'production' ? 'https://stockflow-backend-6gxl.onrender.com/api' : 'http://localhost:3000/api';
   const raw = (value || fallback || '/api').trim();
   return raw.replace(/\/$/, '');
 }

@@ -4,10 +4,13 @@ const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
+const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
 const { writeAudit } = require('../services/auditService');
 
 exports.list = asyncHandler(async (req, res) => {
+  const where = stockWhereForUser(req.user, req.query.warehouseId);
   const batches = await StockBatch.findAll({
+    where,
     include: [
       { model: StockBatchItem, include: [Material] },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
@@ -44,7 +47,9 @@ exports.create = asyncHandler(async (req, res) => {
   if (!proofAttachmentName || !proofAttachmentData) return fail(res, 400, 'Anexe um comprovante da entrada, como nota fiscal, termo de entrega, romaneio ou recibo.');
   if (!fiscalDocumentNumber && !invoiceAccessKey) return fail(res, 400, 'Informe o número do documento fiscal/termo ou a chave de acesso da nota.');
   let targetWarehouseId = warehouseId || null;
+  if (!targetWarehouseId && !isPrivileged(req.user)) return fail(res, 400, 'Selecione um estoque autorizado para registrar entrada.');
   if (targetWarehouseId) {
+    try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque informado.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
     const warehouse = await Warehouse.findByPk(targetWarehouseId);
     if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque/região informado não existe ou está inativo.');
   }

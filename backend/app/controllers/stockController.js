@@ -19,6 +19,7 @@ const { ok, created, fail } = require('../utils/response');
 const { daysBetween, qty, money, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
+const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
 
 function parseSerials(value) {
   if (Array.isArray(value)) return value.map((s) => String(s).trim()).filter(Boolean);
@@ -27,16 +28,19 @@ function parseSerials(value) {
 
 exports.overview = asyncHandler(async (req, res) => {
   const materials = await Material.findAll({ order: [['name', 'ASC']] });
+  const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
   const rows = [];
   for (const material of materials) {
-    const mainBalance = await StockBalance.findOne({ where: { materialId: material.id, ownerType: 'estoque', technicianId: null } });
-    const mainAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'estoque' } });
+    const balanceWhere = { materialId: material.id, ownerType: 'estoque', technicianId: null, ...warehouseScope };
+    const assetWhere = { materialId: material.id, ownerType: 'estoque', ...warehouseScope };
+    const mainBalance = await StockBalance.sum('quantity', { where: balanceWhere });
+    const mainAssets = await SerializedAsset.count({ where: assetWhere });
     const techAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'tecnico' } });
     const installedAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'cliente' } });
     const techBalances = await StockBalance.sum('quantity', { where: { materialId: material.id, ownerType: 'tecnico' } });
     rows.push({
       ...material.toJSON(),
-      mainStock: material.requiresSerial ? mainAssets : Number(mainBalance?.quantity || 0),
+      mainStock: material.requiresSerial ? mainAssets : Number(mainBalance || 0),
       technicianStock: material.requiresSerial ? techAssets : Number(techBalances || 0),
       installedStock: material.requiresSerial ? installedAssets : 0,
     });
@@ -50,6 +54,7 @@ exports.assets = asyncHandler(async (req, res) => {
   if (req.query.ownerType) where.ownerType = req.query.ownerType;
   if (req.query.materialId) where.materialId = req.query.materialId;
   if (req.query.technicianId) where.technicianId = req.query.technicianId;
+  if ((req.query.ownerType || 'estoque') === 'estoque') Object.assign(where, stockWhereForUser(req.user, req.query.warehouseId));
   if (req.query.serial) where.serialNumber = { [Op.iLike]: `%${req.query.serial}%` };
   const limit = Math.min(Number(req.query.limit || 800), 2000);
   const assets = await SerializedAsset.findAll({ where, include: [Material, Technician, Warehouse], order: [['updatedAt', 'DESC']], limit });
@@ -58,20 +63,17 @@ exports.assets = asyncHandler(async (req, res) => {
 
 exports.movements = asyncHandler(async (req, res) => {
   const where = {};
+  const and = [];
   if (req.query.type) where.type = req.query.type;
   if (req.query.materialId) where.materialId = req.query.materialId;
-  if (req.query.technicianId) {
-    where[Op.or] = [{ fromTechnicianId: req.query.technicianId }, { toTechnicianId: req.query.technicianId }];
-  }
+  if (req.query.technicianId) and.push({ [Op.or]: [{ fromTechnicianId: req.query.technicianId }, { toTechnicianId: req.query.technicianId }] });
+  const movementScope = movementWhereForUser(req.user, req.query.warehouseId);
+  if (movementScope) and.push(movementScope);
   if (req.query.search) {
     const q = `%${req.query.search}%`;
-    where[Op.or] = [
-      ...(where[Op.or] || []),
-      { serialNumber: { [Op.iLike]: q } },
-      { reference: { [Op.iLike]: q } },
-      { notes: { [Op.iLike]: q } },
-    ];
+    and.push({ [Op.or]: [{ serialNumber: { [Op.iLike]: q } }, { reference: { [Op.iLike]: q } }, { notes: { [Op.iLike]: q } }] });
   }
+  if (and.length) where[Op.and] = and;
   const limit = Math.min(Number(req.query.limit || 1000), 3000);
   const movements = await StockMovement.findAll({
     include: [
@@ -79,6 +81,8 @@ exports.movements = asyncHandler(async (req, res) => {
       SerializedAsset,
       { model: Technician, as: 'fromTechnician' },
       { model: Technician, as: 'toTechnician' },
+      { model: Warehouse, as: 'fromWarehouse' },
+      { model: Warehouse, as: 'toWarehouse' },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
     ],
     where,
@@ -91,8 +95,6 @@ exports.movements = asyncHandler(async (req, res) => {
 exports.technicianBox = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
-  const targetWarehouseId = warehouseId || technician.defaultWarehouseId || null;
-
   const assets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material, Warehouse],
@@ -156,6 +158,7 @@ exports.technicianBox = asyncHandler(async (req, res) => {
 
 exports.returnFromTechnician = asyncHandler(async (req, res) => {
   const { technicianId, reference, notes, warehouseId, items = [] } = req.body;
+  const targetWarehouseId = warehouseId || null;
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
   if (!items.length) {
     const defaults = await StockBalance.findAll({ where: { technicianId, ownerType: 'tecnico' }, include: [Material] });
@@ -164,6 +167,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
   }
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  if (targetWarehouseId) { try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque de destino.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); } }
 
   const result = await sequelize.transaction(async (transaction) => {
     let totalQuantity = 0;

@@ -1056,3 +1056,43 @@ tr:hover td { background: #f8fbff; }
 .check-line { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--text); }
 .check-line input { width: 18px; height: 18px; margin: 0; }
 .badge.pendente { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+.warehouse-transfer-form .serial-list,
+.warehouse-page .serial-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.warehouse-page .serial-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.warehouse-page .serial-chip span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.warehouse-page .serial-chip em {
+  font-style: normal;
+  font-weight: 800;
+  color: #2563eb;
+  white-space: nowrap;
+}
+
+.warehouse-page .serial-chip.selected em {
+  color: #15803d;
+}
+
+@media (max-width: 720px) {
+  .warehouse-page .serial-chip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
