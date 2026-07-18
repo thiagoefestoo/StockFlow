@@ -11,7 +11,6 @@ const emptyUser = {
   password: '',
   role: 'tecnico',
   status: 'ativo',
-  technicianId: '',
   phone: '',
   jobTitle: '',
   notes: '',
@@ -97,7 +96,7 @@ export default function Users() {
     setModal(true);
   }
   function openEdit(user) {
-    setForm({ ...emptyUser, ...user, password: '', technicianId: user.technicianId || '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0 });
+    setForm({ ...emptyUser, ...user, password: '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0 });
     setModal(true);
   }
   function patchForm(patch) {
