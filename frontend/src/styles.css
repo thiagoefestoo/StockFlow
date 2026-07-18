@@ -1147,3 +1147,80 @@ tr:hover td { background: #f8fbff; }
 .audit-readable table td { vertical-align: top; }
 .audit-readable table td:nth-child(2),
 .audit-readable table td:nth-child(3) { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Ajuste: busca múltipla de patrimônio */
+.patrimony-search-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.patrimony-search-grid input {
+  text-transform: uppercase;
+}
+
+/* Ajuste: logo Super Infra na guia de assinatura */
+.paper-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #dbe4ef;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+.paper-logo {
+  width: 210px;
+  max-width: 48%;
+  height: auto;
+  object-fit: contain;
+}
+
+.paper-brand-meta {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+  color: #0f172a;
+}
+
+.paper-brand-meta strong {
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.paper-brand-meta span {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.stamp-box {
+  margin-top: 24px;
+  border: 2px solid #0f172a;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.stamp-box strong {
+  display: block;
+  margin-bottom: 8px;
+  letter-spacing: .04em;
+}
+
+.stamp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .patrimony-search-grid { grid-template-columns: 1fr; }
+  .paper-brand-row { align-items: flex-start; flex-direction: column; }
+  .paper-brand-meta { text-align: left; }
+  .paper-logo { max-width: 260px; width: 100%; }
+  .stamp-grid { grid-template-columns: 1fr; }
+}
