@@ -13,6 +13,7 @@ const emptyUser = {
   status: 'ativo',
   phone: '',
   jobTitle: '',
+  companyName: '',
   notes: '',
   mustChangePassword: false,
   warehouseIds: [],
@@ -96,7 +97,7 @@ export default function Users() {
     setModal(true);
   }
   function openEdit(user) {
-    setForm({ ...emptyUser, ...user, password: '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0 });
+    setForm({ ...emptyUser, ...user, password: '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0, companyName: user.companyName || user.Technician?.ContractorCompany?.name || '' });
     setModal(true);
   }
   function patchForm(patch) {
@@ -301,6 +302,7 @@ export default function Users() {
             <label>E-mail de login<input type="email" value={form.email} onChange={(e) => patchForm({ email: e.target.value })} /></label>
             <label>Telefone<input value={form.phone || ''} onChange={(e) => patchForm({ phone: e.target.value })} /></label>
             <label>Cargo/função<select value={form.jobTitle || ''} onChange={(e) => patchForm({ jobTitle: e.target.value })}><option value="">Selecione</option>{(JOB_OPTIONS[form.role] || JOB_OPTIONS.tecnico).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+            {form.role === 'tecnico' && <label>Nome da empresa<input value={form.companyName || ''} onChange={(e) => patchForm({ companyName: e.target.value })} placeholder="Ex.: Super Infra, terceirizada ou equipe própria" /></label>}
             <label>Perfil
               <select value={form.role} onChange={(e) => patchForm({ role: e.target.value })}>
                 <option value="admin">Administrador</option>
@@ -366,7 +368,7 @@ export default function Users() {
         {details.data?.user && <>
           <DetailGrid fields={[
             ['Nome', details.data.user.name], ['E-mail', details.data.user.email], ['Perfil', roleLabel(details.data.user.role)], ['Status', statusLabel(details.data.user)],
-            ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle],
+            ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle], ['Empresa do técnico', details.data.user.companyName || details.data.user.Technician?.ContractorCompany?.name],
             ['Último login', dt(details.data.user.lastLoginAt)], ['Senha alterada em', dt(details.data.user.passwordChangedAt)], ['Criado em', dt(details.data.user.createdAt)], ['Atualizado em', dt(details.data.user.updatedAt)],
             ['Bloqueado em', dt(details.data.user.blockedAt)], ['Motivo bloqueio', details.data.user.blockedReason], ['Excluído em', dt(details.data.user.deletedAt)], ['Motivo exclusão', details.data.user.deletedReason],
             ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).length ? `${(details.data.user.cityAccess || []).length} cidade(s)` : '-'], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],

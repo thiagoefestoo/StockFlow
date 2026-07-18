@@ -1,4 +1,5 @@
 const sequelize = require('../../config/db');
+const { Op } = require('sequelize');
 const { StockBatch, StockBatchItem, Material, SerializedAsset, StockMovement, User, Warehouse } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -47,7 +48,7 @@ exports.create = asyncHandler(async (req, res) => {
   if (!proofAttachmentName || !proofAttachmentData) return fail(res, 400, 'Anexe um comprovante da entrada, como nota fiscal, termo de entrega, romaneio ou recibo.');
   if (!fiscalDocumentNumber && !invoiceAccessKey) return fail(res, 400, 'Informe o número do documento fiscal/termo ou a chave de acesso da nota.');
   let targetWarehouseId = warehouseId || null;
-  if (!targetWarehouseId && !isPrivileged(req.user)) return fail(res, 400, 'Selecione um estoque autorizado para registrar entrada.');
+  if (!targetWarehouseId) return fail(res, 400, 'Selecione o estoque regional onde a entrada será registrada. Não existe mais entrada em estoque central.');
   if (targetWarehouseId) {
     try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque informado.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
     const warehouse = await Warehouse.findByPk(targetWarehouseId);
@@ -56,6 +57,7 @@ exports.create = asyncHandler(async (req, res) => {
 
   const result = await sequelize.transaction(async (transaction) => {
     let totalItems = 0;
+    const serialsInThisEntry = new Set();
     let totalValue = 0;
     const batch = await StockBatch.create({
       receiptNumber,
@@ -82,9 +84,23 @@ exports.create = asyncHandler(async (req, res) => {
       if (!material) throw new Error('Material não encontrado.');
       const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
       const quantity = qty(item.quantity || serials.length || 0);
-      const unitCost = money(item.unitCost ?? material.unitCost);
+      const unitCost = money(item.unitCost ?? 0);
       if (quantity <= 0) throw new Error(`Quantidade inválida para ${material.name}.`);
-      if (material.requiresSerial && serials.length !== Number(quantity)) throw new Error(`Quantidade de seriais precisa bater com o item ${material.name}.`);
+      if (unitCost <= 0) throw new Error(`Informe o valor unitário da entrada para ${material.name}.`);
+      if (material.requiresSerial) {
+        if (serials.length !== Number(quantity)) throw new Error(`Informe exatamente ${Number(quantity)} serial(is) para ${material.name}. Você informou ${serials.length}.`);
+        const localSet = new Set();
+        const repeatedTyped = [];
+        for (const serialNumber of serials) {
+          const normalizedSerial = serialNumber.toUpperCase();
+          if (localSet.has(normalizedSerial) || serialsInThisEntry.has(normalizedSerial)) repeatedTyped.push(serialNumber);
+          localSet.add(normalizedSerial);
+        }
+        if (repeatedTyped.length) throw new Error(`Serial digitado repetido: ${[...new Set(repeatedTyped)].join(', ')}.`);
+        const alreadyRegistered = serials.length ? await SerializedAsset.findAll({ where: { [Op.or]: serials.map((serialNumber) => ({ serialNumber: { [Op.iLike]: serialNumber } })) }, transaction }) : [];
+        if (alreadyRegistered.length) throw new Error(`Serial já cadastrado: ${alreadyRegistered.map((asset) => asset.serialNumber).join(', ')}.`);
+        serials.forEach((serialNumber) => serialsInThisEntry.add(serialNumber.toUpperCase()));
+      }
       const totalCost = money(quantity * unitCost);
       totalItems += quantity;
       totalValue += totalCost;
@@ -106,8 +122,6 @@ exports.create = asyncHandler(async (req, res) => {
 
       if (material.requiresSerial) {
         for (const serialNumber of serials) {
-          const exists = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
-          if (exists) throw new Error(`Serial duplicado: ${serialNumber}.`);
           const asset = await SerializedAsset.create({
             materialId: material.id,
             serialNumber,

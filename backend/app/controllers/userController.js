@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
-const { User, Technician, AuditLog } = require('../models');
+const { User, Technician, AuditLog, ContractorCompany } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
@@ -26,6 +26,7 @@ function hide(user) {
     accessStatus: computedStatus(raw),
     technicianId: raw.technicianId,
     Technician: raw.Technician || null,
+    companyName: raw.Technician?.ContractorCompany?.name || raw.Technician?.companyName || null,
     phone: raw.phone,
     jobTitle: raw.jobTitle,
     notes: raw.notes,
@@ -48,11 +49,53 @@ async function assertEmailAvailable(email, userId = null) {
   }
 }
 
-async function validateTechnicianLink(role, technicianId) {
+
+async function resolveContractorCompany(companyName) {
+  const cleanName = String(companyName || '').trim();
+  if (!cleanName) return null;
+  let company = await ContractorCompany.findOne({ where: { name: { [Op.iLike]: cleanName } } });
+  if (!company) {
+    company = await ContractorCompany.create({ name: cleanName, status: 'ativa', notes: 'Empresa criada automaticamente pelo cadastro de usuário técnico.' });
+  }
+  return company;
+}
+
+async function resolveTechnicianLink({ role, technicianId, name, email, phone, warehouseIds = [], cityAccess = [], companyName = '' }) {
   if (role !== 'tecnico') return null;
-  if (!technicianId) throw Object.assign(new Error('Contas de técnico precisam estar vinculadas a um técnico cadastrado.'), { statusCode: 400 });
-  const technician = await Technician.findByPk(technicianId);
-  if (!technician) throw Object.assign(new Error('Técnico vinculado não encontrado.'), { statusCode: 404 });
+
+  if (technicianId) {
+    const technician = await Technician.findByPk(technicianId);
+    if (!technician) throw Object.assign(new Error('Técnico vinculado não encontrado.'), { statusCode: 404 });
+    return technician;
+  }
+
+  const cleanEmail = String(email || '').toLowerCase().trim();
+  const company = await resolveContractorCompany(companyName);
+  let technician = cleanEmail ? await Technician.findOne({ where: { email: cleanEmail } }) : null;
+  if (!technician && name) technician = await Technician.findOne({ where: { name } });
+
+  if (!technician) {
+    technician = await Technician.create({
+      name,
+      email: cleanEmail || null,
+      phone: phone || null,
+      type: company ? 'terceirizado' : 'interno',
+      status: 'ativo',
+      companyId: company?.id || null,
+      serviceCities: Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [],
+      defaultWarehouseId: Array.isArray(warehouseIds) && warehouseIds.length ? Number(warehouseIds[0]) : null,
+      notes: 'Técnico criado automaticamente ao criar usuário técnico.',
+    });
+  } else {
+    const patch = {};
+    if (!technician.email && cleanEmail) patch.email = cleanEmail;
+    if (!technician.phone && phone) patch.phone = phone;
+    if ((!technician.serviceCities || !technician.serviceCities.length) && Array.isArray(cityAccess)) patch.serviceCities = cityAccess.filter(Boolean);
+    if (!technician.defaultWarehouseId && Array.isArray(warehouseIds) && warehouseIds.length) patch.defaultWarehouseId = Number(warehouseIds[0]);
+    if (company) patch.companyId = company.id;
+    if (Object.keys(patch).length) await technician.update(patch);
+  }
+
   return technician;
 }
 
@@ -70,7 +113,7 @@ exports.list = asyncHandler(async (req, res) => {
   if (role) where.role = role;
   if (includeDeleted !== 'true') where.deletedAt = null;
 
-  const users = await User.findAll({ where, include: [Technician], order: [['createdAt', 'DESC']] });
+  const users = await User.findAll({ where, include: [{ model: Technician, include: [ContractorCompany] }], order: [['createdAt', 'DESC']] });
   let list = users.map(hide);
   if (status) list = list.filter((u) => u.accessStatus === status || u.status === status);
 
@@ -90,7 +133,7 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  const user = await User.findByPk(req.params.id, { include: [Technician] });
+  const user = await User.findByPk(req.params.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   if (!user) return fail(res, 404, 'Usuário não encontrado.');
   const audits = await AuditLog.findAll({
     where: { entity: 'User', entityId: String(user.id) },
@@ -102,54 +145,58 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false, warehouseIds = [], cityAccess = [], approvalLimit = 0 } = req.body;
+  const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false, warehouseIds = [], cityAccess = [], approvalLimit = 0, companyName = '' } = req.body;
   if (!name || !email || !password) return fail(res, 400, 'Nome, e-mail e senha são obrigatórios.');
   if (String(password).length < 6) return fail(res, 400, 'A senha precisa ter pelo menos 6 caracteres.');
   if (!['admin', 'supervisor', 'estoquista', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
   await assertEmailAvailable(email);
-  await validateTechnicianLink(role, technicianId);
+  const normalizedWarehouseIds = Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [];
+  const normalizedCityAccess = Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [];
+  const resolvedTechnician = await resolveTechnicianLink({ role, technicianId, name, email, phone, warehouseIds: normalizedWarehouseIds, cityAccess: normalizedCityAccess, companyName });
   const user = await User.create({
     name,
     email: String(email).toLowerCase().trim(),
     role,
-    technicianId: role === 'tecnico' ? technicianId || null : null,
+    technicianId: role === 'tecnico' ? resolvedTechnician?.id || null : null,
     status,
     phone: phone || null,
     jobTitle: jobTitle || null,
     notes: notes || null,
-    warehouseIds: Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [],
-    cityAccess: Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [],
+    warehouseIds: normalizedWarehouseIds,
+    cityAccess: normalizedCityAccess,
     approvalLimit: Number(approvalLimit || 0),
     mustChangePassword: !!mustChangePassword,
     passwordChangedAt: new Date(),
     passwordHash: await bcrypt.hash(password, 10),
   });
   await writeAudit({ req, action: 'create', entity: 'User', entityId: user.id, message: `Usuário ${user.email} criado.`, afterData: hide(user) });
-  return created(res, hide(await User.findByPk(user.id, { include: [Technician] })), 'Usuário criado.');
+  return created(res, hide(await User.findByPk(user.id, { include: [{ model: Technician, include: [ContractorCompany] }] })), 'Usuário criado.');
 });
 
 exports.update = asyncHandler(async (req, res) => {
-  const user = await User.findByPk(req.params.id, { include: [Technician] });
+  const user = await User.findByPk(req.params.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   if (!user) return fail(res, 404, 'Usuário não encontrado.');
   if (user.deletedAt) return fail(res, 409, 'Usuário excluído. Restaure antes de editar.');
 
   const before = hide(user);
-  const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword, warehouseIds, cityAccess, approvalLimit } = req.body;
+  const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword, warehouseIds, cityAccess, approvalLimit, companyName = '' } = req.body;
   const nextRole = role || user.role;
   if (email && email !== user.email) await assertEmailAvailable(String(email).toLowerCase().trim(), user.id);
-  await validateTechnicianLink(nextRole, technicianId === undefined ? user.technicianId : technicianId);
+  const normalizedWarehouseIds = warehouseIds === undefined ? user.warehouseIds : (Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : []);
+  const normalizedCityAccess = cityAccess === undefined ? user.cityAccess : (Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : []);
+  const resolvedTechnician = await resolveTechnicianLink({ role: nextRole, technicianId: technicianId === undefined ? user.technicianId : technicianId, name: name ?? user.name, email: email || user.email, phone: phone === undefined ? user.phone : phone, warehouseIds: normalizedWarehouseIds, cityAccess: normalizedCityAccess, companyName });
 
   Object.assign(user, {
     name: name ?? user.name,
     email: email ? String(email).toLowerCase().trim() : user.email,
     role: nextRole,
-    technicianId: nextRole === 'tecnico' ? (technicianId === undefined ? user.technicianId : technicianId || null) : null,
+    technicianId: nextRole === 'tecnico' ? resolvedTechnician?.id || null : null,
     status: status ?? user.status,
     phone: phone === undefined ? user.phone : phone || null,
     jobTitle: jobTitle === undefined ? user.jobTitle : jobTitle || null,
     notes: notes === undefined ? user.notes : notes || null,
-    warehouseIds: warehouseIds === undefined ? user.warehouseIds : (Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : []),
-    cityAccess: cityAccess === undefined ? user.cityAccess : (Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : []),
+    warehouseIds: normalizedWarehouseIds,
+    cityAccess: normalizedCityAccess,
     approvalLimit: approvalLimit === undefined ? user.approvalLimit : Number(approvalLimit || 0),
     mustChangePassword: mustChangePassword === undefined ? user.mustChangePassword : !!mustChangePassword,
   });
@@ -160,13 +207,13 @@ exports.update = asyncHandler(async (req, res) => {
     user.mustChangePassword = mustChangePassword === undefined ? user.mustChangePassword : !!mustChangePassword;
   }
   await user.save();
-  const updated = await User.findByPk(user.id, { include: [Technician] });
+  const updated = await User.findByPk(user.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   await writeAudit({ req, action: 'update', entity: 'User', entityId: user.id, message: `Usuário ${user.email} atualizado.`, beforeData: before, afterData: hide(updated) });
   return ok(res, hide(updated), 'Usuário atualizado.');
 });
 
 exports.setStatus = asyncHandler(async (req, res) => {
-  const user = await User.findByPk(req.params.id, { include: [Technician] });
+  const user = await User.findByPk(req.params.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   if (!user) return fail(res, 404, 'Usuário não encontrado.');
   const before = hide(user);
   const { action, reason } = req.body;
@@ -203,13 +250,13 @@ exports.setStatus = asyncHandler(async (req, res) => {
   }
 
   await user.save();
-  const updated = await User.findByPk(user.id, { include: [Technician] });
+  const updated = await User.findByPk(user.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   await writeAudit({ req, action: `user_${action}`, entity: 'User', entityId: user.id, message: `Status do usuário ${user.email} alterado para ${computedStatus(updated)}.`, beforeData: before, afterData: hide(updated) });
   return ok(res, hide(updated), 'Status atualizado.');
 });
 
 exports.resetPassword = asyncHandler(async (req, res) => {
-  const user = await User.findByPk(req.params.id, { include: [Technician] });
+  const user = await User.findByPk(req.params.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   if (!user) return fail(res, 404, 'Usuário não encontrado.');
   if (user.deletedAt) return fail(res, 409, 'Usuário excluído. Restaure antes de redefinir senha.');
   const { password, mustChangePassword = false } = req.body;
@@ -224,7 +271,7 @@ exports.resetPassword = asyncHandler(async (req, res) => {
 });
 
 exports.remove = asyncHandler(async (req, res) => {
-  const user = await User.findByPk(req.params.id, { include: [Technician] });
+  const user = await User.findByPk(req.params.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
   if (!user) return fail(res, 404, 'Usuário não encontrado.');
   if (Number(user.id) === Number(req.user.id)) return fail(res, 409, 'Você não pode excluir sua própria conta logada.');
   const before = hide(user);
