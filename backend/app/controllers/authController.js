@@ -97,8 +97,8 @@ exports.updateMe = asyncHandler(async (req, res) => {
   const user = await User.findByPk(req.user.id, { include: [Technician] });
   if (!user) return fail(res, 404, 'Usuário não encontrado.');
 
-  if (['tecnico', 'estoquista'].includes(user.role)) {
-    return fail(res, 403, 'Técnico e estoquista só podem alterar a própria senha. Dados cadastrais devem ser alterados pelo administrador.');
+  if (user.role !== 'admin') {
+    return fail(res, 403, 'Somente administrador pode alterar nome, e-mail ou dados cadastrais. Este perfil pode alterar apenas a própria senha.');
   }
 
   const before = publicUser(user);
