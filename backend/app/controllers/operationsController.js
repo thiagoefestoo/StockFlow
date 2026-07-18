@@ -13,6 +13,98 @@ const {
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
+const { userWarehouseIds } = require('../utils/warehouseAccess');
+
+
+function isManager(user) {
+  return ['admin', 'supervisor', 'estoquista'].includes(user?.role);
+}
+
+function requestScopeFor(user) {
+  if (user?.role === 'tecnico') return { technicianId: user.technicianId || -1 };
+  if (user?.role === 'estoquista') {
+    const ids = userWarehouseIds(user);
+    return ids.length ? { warehouseId: { [Op.in]: ids } } : { warehouseId: -1 };
+  }
+  return {};
+}
+
+function transferScopeFor(user) {
+  if (user?.role === 'tecnico') return { technicianId: user.technicianId || -1 };
+  if (user?.role === 'estoquista') {
+    const ids = userWarehouseIds(user);
+    return ids.length ? { warehouseId: { [Op.in]: ids } } : { warehouseId: -1 };
+  }
+  return {};
+}
+
+function notificationVisibilityWhere(user) {
+  return {
+    [Op.or]: [
+      { userId: user.id },
+      { userId: null, role: 'todos' },
+      { userId: null, role: user.role },
+      ...(user.role === 'admin' ? [{ userId: null, role: 'supervisor' }] : []),
+    ],
+  };
+}
+
+function positiveOnly(value) {
+  return Number(value || 0) > 0 ? Number(value || 0) : 0;
+}
+
+exports.pendingMenu = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const routes = {};
+
+  if (isManager(user)) {
+    const requestScope = requestScopeFor(user);
+    const transferScope = transferScopeFor(user);
+
+    const [
+      pendingApprovals,
+      approvedMaterialRequests,
+      pendingRequestApprovals,
+      pendingTransferSignatures,
+      pendingLossSignatures,
+      openOrders,
+    ] = await Promise.all([
+      ApprovalRequest.count({ where: { status: 'pendente' } }),
+      MaterialRequest.count({ where: { ...requestScope, status: 'aprovado' } }),
+      MaterialRequest.count({ where: { ...requestScope, status: 'pendente_aprovacao' } }),
+      Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura', transferNumber: { [Op.notILike]: 'PERDA-%' } } }),
+      Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura', transferNumber: { [Op.iLike]: 'PERDA-%' } } }),
+      ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
+    ]);
+
+    routes['/aprovacoes'] = positiveOnly(pendingApprovals || pendingRequestApprovals);
+    routes['/solicitacoes-material'] = positiveOnly(approvedMaterialRequests);
+    routes['/transferencias'] = positiveOnly(pendingTransferSignatures);
+    routes['/perdas-tecnico'] = positiveOnly(pendingLossSignatures);
+    routes['/os'] = positiveOnly(openOrders);
+  } else if (user?.role === 'tecnico') {
+    const requestScope = requestScopeFor(user);
+    const transferScope = transferScopeFor(user);
+
+    const [
+      requestsInProgress,
+      pendingSignatures,
+      unreadNotifications,
+      openOrders,
+    ] = await Promise.all([
+      MaterialRequest.count({ where: { ...requestScope, status: { [Op.in]: ['pendente_aprovacao', 'aprovado'] } } }),
+      Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura' } }),
+      Notification.count({ where: { ...notificationVisibilityWhere(user), status: 'nao_lida' } }),
+      ServiceOrder.count({ where: { technicianId: user.technicianId || -1, status: { [Op.in]: ['aberta', 'pendente'] } } }),
+    ]);
+
+    routes['/solicitacoes-material'] = positiveOnly(requestsInProgress);
+    routes['/caixa-tecnico'] = positiveOnly(pendingSignatures + unreadNotifications + openOrders);
+  }
+
+  const total = Object.values(routes).reduce((sum, value) => sum + Number(value || 0), 0);
+  return ok(res, { total, routes, updatedAt: new Date().toISOString() });
+});
 
 exports.cockpit = asyncHandler(async (req, res) => {
   const today = new Date();

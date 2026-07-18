@@ -217,6 +217,51 @@ button.success, .success-btn { background: #ecfdf5; color: #166534; border: 1px 
 .menu-group-toggle { width: 100%; border: 0; background: rgba(15,23,42,.58); color: #cbd5e1; border-radius: 14px; padding: 12px 13px; display: flex; justify-content: space-between; align-items: center; font-weight: 950; letter-spacing: .01em; }
 .menu-group-toggle:hover { background: rgba(30,41,59,.9); color: white; }
 .menu-group-toggle b { background: rgba(148,163,184,.16); border-radius: 999px; width: 22px; height: 22px; display: grid; place-items: center; }
+
+.menu-group-title {
+  min-width: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.menu-link-label {
+  min-width: 0;
+  flex: 1;
+}
+.sidebar a.has-pending {
+  position: relative;
+  padding-right: 12px;
+}
+.menu-pending-badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dc2626;
+  color: #fff;
+  font-size: .72rem;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .18);
+  margin-left: auto;
+}
+.menu-pending-badge.group {
+  min-width: 20px;
+  height: 20px;
+  font-size: .68rem;
+  margin-left: 0;
+}
+.sidebar a.active .menu-pending-badge,
+.sidebar a:hover .menu-pending-badge {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .14), 0 0 0 6px rgba(220, 38, 38, .16);
+}
+
 .accordion-menu .menu-group { border-bottom: 1px solid rgba(148,163,184,.08); padding-bottom: 10px; }
 .accordion-menu .menu-group.closed { padding-bottom: 4px; }
 .live-pulse { margin: -8px 0 18px; border: 1px solid rgba(14,165,233,.22); background: linear-gradient(135deg, rgba(236,253,245,.94), rgba(239,246,255,.92)); border-radius: 22px; padding: 12px 16px; display: flex; gap: 12px; align-items: center; box-shadow: 0 10px 28px rgba(15,23,42,.05); overflow: hidden; }

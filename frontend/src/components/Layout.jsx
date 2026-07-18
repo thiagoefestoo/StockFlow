@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import NotificationBell from './NotificationBell';
 import LivePulse from './LivePulse';
 import SuperInfraLogo from './SuperInfraLogo';
+import api from '../services/api';
 
 const adminGroups = [
   { title: 'Comando', links: [['/', 'OP', 'Cockpit'], ['/aprovacoes', 'AP', 'Aprovações'], ['/dashboard', 'DB', 'Dashboard legado']] },
@@ -23,7 +24,39 @@ export default function Layout() {
   const groups = isSupervisor ? adminGroups.filter((group) => !group.adminOnly || isAdmin) : technicianGroups;
   const defaultOpen = useMemo(() => Object.fromEntries(groups.map((g, i) => [g.title, i < 2])), [isSupervisor]);
   const [openGroups, setOpenGroups] = useState(defaultOpen);
+  const [pendingMenu, setPendingMenu] = useState({ total: 0, routes: {} });
+
   function toggle(title) { setOpenGroups((current) => ({ ...current, [title]: !current[title] })); }
+
+  async function loadPendingMenu() {
+    try {
+      const res = await api.get('/operations/pending-menu');
+      setPendingMenu(res.data.data || { total: 0, routes: {} });
+    } catch (_) {}
+  }
+
+  useEffect(() => {
+    loadPendingMenu();
+    const id = setInterval(loadPendingMenu, 30000);
+    window.addEventListener('focus', loadPendingMenu);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', loadPendingMenu);
+    };
+  }, [user?.id, user?.role]);
+
+  function pendingForRoute(route) {
+    return Number(pendingMenu?.routes?.[route] || 0);
+  }
+
+  function pendingForGroup(group) {
+    return group.links.reduce((sum, [to]) => sum + pendingForRoute(to), 0);
+  }
+
+  function badgeLabel(count) {
+    const value = Number(count || 0);
+    return value > 99 ? '99+' : String(value);
+  }
 
   return (
     <div className="shell erp-shell superinfra-shell">
@@ -32,16 +65,25 @@ export default function Layout() {
         <nav className="accordion-menu">
           {groups.map((group) => {
             const isOpen = openGroups[group.title] ?? true;
+            const groupPending = pendingForGroup(group);
             return (
               <div className={`menu-group ${isOpen ? 'open' : 'closed'}`} key={group.title}>
                 <button type="button" className="menu-group-toggle" onClick={() => toggle(group.title)}>
-                  <span>{group.title}</span><b>{isOpen ? '−' : '+'}</b>
+                  <span className="menu-group-title">
+                    <span>{group.title}</span>
+                    {groupPending > 0 && <em className="menu-pending-badge group" aria-label={`${groupPending} tarefa(s) pendente(s) neste grupo`}>{badgeLabel(groupPending)}</em>}
+                  </span>
+                  <b>{isOpen ? '−' : '+'}</b>
                 </button>
-                {isOpen && group.links.map(([to, icon, label]) => (
-                  <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'active' : '')}>
-                    <b>{icon}</b><span>{label}</span>
-                  </NavLink>
-                ))}
+                {isOpen && group.links.map(([to, icon, label]) => {
+                  const routePending = pendingForRoute(to);
+                  return (
+                    <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `${isActive ? 'active' : ''}${routePending > 0 ? ' has-pending' : ''}`.trim()}>
+                      <b>{icon}</b><span className="menu-link-label">{label}</span>
+                      {routePending > 0 && <em className="menu-pending-badge" aria-label={`${routePending} tarefa(s) pendente(s)`}>{badgeLabel(routePending)}</em>}
+                    </NavLink>
+                  );
+                })}
               </div>
             );
           })}
