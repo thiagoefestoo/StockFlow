@@ -13,6 +13,7 @@ function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style:
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function categoryGroup(category) { const c = String(category || '').toLowerCase(); if (c.includes('onu') || c.includes('roteador')) return 'ONU e equipamentos'; if (c.includes('cabo') || c.includes('drop')) return 'Cabo/drop'; if (c.includes('conector') || c.includes('esticador')) return 'Conectores e fixação'; return 'Outros materiais'; }
 function statusLabel(value) { return ({ pendente_aprovacao: 'Pendente aprovação', aprovado: 'Aprovado', entregue: 'Entregue', reprovado: 'Reprovado', cancelado: 'Cancelado' }[value] || value || '-'); }
+function sectionLabel(key) { return ({ resumo: 'Resumo', baixa: 'Baixar OS', caixa: 'Minha carga', solicitacoes: 'Solicitações' }[key] || key); }
 
 export default function TechnicianInbox() {
   const { user, isSupervisor } = useAuth();
@@ -23,18 +24,23 @@ export default function TechnicianInbox() {
   const [requests, setRequests] = useState([]);
   const [osForm, setOsForm] = useState(osEmpty);
   const [osFieldsOpen, setOsFieldsOpen] = useState(false);
+  const [activeMobileSection, setActiveMobileSection] = useState('resumo');
   const [requestModal, setRequestModal] = useState(false);
   const [requestForm, setRequestForm] = useState(reqEmpty);
   const [message, setMessage] = useState('');
   const [details, setDetails] = useState(null);
 
-  async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data); }
+  async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []); }
   async function loadStock(id = selectedTech) {
     if (!id) return;
-    setStock((await api.get(`/technicians/${id}/stock`)).data.data);
-    setRequests((await api.get(`/material-requests?technicianId=${id}`)).data.data);
+    const [stockRes, requestsRes] = await Promise.all([
+      api.get(`/technicians/${id}/stock`),
+      api.get(`/material-requests?technicianId=${id}`),
+    ]);
+    setStock(stockRes.data.data);
+    setRequests(requestsRes.data.data || []);
   }
-  async function loadCatalog() { setMaterialsCatalog((await api.get('/materials')).data.data); }
+  async function loadCatalog() { setMaterialsCatalog((await api.get('/materials')).data.data || []); }
 
   useEffect(() => { loadTechs(); loadCatalog(); if (selectedTech) loadStock(selectedTech); }, []);
 
@@ -49,12 +55,26 @@ export default function TechnicianInbox() {
     }
     return map;
   }, [stock]);
+  const flatBoxRows = useMemo(() => Object.entries(boxGroups).flatMap(([group, rows]) => rows.map((row) => ({ ...row, group }))), [boxGroups]);
   const custodyValue = (stock?.assets || []).reduce((sum, item) => sum + Number(item.acquisitionCost || item.Material?.unitCost || 0), 0) + (stock?.balances || []).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
 
   const pendingRequests = requests.filter((r) => r.status !== 'entregue' && r.status !== 'reprovado' && r.status !== 'cancelado');
+  const approvedRequests = requests.filter((r) => r.status === 'aprovado');
+  const deliveredRequests = requests.filter((r) => r.status === 'entregue');
+  const recentRequests = requests.slice(0, 10);
+
+  function mobileSectionClass(key) {
+    return `technician-mobile-section mobile-section-${key} ${activeMobileSection === key ? 'mobile-open' : 'mobile-closed'}`;
+  }
+
+  function showSection(key) {
+    setActiveMobileSection(key);
+    if (key === 'baixa') setOsFieldsOpen(true);
+  }
 
   function addOsMaterial() {
     setOsForm({ ...osForm, materials: [...osForm.materials, { materialId: '', quantity: 1, serialNumbers: [] }] });
+    setActiveMobileSection('baixa');
   }
 
   function addStandardKit() {
@@ -67,6 +87,7 @@ export default function TechnicianInbox() {
       }
     }
     setOsForm({ ...osForm, materials: kit.length ? kit : osForm.materials });
+    setActiveMobileSection('baixa');
   }
 
   function updateOsMaterial(i, patch) {
@@ -83,7 +104,7 @@ export default function TechnicianInbox() {
     const materials = osForm.materials.map((item, index) => {
       if (index !== i) return { ...item, serialNumbers: [] };
       const already = (item.serialNumbers || []).includes(serialNumber);
-      return { ...item, serialNumbers: already ? [] : [serialNumber], quantity: already ? 1 : 1 };
+      return { ...item, serialNumbers: already ? [] : [serialNumber], quantity: 1 };
     });
     setOsForm({ ...osForm, materials });
   }
@@ -92,6 +113,7 @@ export default function TechnicianInbox() {
     setRequestForm({ ...requestForm, items: [...requestForm.items, { materialId: '', quantity: 1 }] });
   }
   function updateRequestItem(i, patch) { const items = [...requestForm.items]; items[i] = { ...items[i], ...patch }; setRequestForm({ ...requestForm, items }); }
+  function removeRequestItem(i) { setRequestForm({ ...requestForm, items: requestForm.items.filter((_, index) => index !== i) }); }
 
   function validateOs() {
     if (!String(osForm.osNumber || '').trim()) return 'Informe o número da OS.';
@@ -120,6 +142,7 @@ export default function TechnicianInbox() {
     if (validation) {
       setMessage(validation);
       setOsFieldsOpen(true);
+      setActiveMobileSection('baixa');
       return;
     }
     try {
@@ -128,6 +151,7 @@ export default function TechnicianInbox() {
       setMessage('OS baixada com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
       setOsForm(osEmpty);
       setOsFieldsOpen(false);
+      setActiveMobileSection('resumo');
       loadStock(selectedTech);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao baixar OS.');
@@ -142,6 +166,7 @@ export default function TechnicianInbox() {
       setMessage('Solicitação enviada para aprovação do supervisor.');
       setRequestModal(false);
       setRequestForm(reqEmpty);
+      setActiveMobileSection('solicitacoes');
       loadStock(selectedTech);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao solicitar material.');
@@ -149,26 +174,60 @@ export default function TechnicianInbox() {
   }
 
   return (
-    <div className="page-grid mobile-first erp-page">
-      <section className="command-center"><div><span className="eyebrow">Caixa do técnico</span><h2>Minha caixa de materiais</h2><p>Tela otimizada para celular: consultar o que está em seu nome e dar baixa somente no que precisa operar.</p></div>{isSupervisor && <button onClick={() => setRequestModal(true)}>Solicitar material</button>}</section>
+    <div className="page-grid mobile-first erp-page technician-mobile-page">
+      <section className="command-center technician-hero-card">
+        <div>
+          <span className="eyebrow">Caixa do técnico</span>
+          <h2>Minha caixa de materiais</h2>
+          <p>Tela otimizada para celular: veja só o essencial primeiro e abra cada operação quando precisar.</p>
+        </div>
+        <div className="row-actions technician-hero-actions">
+          <button type="button" onClick={() => setRequestModal(true)} disabled={!selectedTech}>Solicitar material</button>
+          <button type="button" className="ghost" onClick={() => loadStock(selectedTech)} disabled={!selectedTech}>Atualizar</button>
+        </div>
+      </section>
+
       {message && <div className="alert danger">{message}</div>}
       {isSupervisor && <section className="panel"><label>Operar como técnico<select value={selectedTech} onChange={(e) => { setSelectedTech(e.target.value); loadStock(e.target.value); }}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></section>}
-      <div className="kpi-grid small"><KpiCard label="Equipamentos na caixa" value={stock?.assets?.length || 0} /><KpiCard label="Linhas consumíveis" value={stock?.balances?.length || 0} /><KpiCard label="Valor sob minha guarda" value={brl(custodyValue)} /></div>
 
-      <section className="panel technician-notifications">
-        <div className="panel-title"><div><h3>Notificações da minha caixa</h3><p>Acompanhe solicitações de material e cargas sob sua responsabilidade.</p></div><button className="ghost" onClick={() => loadStock(selectedTech)}>Atualizar</button></div>
-        <div className="notification-strip">
-          <article><strong>{pendingRequests.length}</strong><span>solicitação(ões) em andamento</span></article>
-          <article><strong>{requests.filter((r) => r.status === 'aprovado').length}</strong><span>aprovada(s), aguardando entrega</span></article>
-          <article><strong>{requests.filter((r) => r.status === 'entregue').length}</strong><span>entregue(s) para sua caixa</span></article>
+      <nav className="technician-mobile-tabs" aria-label="Atalhos da caixa do técnico">
+        {['resumo', 'baixa', 'caixa', 'solicitacoes'].map((key) => (
+          <button key={key} type="button" className={activeMobileSection === key ? 'active' : ''} onClick={() => showSection(key)}>
+            {sectionLabel(key)}
+            {key === 'resumo' && pendingRequests.length > 0 && <b>{pendingRequests.length}</b>}
+            {key === 'solicitacoes' && approvedRequests.length > 0 && <b>{approvedRequests.length}</b>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="kpi-grid small technician-kpis">
+        <KpiCard label="Equipamentos" value={stock?.assets?.length || 0} />
+        <KpiCard label="Consumíveis" value={stock?.balances?.length || 0} />
+        <KpiCard label="Valor sob guarda" value={brl(custodyValue)} />
+      </div>
+
+      <section className={`panel technician-notifications ${mobileSectionClass('resumo')}`}>
+        <div className="panel-title compact-title">
+          <div><h3>Resumo e notificações</h3><p>Acompanhe rapidamente o andamento das suas solicitações e entregas.</p></div>
+          <button className="ghost" onClick={() => loadStock(selectedTech)}>Atualizar</button>
+        </div>
+        <div className="notification-strip technician-status-strip">
+          <article><strong>{pendingRequests.length}</strong><span>em andamento</span></article>
+          <article><strong>{approvedRequests.length}</strong><span>aguardando entrega</span></article>
+          <article><strong>{deliveredRequests.length}</strong><span>entregue(s)</span></article>
+        </div>
+        <div className="mobile-quick-actions">
+          <button type="button" onClick={() => showSection('baixa')}>Baixar OS</button>
+          <button type="button" className="ghost" onClick={() => showSection('caixa')}>Ver minha carga</button>
+          <button type="button" className="ghost" onClick={() => setRequestModal(true)}>Solicitar material</button>
         </div>
         {requests.slice(0, 4).map((r) => <button type="button" className="request-notice" key={r.id} onClick={() => setDetails({ type: 'request', item: r })}><b>{r.requestNumber}</b><span>{statusLabel(r.status)} • {Number(r.totalQuantity || 0)} item(ns) • {dt(r.updatedAt)}</span></button>)}
         {!requests.length && <div className="empty-state small">Nenhuma solicitação registrada para sua caixa.</div>}
       </section>
 
-      <section className="two-col">
-        <article className="panel">
-          <div className="panel-title"><div><h3>Baixar material por OS</h3><p>Informe nome, CPF e selecione exatamente 1 serial que será transferido para o cliente.</p></div></div>
+      <section className="two-col technician-work-area">
+        <article className={`panel os-work-card ${mobileSectionClass('baixa')}`}>
+          <div className="panel-title compact-title"><div><h3>Baixar material por OS</h3><p>Informe nome, CPF e selecione exatamente 1 serial que será transferido para o cliente.</p></div></div>
           <button type="button" className="ghost os-mobile-toggle" onClick={() => setOsFieldsOpen((open) => !open)}>{osFieldsOpen ? 'Ocultar dados da OS' : 'Preencher dados da OS'}</button>
           <div className={`form-grid os-mobile-fields ${osFieldsOpen ? 'open' : ''}`}>
             <label>Nº da OS<input value={osForm.osNumber} onChange={(e) => setOsForm({ ...osForm, osNumber: e.target.value })} required /></label>
@@ -178,35 +237,63 @@ export default function TechnicianInbox() {
             <label>Cidade<input value={osForm.city} onChange={(e) => setOsForm({ ...osForm, city: e.target.value })} /></label>
             <label>Tipo<select value={osForm.serviceType} onChange={(e) => setOsForm({ ...osForm, serviceType: e.target.value })}><option value="instalacao">Instalação</option><option value="manutencao">Manutenção</option><option value="troca_onu">Troca de ONU</option><option value="retirada">Retirada</option><option value="outro">Outro</option></select></label>
           </div>
-          <div className="subtoolbar"><h4>Material usado</h4><div className="row-actions"><button className="ghost" onClick={addStandardKit}>Usar kit padrão</button><button className="ghost" onClick={addOsMaterial}>Adicionar</button></div></div>
+          <div className="subtoolbar"><h4>Material usado</h4><div className="row-actions"><button className="ghost desktop-action" onClick={addStandardKit}>Usar kit padrão</button><button className="ghost" onClick={addOsMaterial}>Adicionar item</button></div></div>
           {osForm.materials.map((m, i) => {
             const material = stockMaterials.find((x) => Number(x.id) === Number(m.materialId));
             const serials = serialByMaterial(m.materialId);
-            return <div className="item-card" key={i}>
+            return <div className="item-card technician-os-item" key={i}>
               <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeOsMaterial(i)}>Remover</button></div>
               <label>Material<select value={m.materialId} onChange={(e) => updateOsMaterial(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{stockMaterials.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial obrigatório</strong><small>Selecione apenas 1 serial por OS.</small></div><div className="serial-list">{serials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {asset.status || 'com_tecnico'}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /></label>}
+              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial obrigatório</strong><small>Selecione apenas 1 serial por OS.</small></div><div className="serial-list compact-serial-list">{serials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" min="1" value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /></label>}
             </div>;
           })}
+          {!osForm.materials.length && <div className="empty-state small">Clique em “Adicionar item” para informar o material usado na OS.</div>}
           <button onClick={saveOs} className="wide">Baixar OS e atualizar minha caixa</button>
         </article>
-        <article className="panel"><div className="panel-title"><div><h3>Minha caixa atual</h3><p>Lista agrupada por tipo. Clique em detalhes para ver seriais e valores.</p></div></div>
-          <div className="category-box-list">
+
+        <article className={`panel technician-box-card ${mobileSectionClass('caixa')}`}>
+          <div className="panel-title compact-title"><div><h3>Minha carga atual</h3><p>Resumo por material. Abra detalhes apenas quando precisar ver seriais e valores.</p></div></div>
+          <div className="technician-card-list">
+            {flatBoxRows.map((row) => <button type="button" className="tech-stock-card" key={`${row.group}-${row.materialId}`} onClick={() => setDetails({ type: 'group', item: row })}>
+              <span><b>{row.material}</b><small>{row.group} • {row.requiresSerial ? 'Serializado' : 'Consumível'}</small></span>
+              <strong>{row.quantity} {row.unit || ''}</strong>
+            </button>)}
+            {!flatBoxRows.length && <div className="empty-state">Nenhum material em sua caixa.</div>}
+          </div>
+          <div className="category-box-list desktop-box-list">
             {Object.entries(boxGroups).map(([group, rows]) => <div className="panel-soft" key={group}><h4>{group}</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Opções</th></tr></thead><tbody>{rows.map((row) => <tr key={`${group}-${row.materialId}`}><td><strong>{row.material}</strong><br /><small>{row.requiresSerial ? 'Serializado' : 'Consumível'}</small></td><td>{row.quantity} {row.unit || ''}</td><td>{brl(row.value)}</td><td><button className="info" onClick={() => setDetails({ type: 'group', item: row })}>Detalhes</button></td></tr>)}</tbody></table></div></div>)}
-            {!Object.keys(boxGroups).length && <div className="empty-state">Nenhum material em sua caixa.</div>}
           </div>
         </article>
       </section>
-      <section className="panel"><div className="panel-title"><div><h3>Minhas solicitações recentes</h3><p>Fila de aprovação e expedição do material pedido.</p></div></div><div className="table-wrap"><table><thead><tr><th>Número</th><th>Status</th><th>Itens</th><th>Valor</th><th>Atualização</th><th>Opções</th></tr></thead><tbody>{requests.slice(0, 10).map((r) => <tr key={r.id}><td>{r.requestNumber}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.totalQuantity}</td><td>{brl(r.totalValue)}</td><td>{dt(r.updatedAt)}</td><td><button className="info" onClick={() => setDetails({ type: 'request', item: r })}>Detalhes</button></td></tr>)}</tbody></table></div></section>
+
+      <section className={`panel technician-requests-section ${mobileSectionClass('solicitacoes')}`}>
+        <div className="panel-title compact-title"><div><h3>Minhas solicitações recentes</h3><p>Fila de aprovação e expedição do material pedido.</p></div><button type="button" onClick={() => setRequestModal(true)}>Nova solicitação</button></div>
+        <div className="mobile-request-list">
+          {recentRequests.map((r) => <button key={r.id} type="button" className="mobile-request-card" onClick={() => setDetails({ type: 'request', item: r })}>
+            <span><b>{r.requestNumber}</b><small>{dt(r.updatedAt)}</small></span>
+            <em className={`badge ${r.status}`}>{statusLabel(r.status)}</em>
+            <strong>{r.totalQuantity || 0} item(ns)</strong>
+          </button>)}
+        </div>
+        <div className="table-wrap desktop-request-table"><table><thead><tr><th>Número</th><th>Status</th><th>Itens</th><th>Valor</th><th>Atualização</th><th>Opções</th></tr></thead><tbody>{recentRequests.map((r) => <tr key={r.id}><td>{r.requestNumber}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.totalQuantity}</td><td>{brl(r.totalValue)}</td><td>{dt(r.updatedAt)}</td><td><button className="info" onClick={() => setDetails({ type: 'request', item: r })}>Detalhes</button></td></tr>)}</tbody></table></div>
+        {!recentRequests.length && <div className="empty-state small">Nenhuma solicitação registrada.</div>}
+      </section>
 
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["Categoria", details.item.Material?.category], ["Status", details.item.status], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Último movimento", details.item.lastMovementAt]]} />}
         {details?.type === 'group' && <><DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", `${details.item.quantity} ${details.item.unit || ''}`], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não']]} />{details.item.requiresSerial && <div className="table-wrap compact"><table><thead><tr><th>Serial</th></tr></thead><tbody>{(details.item.serials || []).map((serial) => <tr key={serial}><td>{serial}</td></tr>)}</tbody></table></div>}</>}
         {details?.type === 'balance' && <DetailGrid fields={[["Material", details.item.Material?.name], ["Categoria", details.item.Material?.category], ["Quantidade", `${details.item.quantity} ${details.item.Material?.unit || ''}`], ["Valor unitário", brl(details.item.Material?.unitCost)], ["Valor estimado", brl(Number(details.item.quantity || 0) * Number(details.item.Material?.unitCost || 0))]]} />}
-        {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", details.item.totalQuantity], ["Valor", brl(details.item.totalValue)], ["Atualização", details.item.updatedAt], ["Observação", details.item.requesterNotes]]} />}
+        {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", details.item.totalQuantity], ["Valor", brl(details.item.totalValue)], ["Atualização", dt(details.item.updatedAt)], ["Observação", details.item.requesterNotes]]} />}
       </DetailsModal>
+
       <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={sendRequest}>Enviar para aprovação</button></>}>
-        <div className="form-stack"><label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label><label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label><div className="subtoolbar"><h4>Itens</h4><button className="ghost" onClick={addRequestItem}>Adicionar</button></div>{requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecione o material</option>{materialsCatalog.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}</div>
+        <div className="form-stack">
+          <label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
+          <label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label>
+          <div className="subtoolbar"><h4>Itens</h4><button className="ghost" onClick={addRequestItem}>Adicionar</button></div>
+          {requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeRequestItem(i)}>Remover</button></div><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecione o material</option>{materialsCatalog.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" min="1" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}
+          {!requestForm.items.length && <div className="empty-state small">Adicione ao menos um item para solicitar material.</div>}
+        </div>
       </Modal>
     </div>
   );
