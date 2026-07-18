@@ -114,6 +114,20 @@ export default function Technicians() {
   }
 
   const totalValue = useMemo(() => technicians.reduce((s, t) => s + Number(t.totalCustodyValue ?? t.assetValue ?? 0), 0), [technicians]);
+  const cityOptions = useMemo(() => Array.from(new Set(warehouses.map((w) => String(w.city || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
+  function selectedServiceCities() { return textToCities(form.serviceCitiesText); }
+  function toggleServiceCity(city) {
+    const selected = new Set(selectedServiceCities());
+    if (selected.has(city)) selected.delete(city);
+    else selected.add(city);
+    setForm({ ...form, serviceCitiesText: Array.from(selected).join(', ') });
+  }
+  function selectDefaultWarehouse(value) {
+    const warehouse = warehouses.find((w) => String(w.id) === String(value));
+    const selected = new Set(selectedServiceCities());
+    if (warehouse?.city) selected.add(warehouse.city);
+    setForm({ ...form, defaultWarehouseId: value, serviceCitiesText: Array.from(selected).join(', ') });
+  }
 
   return (
     <div className="page-grid technicians-page">
@@ -172,9 +186,16 @@ export default function Technicians() {
             <label>Empresa<select value={form.companyId || ''} onChange={(e) => setForm({ ...form, companyId: e.target.value })}><option value="">Sem empresa</option>{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <label>Tipo<select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}><option value="interno">Interno</option><option value="terceirizado">Terceirizado</option></select></label>
             <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="ativo">Ativo</option><option value="inativo">Inativo</option><option value="bloqueado">Bloqueado</option></select></label>
-            <label>Estoque padrão<select value={form.defaultWarehouseId || ''} onChange={(e) => setForm({ ...form, defaultWarehouseId: e.target.value })}><option value="">Sem estoque padrão</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} {w.city ? `- ${w.city}` : ''}</option>)}</select></label>
+            <label>Estoque regional vinculado ao técnico<select value={form.defaultWarehouseId || ''} onChange={(e) => selectDefaultWarehouse(e.target.value)}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} {w.city ? `- ${w.city}` : ''}</option>)}</select><small>Ao selecionar o estoque, a cidade dele é marcada automaticamente abaixo.</small></label>
           </div>
-          <label>Cidades atendidas<input value={form.serviceCitiesText || ''} onChange={(e) => setForm({ ...form, serviceCitiesText: e.target.value })} placeholder="Ex.: Joinville, Araquari, São Francisco do Sul" /></label>
+          <div className="form-field full-span">
+            <span className="field-label">Cidades atendidas</span>
+            <div className="city-checkbox-list">
+              {cityOptions.map((city) => <label className="check-pill" key={city}><input type="checkbox" checked={selectedServiceCities().includes(city)} onChange={() => toggleServiceCity(city)} /><span>{city}</span></label>)}
+              {cityOptions.length === 0 && <small>Nenhuma cidade disponível. Cadastre a cidade no estoque regional.</small>}
+            </div>
+            <small>Sem campo manual: as cidades são carregadas automaticamente dos estoques regionais cadastrados.</small>
+          </div>
 
           <section className="panel-soft">
             <h4>Acesso do técnico</h4>

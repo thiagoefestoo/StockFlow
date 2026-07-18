@@ -21,6 +21,14 @@ const emptyUser = {
   approvalLimit: 0,
 };
 
+
+const JOB_OPTIONS = {
+  admin: ['Administrador', 'Gestor de operações', 'Coordenador administrativo'],
+  supervisor: ['Supervisor de estoque', 'Supervisor operacional', 'Coordenador de campo'],
+  estoquista: ['Estoquista', 'Almoxarife', 'Responsável de estoque regional'],
+  tecnico: ['Técnico', 'Técnico de campo', 'Instalador', 'Técnico de manutenção'],
+};
+
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function roleLabel(role) { return ({ admin: 'Administrador', supervisor: 'Supervisor', estoquista: 'Estoquista', tecnico: 'Técnico' }[role] || role); }
 function statusLabel(user) {
@@ -37,8 +45,8 @@ function statusTone(user) {
 function csvCell(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
 function exportUsers(users) {
   const rows = [
-    ['Nome', 'Email', 'Perfil', 'Status', 'Técnico vinculado', 'Telefone', 'Cargo', 'Último login', 'Criado em'],
-    ...users.map((u) => [u.name, u.email, roleLabel(u.role), statusLabel(u), u.Technician?.name || '', u.phone || '', u.jobTitle || '', dt(u.lastLoginAt), dt(u.createdAt)]),
+    ['Nome', 'Email', 'Perfil', 'Status', 'Telefone', 'Cargo', 'Último login', 'Criado em'],
+    ...users.map((u) => [u.name, u.email, roleLabel(u.role), statusLabel(u), u.phone || '', u.jobTitle || '', dt(u.lastLoginAt), dt(u.createdAt)]),
   ];
   const blob = new Blob([rows.map((r) => r.map(csvCell).join(';')).join('\n')], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
@@ -56,7 +64,6 @@ export default function Users() {
   const { user: loggedUser, isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState({});
-  const [technicians, setTechnicians] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [filters, setFilters] = useState({ q: '', role: '', status: '', includeDeleted: 'true' });
   const [form, setForm] = useState(emptyUser);
@@ -70,18 +77,16 @@ export default function Users() {
   const cityOptions = useMemo(() => {
     const values = new Set();
     warehouses.forEach((w) => { if (w.city) values.add(String(w.city).trim()); });
-    technicians.forEach((t) => (t.serviceCities || []).forEach((city) => { if (city) values.add(String(city).trim()); }));
     users.forEach((u) => (u.cityAccess || []).forEach((city) => { if (city) values.add(String(city).trim()); }));
     String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean).forEach((city) => values.add(city));
     return Array.from(values).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [warehouses, technicians, users, form.cityAccessText]);
+  }, [warehouses, users, form.cityAccessText]);
 
   async function load() {
     const params = new URLSearchParams(filters).toString();
-    const [u, t, w] = await Promise.all([api.get(`/users?${params}`), api.get('/technicians'), api.get('/warehouses').catch(() => ({ data: { data: [] } }))]);
+    const [u, w] = await Promise.all([api.get(`/users?${params}`), api.get('/warehouses').catch(() => ({ data: { data: [] } }))]);
     setUsers(u.data.data.users || []);
     setStats(u.data.data.stats || {});
-    setTechnicians(t.data.data || []);
     setWarehouses(w.data.data || []);
   }
 
@@ -109,12 +114,23 @@ export default function Users() {
     else selected.add(city);
     patchForm({ cityAccessText: Array.from(selected).join(', ') });
   }
-  function addManualCity(value) {
-    const city = String(value || '').trim();
-    if (!city) return;
-    const selected = new Set(selectedCitiesFromForm());
-    selected.add(city);
-    patchForm({ cityAccessText: Array.from(selected).join(', '), newCityText: '' });
+  function selectedWarehouseIds() {
+    return (form.warehouseIds || []).map((id) => Number(id)).filter(Boolean);
+  }
+  function toggleWarehouseAccess(warehouse) {
+    const selected = new Set(selectedWarehouseIds());
+    const id = Number(warehouse.id);
+    if (selected.has(id)) selected.delete(id);
+    else selected.add(id);
+
+    const selectedCities = new Set(selectedCitiesFromForm());
+    if (!selected.has(id) && warehouse.city) {
+      const stillUsed = warehouses.some((w) => selected.has(Number(w.id)) && w.city === warehouse.city);
+      if (!stillUsed) selectedCities.delete(warehouse.city);
+    }
+    if (selected.has(id) && warehouse.city) selectedCities.add(warehouse.city);
+
+    patchForm({ warehouseIds: Array.from(selected), cityAccessText: Array.from(selectedCities).join(', ') });
   }
   async function saveUser() {
     try {
@@ -123,7 +139,8 @@ export default function Users() {
         setMessage('A senha precisa ter pelo menos 6 caracteres.');
         return;
       }
-      const payload = { ...form, technicianId: form.role === 'tecnico' ? form.technicianId || null : null, warehouseIds: form.warehouseIds || [], cityAccess: String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean), approvalLimit: Number(form.approvalLimit || 0) };
+      const payload = { ...form, warehouseIds: form.warehouseIds || [], cityAccess: String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean), approvalLimit: Number(form.approvalLimit || 0) };
+      delete payload.technicianId;
       if (form.id) {
         if (!payload.password) delete payload.password;
         await api.put(`/users/${form.id}`, payload);
@@ -244,19 +261,18 @@ export default function Users() {
 
       <section className="panel">
         <div className="panel-title">
-          <div><h3>👥 Contas do sistema</h3><p>Somente administradores visualizam esta página. Contas de técnico podem ser vinculadas ao cadastro do técnico para abrir a caixa mobile.</p></div>
+          <div><h3>👥 Contas do sistema</h3><p>Somente administradores visualizam esta página. Contas técnicas criam ou sincronizam automaticamente o cadastro do técnico pelo nome/e-mail.</p></div>
           <div className="row-actions"><button className="ghost" onClick={() => openCreate('admin')}>Criar admin</button><button className="ghost" onClick={() => openCreate('supervisor')}>Criar supervisor</button><button onClick={() => openCreate('tecnico')}>Criar técnico</button></div>
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Usuário</th><th>Perfil</th><th>Status</th><th>Técnico vinculado</th><th>Último login</th><th>Criado em</th><th className="action-cell wide-actions">Opções</th></tr></thead>
+            <thead><tr><th>Usuário</th><th>Perfil</th><th>Status</th><th>Último login</th><th>Criado em</th><th className="action-cell wide-actions">Opções</th></tr></thead>
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className={u.deletedAt ? 'muted-row' : ''}>
                   <td><button className="link-button" onClick={() => openDetails(u)}>👤 {u.name}</button><small className="block">{u.email}</small></td>
                   <td><span className={`badge role-${u.role}`}>{roleLabel(u.role)}</span></td>
                   <td><span className={`badge ${statusTone(u)}`}>{statusLabel(u)}</span></td>
-                  <td>{u.Technician?.name || (u.role === 'tecnico' ? '⚠️ sem vínculo' : '-')}</td>
                   <td>{dt(u.lastLoginAt)}</td>
                   <td>{dt(u.createdAt)}</td>
                   <td>
@@ -273,7 +289,7 @@ export default function Users() {
                   </td>
                 </tr>
               ))}
-              {users.length === 0 && <tr><td colSpan="7"><div className="empty-state">Nenhum usuário encontrado.</div></td></tr>}
+              {users.length === 0 && <tr><td colSpan="6"><div className="empty-state">Nenhum usuário encontrado.</div></td></tr>}
             </tbody>
           </table>
         </div>
@@ -285,7 +301,7 @@ export default function Users() {
             <label>Nome completo<input value={form.name} onChange={(e) => patchForm({ name: e.target.value })} /></label>
             <label>E-mail de login<input type="email" value={form.email} onChange={(e) => patchForm({ email: e.target.value })} /></label>
             <label>Telefone<input value={form.phone || ''} onChange={(e) => patchForm({ phone: e.target.value })} /></label>
-            <label>Cargo/função<input value={form.jobTitle || ''} onChange={(e) => patchForm({ jobTitle: e.target.value })} placeholder="Ex.: Estoquista, Técnico de campo" /></label>
+            <label>Cargo/função<select value={form.jobTitle || ''} onChange={(e) => patchForm({ jobTitle: e.target.value })}><option value="">Selecione</option>{(JOB_OPTIONS[form.role] || JOB_OPTIONS.tecnico).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
             <label>Perfil
               <select value={form.role} onChange={(e) => patchForm({ role: e.target.value })}>
                 <option value="admin">Administrador</option>
@@ -300,26 +316,21 @@ export default function Users() {
                 <option value="inativo">Inativo</option>
               </select>
             </label>
-            {form.role === 'tecnico' && <label>Técnico vinculado
-              <select value={form.technicianId || ''} onChange={(e) => patchForm({ technicianId: e.target.value })}>
-                <option value="">Selecione o técnico</option>
-                {technicians.map((t) => <option key={t.id} value={t.id}>{t.name} {t.document ? `• ${t.document}` : ''}</option>)}
-              </select>
-            </label>}
-            {form.role === 'estoquista' && <label>Estoques autorizados
-              <select multiple value={form.warehouseIds || []} onChange={(e) => patchForm({ warehouseIds: Array.from(e.target.selectedOptions).map((option) => Number(option.value)) })}>
-                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}
-              </select>
-              <small>Use Ctrl para selecionar mais de um estoque.</small>
-            </label>}
-            {['estoquista', 'tecnico'].includes(form.role) && <div className="form-field full-span">
+            {['estoquista', 'tecnico', 'supervisor'].includes(form.role) && <div className="form-field full-span">
+              <span className="field-label">Estoques autorizados</span>
+              <div className="city-checkbox-list warehouse-checkbox-list">
+                {warehouses.map((w) => <label className="check-pill" key={w.id}><input type="checkbox" checked={selectedWarehouseIds().includes(Number(w.id))} onChange={() => toggleWarehouseAccess(w)} /><span>{w.name} • {w.city || w.region || w.code}</span></label>)}
+                {warehouses.length === 0 && <small>Nenhum estoque regional cadastrado. Crie o estoque antes de vincular ao usuário.</small>}
+              </div>
+              <small>O usuário verá e movimentará apenas os estoques marcados pelo administrador.</small>
+            </div>}
+            {['estoquista', 'tecnico', 'supervisor'].includes(form.role) && <div className="form-field full-span">
               <span className="field-label">Cidades autorizadas</span>
               <div className="city-checkbox-list">
                 {cityOptions.map((city) => <label className="check-pill" key={city}><input type="checkbox" checked={selectedCitiesFromForm().includes(city)} onChange={() => toggleCityAccess(city)} /><span>{city}</span></label>)}
-                {cityOptions.length === 0 && <small>Nenhuma cidade cadastrada em estoques ou técnicos. Adicione manualmente abaixo.</small>}
+                {cityOptions.length === 0 && <small>Nenhuma cidade disponível. Cadastre a cidade no estoque regional.</small>}
               </div>
-              <div className="input-with-button"><input value={form.newCityText || ''} onChange={(e) => patchForm({ newCityText: e.target.value })} placeholder="Adicionar cidade manualmente" /><button type="button" className="ghost" onClick={() => addManualCity(form.newCityText)}>Adicionar cidade</button></div>
-              <small>As cidades marcadas limitam o login a operações e visões autorizadas pela administração.</small>
+              <small>As cidades vêm dos estoques regionais e podem ser marcadas/desmarcadas pelo administrador.</small>
             </div>}
             {form.role === 'estoquista' && <label>Limite de aprovação do usuário
               <input type="number" value={form.approvalLimit || 0} onChange={(e) => patchForm({ approvalLimit: e.target.value })} />
@@ -331,7 +342,7 @@ export default function Users() {
           </div>
           <label className="form-check"><input className="form-check-input" type="checkbox" checked={!!form.mustChangePassword} onChange={(e) => patchForm({ mustChangePassword: e.target.checked })} /><span className="form-check-label">Solicitar troca de senha no próximo acesso</span></label>
           <label>Observações administrativas<textarea rows="3" value={form.notes || ''} onChange={(e) => patchForm({ notes: e.target.value })} placeholder="Motivo da criação, restrições, observações de auditoria..." /></label>
-          {form.role === 'tecnico' && <div className="viz-callout">📱 Ao logar no celular, este usuário técnico será direcionado para a própria caixa de materiais, com acesso reduzido ao que precisa operar.</div>}
+          {form.role === 'tecnico' && <div className="viz-callout">📱 Ao logar no celular, este usuário técnico será direcionado para a própria caixa. O vínculo técnico é criado automaticamente pelo e-mail/nome do usuário.</div>}
         </div>
       </Modal>
 
@@ -356,7 +367,7 @@ export default function Users() {
         {details.data?.user && <>
           <DetailGrid fields={[
             ['Nome', details.data.user.name], ['E-mail', details.data.user.email], ['Perfil', roleLabel(details.data.user.role)], ['Status', statusLabel(details.data.user)],
-            ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle], ['Técnico vinculado', details.data.user.Technician?.name || '-'], ['Documento técnico', details.data.user.Technician?.document || '-'],
+            ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle],
             ['Último login', dt(details.data.user.lastLoginAt)], ['Senha alterada em', dt(details.data.user.passwordChangedAt)], ['Criado em', dt(details.data.user.createdAt)], ['Atualizado em', dt(details.data.user.updatedAt)],
             ['Bloqueado em', dt(details.data.user.blockedAt)], ['Motivo bloqueio', details.data.user.blockedReason], ['Excluído em', dt(details.data.user.deletedAt)], ['Motivo exclusão', details.data.user.deletedReason],
             ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).length ? `${(details.data.user.cityAccess || []).length} cidade(s)` : '-'], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],

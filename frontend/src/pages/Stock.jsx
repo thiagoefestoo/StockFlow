@@ -44,6 +44,9 @@ const empty = {
   requiresReturnOnRemoval: false,
   autoLowStockAlert: true,
   notes: '',
+  initialWarehouseId: '',
+  initialQuantity: 0,
+  initialSerialsText: '',
 };
 
 const categories = [
@@ -68,6 +71,7 @@ function asNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
+function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((item) => item.trim()).filter(Boolean); }
 
 function MaterialField({ label, children, hint, className = '' }) {
   return (
@@ -82,6 +86,7 @@ function MaterialField({ label, children, hint, className = '' }) {
 export default function Stock() {
   const { isAdmin } = useAuth();
   const [materials, setMaterials] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [modal, setModal] = useState(false);
   const [details, setDetails] = useState(null);
   const [form, setForm] = useState(empty);
@@ -89,7 +94,12 @@ export default function Stock() {
   const [error, setError] = useState('');
 
   async function load() {
-    setMaterials((await api.get('/materials')).data.data);
+    const [materialsResponse, warehousesResponse] = await Promise.all([
+      api.get('/materials'),
+      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+    ]);
+    setMaterials(materialsResponse.data.data || []);
+    setWarehouses(warehousesResponse.data.data || []);
   }
 
   useEffect(() => { load(); }, []);
@@ -115,7 +125,8 @@ export default function Stock() {
   }, [form]);
 
   function openCreate() {
-    setForm(empty);
+    const firstWarehouse = warehouses.find((w) => w.status === 'ativo') || warehouses[0];
+    setForm({ ...empty, initialWarehouseId: firstWarehouse ? String(firstWarehouse.id) : '' });
     setError('');
     setModal(true);
   }
@@ -145,6 +156,10 @@ export default function Stock() {
       warrantyDays: Math.max(0, Math.round(asNumber(form.warrantyDays))),
       usefulLifeMonths: Math.max(0, Math.round(asNumber(form.usefulLifeMonths))),
       weightKg: Math.max(0, asNumber(form.weightKg)),
+      initialWarehouseId: form.initialWarehouseId || '',
+      initialQuantity: Math.max(0, asNumber(form.initialQuantity)),
+      initialSerialNumbers: splitSerials(form.initialSerialsText),
+      initialSerialsText: form.initialSerialsText || '',
     };
   }
 
@@ -153,6 +168,14 @@ export default function Stock() {
     const payload = normalizePayload();
     if (!payload.sku || !payload.name) {
       setError('Informe SKU e nome do material para continuar.');
+      return;
+    }
+    if (!payload.id && !payload.initialWarehouseId) {
+      setError('Selecione o estoque regional onde o material será cadastrado.');
+      return;
+    }
+    if (!payload.id && payload.requiresSerial && payload.initialQuantity > 0 && payload.initialSerialNumbers.length !== payload.initialQuantity) {
+      setError('A quantidade inicial precisa bater com a quantidade de seriais informados.');
       return;
     }
     setSaving(true);
@@ -196,7 +219,7 @@ export default function Stock() {
               {materials.map((m) => (
                 <tr key={m.id}>
                   <td>{m.sku}</td>
-                  <td><b>{m.name}</b><br /><small>{m.brand || m.defaultSupplier || m.storageLocation || 'Sem dados complementares'}</small></td>
+                  <td><b>{m.name}</b><br /><small>{m.storageLocation || m.category || 'Sem dados complementares'}</small></td>
                   <td>{m.category}</td>
                   <td>{m.requiresSerial ? 'Sim' : 'Não'}</td>
                   <td>{m.mainStock}</td>
@@ -241,24 +264,13 @@ export default function Stock() {
               <MaterialField label="Nome comercial"><input value={form.commercialName || ''} onChange={(e) => change('commercialName', e.target.value)} placeholder="Nome usado pelo fornecedor ou telecom" /></MaterialField>
               <MaterialField label="Categoria"><select value={form.category} onChange={(e) => change('category', e.target.value)}>{categories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></MaterialField>
               <MaterialField label="Unidade de medida"><select value={form.unit} onChange={(e) => change('unit', e.target.value)}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></MaterialField>
-              <MaterialField label="Quantidade por embalagem"><input type="number" min="0" step="0.001" value={form.packageQuantity} onChange={(e) => change('packageQuantity', e.target.value)} /></MaterialField>
+              <MaterialField label="Unidade"><input type="number" min="0" step="0.001" value={form.packageQuantity} onChange={(e) => change('packageQuantity', e.target.value)} /></MaterialField>
             </div>
           </section>
 
-          <section className="form-section span-2">
-            <div className="section-header"><span>2</span><div><h4>Fabricante, modelo e rastreio</h4><p>Informações úteis para auditoria, inventário, nota fiscal e conferência patrimonial.</p></div></div>
-            <div className="form-grid">
-              <MaterialField label="Marca"><input value={form.brand || ''} onChange={(e) => change('brand', e.target.value)} placeholder="FiberHome, Huawei, TP-Link..." /></MaterialField>
-              <MaterialField label="Modelo"><input value={form.model || ''} onChange={(e) => change('model', e.target.value)} placeholder="HG6145D2" /></MaterialField>
-              <MaterialField label="Fabricante"><input value={form.manufacturer || ''} onChange={(e) => change('manufacturer', e.target.value)} /></MaterialField>
-              <MaterialField label="Fornecedor padrão"><input value={form.defaultSupplier || ''} onChange={(e) => change('defaultSupplier', e.target.value)} /></MaterialField>
-              <MaterialField label="Código de barras / EAN"><input value={form.barcode || ''} onChange={(e) => change('barcode', e.target.value)} /></MaterialField>
-              <MaterialField label="Padrão do serial"><input value={form.serialPattern || ''} onChange={(e) => change('serialPattern', e.target.value)} placeholder="Ex.: FHTT########" /></MaterialField>
-            </div>
-          </section>
 
           <section className="form-section span-2">
-            <div className="section-header"><span>3</span><div><h4>Estoque, custo e reposição</h4><p>Base para alertas, BI financeiro, curva de reposição e previsão de compra.</p></div></div>
+            <div className="section-header"><span>2</span><div><h4>Estoque, custo e reposição</h4><p>Base para alertas, BI financeiro, curva de reposição e previsão de compra.</p></div></div>
             <div className="form-grid">
               <MaterialField label="Valor unitário"><input type="number" min="0" step="0.01" value={form.unitCost} onChange={(e) => change('unitCost', e.target.value)} /></MaterialField>
               <MaterialField label="Estoque mínimo"><input type="number" min="0" value={form.minStock} onChange={(e) => change('minStock', e.target.value)} /></MaterialField>
@@ -268,6 +280,15 @@ export default function Stock() {
               <MaterialField label="Criticidade"><select value={form.criticality} onChange={(e) => change('criticality', e.target.value)}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></MaterialField>
             </div>
           </section>
+
+          {!form.id && <section className="form-section span-2">
+            <div className="section-header"><span>3</span><div><h4>Cadastro direto no estoque regional</h4><p>Não existe mais entrada em estoque central. Todo material novo deve nascer vinculado a um estoque regional.</p></div></div>
+            <div className="form-grid">
+              <MaterialField label="Estoque regional obrigatório"><select value={form.initialWarehouseId || ''} onChange={(e) => change('initialWarehouseId', e.target.value)}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}</select></MaterialField>
+              {!form.requiresSerial && <MaterialField label="Quantidade inicial"><input type="number" min="0" step="0.001" value={form.initialQuantity || 0} onChange={(e) => change('initialQuantity', e.target.value)} /></MaterialField>}
+              {form.requiresSerial && <MaterialField label="Seriais iniciais" className="span-2" hint={`${splitSerials(form.initialSerialsText).length} serial(is) informado(s). Cada linha vira um equipamento em estoque.`}><textarea rows="5" value={form.initialSerialsText || ''} onChange={(e) => change('initialSerialsText', e.target.value)} placeholder="Um serial por linha" /></MaterialField>}
+            </div>
+          </section>}
 
           <section className="form-section span-2">
             <div className="section-header"><span>4</span><div><h4>Regras de movimentação</h4><p>Define como o item pode sair do estoque e aparecer na caixa do técnico.</p></div></div>
@@ -309,7 +330,6 @@ export default function Stock() {
         {details && <>
           <DetailGrid fields={[
             ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', details.requiresSerial],
-            ['Marca', details.brand], ['Modelo', details.model], ['Fabricante', details.manufacturer], ['Fornecedor padrão', details.defaultSupplier], ['Código de barras', details.barcode], ['Padrão serial', details.serialPattern],
             ['Estoque atual', details.mainStock], ['Estoque mínimo', details.minStock], ['Estoque máximo', details.maxStock], ['Ponto de pedido', details.reorderPoint], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
             ['Criticidade', details.criticality], ['Política', details.movementPolicy], ['Inspeção', details.qualityInspection], ['Pode ir para técnico', details.allowTechnicianTransfer], ['Pode ir para cliente', details.allowCustomerInstall], ['Exige retorno', details.requiresReturnOnRemoval],
             ['NCM', details.ncm], ['Código fiscal', details.fiscalCode], ['Código contábil', details.accountingCode], ['Centro de custo', details.costCenter], ['Prefixo patrimonial', details.patrimonyPrefix], ['Local', details.storageLocation], ['Prateleira', details.shelf],
