@@ -6,7 +6,9 @@ router.get('/overview', requireRoles('admin', 'supervisor', 'estoquista'), contr
 router.get('/assets', requireRoles('admin', 'supervisor', 'estoquista'), controller.assets);
 router.get('/serial-life/:serial', requireRoles('admin', 'supervisor', 'estoquista', 'tecnico'), controller.serialLife);
 router.get('/movements', requireRoles('admin', 'supervisor', 'estoquista'), controller.movements);
+router.get('/technician-losses', requireRoles('admin', 'supervisor', 'estoquista'), controller.losses);
 router.get('/technician-box/:id', requireRoles('admin', 'supervisor', 'estoquista'), controller.technicianBox);
 router.post('/technician-box/move-to-client', requireRoles('admin', 'supervisor', 'estoquista', 'tecnico'), controller.moveFromTechnicianToClient);
+router.post('/technician-box/loss', requireRoles('admin', 'supervisor', 'estoquista'), controller.registerTechnicianLoss);
 router.post('/technician-box/return-to-stock', requireRoles('admin', 'supervisor', 'estoquista'), controller.returnFromTechnician);
 module.exports = router;

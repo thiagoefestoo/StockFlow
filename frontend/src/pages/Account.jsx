@@ -9,7 +9,7 @@ function formatDate(value) {
 }
 
 function roleLabel(role) {
-  const labels = { admin: 'Administrador', supervisor: 'Supervisor', tecnico: 'Técnico' };
+  const labels = { admin: 'Administrador', supervisor: 'Supervisor', estoquista: 'Estoquista', tecnico: 'Técnico' };
   return labels[role] || role || '-';
 }
 
@@ -56,6 +56,10 @@ export default function Account() {
 
   async function saveProfile(event) {
     event.preventDefault();
+    if (['tecnico', 'estoquista'].includes(current.role)) {
+      setMessage({ type: 'danger', text: 'Técnico e estoquista só podem alterar a própria senha. Dados cadastrais devem ser alterados pelo administrador.' });
+      return;
+    }
     setSavingProfile(true);
     setMessage(null);
     try {
@@ -88,6 +92,7 @@ export default function Account() {
   }
 
   const current = freshUser || user || {};
+  const canEditProfile = !['tecnico', 'estoquista'].includes(current.role);
 
   return (
     <div className="page-grid account-page executive-page">
@@ -95,7 +100,7 @@ export default function Account() {
         <div>
           <span className="eyebrow">👤 Área do usuário</span>
           <h2>Minha conta e segurança</h2>
-          <p>Atualize seus dados, confira seu perfil de acesso, acompanhe informações da sessão e altere sua senha sem depender do administrador.</p>
+          <p>{canEditProfile ? 'Atualize seus dados, confira seu perfil de acesso, acompanhe informações da sessão e altere sua senha sem depender do administrador.' : 'Confira seus dados cadastrais e altere apenas sua senha. Dados de técnico e estoquista são mantidos pelo administrador.'}</p>
         </div>
         <div className="account-hero-card">
           <div className="account-avatar">{String(current.name || 'U').charAt(0).toUpperCase()}</div>
@@ -118,19 +123,19 @@ export default function Account() {
           <div className="panel-title">
             <div>
               <h3>📝 Informações da conta</h3>
-              <p>Essas informações aparecem no topo do sistema, auditoria e identificação operacional.</p>
+              <p>{canEditProfile ? 'Essas informações aparecem no topo do sistema, auditoria e identificação operacional.' : 'Dados cadastrais bloqueados para técnico e estoquista. Solicite alteração ao administrador.'}</p>
             </div>
             <span className="badge role-admin">{roleLabel(current.role)}</span>
           </div>
           <div className="form-grid">
-            <label><span>Nome</span><input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} required /></label>
-            <label><span>E-mail</span><input type="email" value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} required /></label>
-            <label><span>Telefone</span><input value={profile.phone} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} placeholder="(00) 00000-0000" /></label>
-            <label><span>Cargo/função</span><input value={profile.jobTitle} onChange={(event) => setProfile({ ...profile, jobTitle: event.target.value })} placeholder="Ex.: Supervisor operacional" /></label>
+            <label><span>Nome</span><input readOnly={!canEditProfile} value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} required /></label>
+            <label><span>E-mail</span><input readOnly={!canEditProfile} type="email" value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} required /></label>
+            <label><span>Telefone</span><input readOnly={!canEditProfile} value={profile.phone} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} placeholder="(00) 00000-0000" /></label>
+            <label><span>Cargo/função</span><input readOnly={!canEditProfile} value={profile.jobTitle} onChange={(event) => setProfile({ ...profile, jobTitle: event.target.value })} placeholder="Ex.: Supervisor operacional" /></label>
           </div>
-          <label><span>Observações da conta</span><textarea rows="4" value={profile.notes} onChange={(event) => setProfile({ ...profile, notes: event.target.value })} placeholder="Informações internas sobre contato, setor, turno ou observações administrativas." /></label>
+          <label><span>Observações da conta</span><textarea readOnly={!canEditProfile} rows="4" value={profile.notes} onChange={(event) => setProfile({ ...profile, notes: event.target.value })} placeholder="Informações internas sobre contato, setor, turno ou observações administrativas." /></label>
           <div className="row-actions">
-            <button type="submit" disabled={savingProfile}>{savingProfile ? 'Salvando...' : '💾 Salvar minhas informações'}</button>
+            {canEditProfile && <button type="submit" disabled={savingProfile}>{savingProfile ? 'Salvando...' : '💾 Salvar minhas informações'}</button>}
           </div>
         </form>
 

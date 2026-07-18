@@ -1224,3 +1224,92 @@ tr:hover td { background: #f8fbff; }
   .paper-logo { max-width: 260px; width: 100%; }
   .stamp-grid { grid-template-columns: 1fr; }
 }
+
+/* Ajustes de baixa de OS, notificações e uso mobile */
+.os-mobile-toggle { display: none; margin-bottom: 12px; }
+.technician-notifications { gap: 14px; }
+.notification-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.notification-strip article {
+  border: 1px solid var(--line, #d9e4f2);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(248, 251, 255, 0.96);
+  display: grid;
+  gap: 4px;
+}
+.notification-strip strong { font-size: 1.4rem; color: #1d4ed8; }
+.notification-strip span { color: var(--muted, #64748b); font-weight: 760; }
+.request-notice {
+  border: 1px solid var(--line, #d9e4f2);
+  background: #fff;
+  border-radius: 14px;
+  padding: 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  color: var(--text, #0f172a);
+}
+button.request-notice { cursor: pointer; }
+.request-notice span { color: var(--muted, #64748b); font-weight: 760; }
+input[readonly], textarea[readonly] {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: not-allowed;
+}
+@media (max-width: 640px) {
+  .os-mobile-toggle { display: inline-flex; width: 100%; justify-content: center; }
+  .os-mobile-fields:not(.open) { display: none; }
+  .notification-strip { grid-template-columns: 1fr; }
+}
+
+.loss-summary-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.loss-summary-card article {
+  border: 1px solid var(--line, #d9e4f2);
+  border-radius: 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.98));
+}
+
+.loss-summary-card small {
+  display: block;
+  color: var(--muted, #64748b);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 6px;
+}
+
+.loss-summary-card strong {
+  font-size: 1.15rem;
+  color: var(--text, #0f172a);
+}
+
+.loss-item-card {
+  border-left: 4px solid #ef4444;
+}
+
+.technician-loss-page .badge.pendente_assinatura {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.technician-loss-page .badge.assinado {
+  background: #dcfce7;
+  color: #166534;
+}
+
+@media (max-width: 760px) {
+  .loss-summary-card {
+    grid-template-columns: 1fr;
+  }
+}

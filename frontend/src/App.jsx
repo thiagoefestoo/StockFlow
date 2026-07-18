@@ -27,6 +27,8 @@ import Users from './pages/Users';
 import Account from './pages/Account';
 import Warehouses from './pages/Warehouses';
 import SerialLife from './pages/SerialLife';
+import TechnicianLosses from './pages/TechnicianLosses';
+import LossPrint from './pages/LossPrint';
 
 
 export default function App() {
@@ -44,6 +46,8 @@ export default function App() {
             <Route path="solicitacoes-material" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista', 'tecnico']}><MaterialRequests /></PrivateRoute>} />
             <Route path="aprovacoes" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><Approvals /></PrivateRoute>} />
             <Route path="transferencias/:id" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><TransferPrint /></PrivateRoute>} />
+            <Route path="perdas-tecnico" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><TechnicianLosses /></PrivateRoute>} />
+            <Route path="perdas-tecnico/:id" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><LossPrint /></PrivateRoute>} />
             <Route path="portal-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor', 'estoquista']}><TechnicianPortal /></PrivateRoute>} />
             <Route path="caixa-tecnico" element={<PrivateRoute roles={['tecnico', 'admin', 'supervisor', 'estoquista']}><TechnicianInbox /></PrivateRoute>} />
             <Route path="central-caixa-tecnico" element={<PrivateRoute roles={['admin', 'supervisor', 'estoquista']}><TechnicianBoxControl /></PrivateRoute>} />

@@ -7,7 +7,7 @@ import SuperInfraLogo from './SuperInfraLogo';
 
 const adminGroups = [
   { title: 'Comando', links: [['/', 'OP', 'Cockpit'], ['/aprovacoes', 'AP', 'Aprovações'], ['/dashboard', 'DB', 'Dashboard legado']] },
-  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa']] },
+  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/perdas-tecnico', 'PD', 'Perdas/descontos'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa']] },
   { title: 'Cadastros e estoque', links: [['/estoque', 'MT', 'Materiais/Estoque'], ['/patrimonio', 'PA', 'Patrimônio'], ['/vida-serial', 'VS', 'Vida do serial'], ['/tecnicos', 'TE', 'Técnicos']] },
   { title: 'Administração', adminOnly: true, links: [['/usuarios', 'US', 'Usuários e permissões']] },
   { title: 'Minha conta', links: [['/minha-conta', 'CO', 'Configurações da conta']] },
@@ -84,6 +84,7 @@ function titleFor(path) {
   if (path.includes('/vida-serial')) return 'Vida útil do serial';
   if (path.includes('/entrada')) return 'Entrada quinzenal de material';
   if (path.includes('/transferencias')) return 'Transferências e guias de assinatura';
+  if (path.includes('/perdas-tecnico')) return 'Perdas e descontos do técnico';
   if (path.includes('/portal-tecnico')) return 'Portal mobile do técnico';
   if (path.includes('/bi/financeiro')) return 'BI financeiro';
   if (path.includes('/bi/tecnicos')) return 'BI por técnico';

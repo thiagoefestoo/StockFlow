@@ -20,6 +20,19 @@ exports.create = asyncHandler(async (req, res) => {
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
   if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome e CPF do cliente são obrigatórios.');
+  if (!Array.isArray(materials) || !materials.length) return fail(res, 400, 'Adicione ao menos um material usado na OS.');
+
+  let totalSerials = 0;
+  for (const item of materials) {
+    const material = await Material.findByPk(item.materialId);
+    if (!material) return fail(res, 404, 'Material não encontrado.');
+    const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
+    if (material.requiresSerial) {
+      if (serials.length > 1) return fail(res, 400, 'Selecione apenas 1 serial por OS.');
+      totalSerials += serials.length;
+    }
+  }
+  if (totalSerials !== 1) return fail(res, 400, 'Selecione exatamente 1 serial que será transferido para o cliente.');
 
   const order = await sequelize.transaction(async (transaction) => {
     const record = await ServiceOrder.create({

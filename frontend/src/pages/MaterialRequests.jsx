@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -75,7 +76,7 @@ export default function MaterialRequests() {
   }
 
   function addItem() {
-    setForm({ ...form, items: [...form.items, { materialId: materials[0]?.id || '', quantity: 1, notes: '', serialNumbersText: '' }] });
+    setForm({ ...form, items: [...form.items, { materialId: '', quantity: 1, notes: '', serialNumbersText: '' }] });
   }
   function updateItem(index, patch) {
     const items = [...form.items];
@@ -106,6 +107,19 @@ export default function MaterialRequests() {
 
   async function save(e) {
     e.preventDefault();
+    const invalidItem = form.items.find((item) => !item.materialId || Number(item.quantity || 0) <= 0);
+    if (!form.items.length || invalidItem) {
+      setMessage('Adicione materiais, selecione o item na lista e informe uma quantidade válida.');
+      return;
+    }
+    if (!isTechnician && form.requestType === 'reposicao_carga' && !form.technicianId) {
+      setMessage('Selecione o técnico antes de enviar a solicitação.');
+      return;
+    }
+    if (form.requestType === 'recarga_estoque' && !form.warehouseId) {
+      setMessage('Selecione o estoque que receberá a recarga.');
+      return;
+    }
     try {
       await api.post('/material-requests', requestPayload());
       setMessage(form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação do admin.' : 'Solicitação enviada para aprovação.');
@@ -191,7 +205,7 @@ export default function MaterialRequests() {
       </section>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{Number(r.totalQuantity || 0)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" onClick={() => openDecision('reject', r)}>Reprovar</button></>}{canDeliver && r.status === 'aprovado' && <button onClick={() => openDecision('deliver', r)}>{r.requestType === 'recarga_estoque' ? 'Receber recarga' : 'Entregar carga'}</button>}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{Number(r.totalQuantity || 0)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" onClick={() => openDecision('reject', r)}>Reprovar</button></>}{canDeliver && r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : <Link className="ghost" to={`/transferencias?requestId=${r.id}`}>Entregar carga</Link>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
       </section>
 
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar para aprovação</button></>}>
@@ -208,13 +222,13 @@ export default function MaterialRequests() {
           <div className="subtoolbar"><h4>Itens solicitados</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
           {form.items.map((item, i) => {
             const material = selectedMaterial(item.materialId);
-            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="0.001" min="0" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div>{form.requestType === 'recarga_estoque' && material?.requiresSerial && <label>Seriais da recarga, se já souber<textarea rows="3" value={item.serialNumbersText || ''} onChange={(e) => updateItem(i, { serialNumbersText: e.target.value })} placeholder="Um serial por linha. Também pode preencher no recebimento após aprovação." /></label>}<label>Observação<input value={item.notes || ''} onChange={(e) => updateItem(i, { notes: e.target.value })} /></label><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
+            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecione o material</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="0.001" min="0" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div>{form.requestType === 'recarga_estoque' && material?.requiresSerial && <label>Seriais da recarga, se já souber<textarea rows="3" value={item.serialNumbersText || ''} onChange={(e) => updateItem(i, { serialNumbersText: e.target.value })} placeholder="Um serial por linha. Também pode preencher no recebimento após aprovação." /></label>}<label>Observação<input value={item.notes || ''} onChange={(e) => updateItem(i, { notes: e.target.value })} /></label><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
           })}
           {form.items.length === 0 && <div className="empty-state">Adicione materiais para enviar a solicitação.</div>}
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{canDeliver && details?.status === 'aprovado' && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>{details?.requestType === 'recarga_estoque' ? 'Receber recarga' : 'Entregar carga'}</button>}</>}>
+      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{canDeliver && details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : <Link className="ghost" to={`/transferencias?requestId=${details.id}`}>Entregar carga</Link>)}</>}>
         {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", details.totalQuantity], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {item.quantity} • {brl(item.totalCost)} • {item.notes || 'sem observação'}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
       </DetailsModal>
 

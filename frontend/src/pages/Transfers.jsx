@@ -20,8 +20,9 @@ export default function Transfers() {
   const [modal, setModal] = useState(false);
   const [details, setDetails] = useState(null);
   const [edit, setEdit] = useState({ open: false, item: null, form: {} });
-  const [form, setForm] = useState({ warehouseId: '', technicianId: '', notes: '', items: [] });
+  const [form, setForm] = useState({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
   const [assetSearch, setAssetSearch] = useState('');
+  const [requestPrefilled, setRequestPrefilled] = useState(false);
 
   async function load() {
     const [t, tec, wh] = await Promise.all([
@@ -56,6 +57,37 @@ export default function Transfers() {
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
+    const requestId = new URLSearchParams(window.location.search).get('requestId');
+    if (!requestId || requestPrefilled || !warehouses.length || !technicians.length) return;
+    async function prefillFromRequest() {
+      try {
+        const { data } = await api.get(`/material-requests/${requestId}`);
+        const request = data.data;
+        if (!request || request.status !== 'aprovado' || request.requestType === 'recarga_estoque') return;
+        const warehouseId = request.warehouseId || request.Technician?.defaultWarehouseId || warehouses[0]?.id || '';
+        setForm({
+          warehouseId: warehouseId ? String(warehouseId) : '',
+          technicianId: request.technicianId ? String(request.technicianId) : '',
+          materialRequestId: request.id,
+          notes: `Entrega pela solicitação ${request.requestNumber}.`,
+          items: (request.MaterialRequestItems || []).map((item) => ({
+            materialId: item.materialId ? String(item.materialId) : '',
+            quantity: item.approvedQuantity || item.quantity || 1,
+            serialNumbers: [],
+          })),
+        });
+        setAssetSearch('');
+        setModal(true);
+        setRequestPrefilled(true);
+      } catch (error) {
+        window.alert(error.response?.data?.message || 'Não foi possível carregar a solicitação aprovada.');
+        setRequestPrefilled(true);
+      }
+    }
+    prefillFromRequest();
+  }, [warehouses, technicians, requestPrefilled]);
+
+  useEffect(() => {
     if (!modal) return;
     if (form.warehouseId) return;
     const firstActive = warehouses.find((warehouse) => warehouse.status === 'ativo') || warehouses[0];
@@ -84,7 +116,7 @@ export default function Transfers() {
 
   function openNewTransfer() {
     const firstActive = warehouses.find((warehouse) => warehouse.status === 'ativo') || warehouses[0];
-    setForm({ warehouseId: firstActive ? String(firstActive.id) : '', technicianId: '', notes: '', items: [] });
+    setForm({ warehouseId: firstActive ? String(firstActive.id) : '', technicianId: '', notes: '', materialRequestId: '', items: [] });
     setAssetSearch('');
     setModal(true);
   }
@@ -98,7 +130,7 @@ export default function Transfers() {
       window.alert('Este estoque não possui materiais disponíveis para transferência.');
       return;
     }
-    setForm({ ...form, items: [...form.items, { materialId: materialOptions[0]?.id || '', quantity: 1, serialNumbers: [] }] });
+    setForm({ ...form, items: [...form.items, { materialId: '', quantity: 1, serialNumbers: [] }] });
   }
 
   function removeItem(i) {
@@ -156,7 +188,7 @@ export default function Transfers() {
     };
     await api.post('/transfers', payload);
     setModal(false);
-    setForm({ warehouseId: '', technicianId: '', notes: '', items: [] });
+    setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
     setAssetSearch('');
     setWarehouseMaterials([]);
     setAvailableAssets([]);
@@ -195,7 +227,7 @@ export default function Transfers() {
 
       <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Técnico</th><th>Estoque origem</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{transfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td>{tr.Technician?.name}</td><td>{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{tr.totalQuantity}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div></section>
 
-      <Modal open={modal} title="📦 Nova transferência para técnico" onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Gerar guia e enviar para caixa</button></>}>
+      <Modal open={modal} title={form.materialRequestId ? '📦 Entregar carga solicitada ao técnico' : '📦 Nova transferência para técnico'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Gerar guia e enviar para caixa</button></>}>
         <div className="transfer-wizard">
           <section className="transfer-summary-card">
             <div><small>Estoque de origem</small><strong>{selectedWarehouse?.name || 'Selecione um estoque'}</strong><span>{selectedWarehouse ? `${selectedWarehouse.city || '-'} • ${selectedWarehouse.code || 'sem código'}` : 'Materiais serão filtrados pelo estoque'}</span></div>
@@ -224,7 +256,7 @@ export default function Transfers() {
               <div className="item-card transfer-item-card" key={i}>
                 <div className="item-head"><strong>📦 Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
                 <div className="form-grid">
-                  <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
+                  <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
                   {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" max={Number(material?.mainStock || 0)} step="0.001" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível neste estoque: {qtyLabel(material?.mainStock, material?.unit)}</small></label>}
                 </div>
                 {material?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><div><strong>🏷️ Seriais disponíveis no estoque selecionado</strong><span>{serialAssets.length} disponível(is) • {item.serialNumbers?.length || 0} selecionado(s)</span></div><input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Buscar serial, MAC, marca..." /></div><div className="serial-grid">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleSerial(i, asset.serialNumber)}><b>{checked ? '✅' : '🏷️'} {asset.serialNumber}</b><span>{asset.Material?.name} • {asset.Warehouse?.name || selectedWarehouse?.name || 'estoque'} • {asset.brand || '-'} {asset.model || ''}</span><small>{asset.mac || 'sem MAC'} • {brl(asset.acquisitionCost)}</small></button>; })}</div>{serialAssets.length === 0 && <div className="empty-state">Nenhum serial disponível para esse material no estoque selecionado.</div>}</div>}

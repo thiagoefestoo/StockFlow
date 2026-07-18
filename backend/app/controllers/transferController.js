@@ -1,5 +1,6 @@
 const sequelize = require('../../config/db');
-const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse } = require('../models');
+const { Op } = require('sequelize');
+const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
@@ -14,7 +15,7 @@ function nextNumber() {
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const where = stockWhereForUser(req.user, req.query.warehouseId);
+  const where = { ...stockWhereForUser(req.user, req.query.warehouseId), transferNumber: { [Op.notILike]: 'PERDA-%' } };
   const transfers = await Transfer.findAll({ where, include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }], order: [['deliveredAt', 'DESC']], limit: 300 });
   return ok(res, transfers);
 });
@@ -26,7 +27,7 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { technicianId, deliveredAt, notes, warehouseId, items = [] } = req.body;
+  const { technicianId, deliveredAt, notes, warehouseId, materialRequestId, items = [] } = req.body;
   if (!technicianId || !items.length) return fail(res, 400, 'Técnico e itens são obrigatórios.');
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
@@ -38,6 +39,16 @@ exports.create = asyncHandler(async (req, res) => {
   const sourceWarehouse = await Warehouse.findByPk(sourceWarehouseId);
   if (!sourceWarehouse) return fail(res, 404, 'Estoque de origem não encontrado.');
   if (sourceWarehouse.status && sourceWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de origem precisa estar ativo para transferir material.');
+
+  let linkedRequest = null;
+  if (materialRequestId) {
+    linkedRequest = await MaterialRequest.findByPk(materialRequestId, { include: [{ model: MaterialRequestItem, include: [Material] }] });
+    if (!linkedRequest) return fail(res, 404, 'Solicitação de material não encontrada.');
+    if (linkedRequest.status !== 'aprovado') return fail(res, 400, 'A solicitação precisa estar aprovada para gerar entrega.');
+    if (linkedRequest.requestType === 'recarga_estoque') return fail(res, 400, 'Recarga de estoque deve ser recebida pela tela de solicitações.');
+    if (Number(linkedRequest.technicianId) !== Number(technicianId)) return fail(res, 400, 'O técnico selecionado não corresponde à solicitação.');
+    if (linkedRequest.warehouseId && Number(linkedRequest.warehouseId) !== Number(sourceWarehouseId)) return fail(res, 400, 'O estoque de origem não corresponde ao estoque da solicitação.');
+  }
 
   const transfer = await sequelize.transaction(async (transaction) => {
     const record = await Transfer.create({ transferNumber: nextNumber(), technicianId, deliveredAt: deliveredAt || new Date(), notes, createdById: req.user.id, warehouseId: sourceWarehouseId }, { transaction });
@@ -77,6 +88,27 @@ exports.create = asyncHandler(async (req, res) => {
     record.totalQuantity = qty(totalQuantity);
     record.totalValue = money(totalValue);
     await record.save({ transaction });
+
+    if (linkedRequest) {
+      const beforeRequest = linkedRequest.toJSON();
+      linkedRequest.status = 'entregue';
+      linkedRequest.deliveredAt = new Date();
+      linkedRequest.deliveredById = req.user.id;
+      linkedRequest.transferId = record.id;
+      linkedRequest.logisticsNotes = notes || linkedRequest.logisticsNotes;
+      await linkedRequest.save({ transaction });
+      await Notification.create({
+        role: 'tecnico',
+        type: 'estoque',
+        severity: 'success',
+        title: `Carga recebida ${linkedRequest.requestNumber}`,
+        message: `Sua solicitação foi entregue. Confira sua caixa e assine a guia ${record.transferNumber}.`,
+        route: '/caixa-tecnico',
+        metadata: { requestId: linkedRequest.id, transferId: record.id },
+      }, { transaction });
+      await writeAudit({ req, action: 'deliver_from_request', entity: 'MaterialRequest', entityId: linkedRequest.id, message: `Solicitação ${linkedRequest.requestNumber} entregue pela guia ${record.transferNumber}.`, beforeData: beforeRequest, afterData: linkedRequest.toJSON(), transaction });
+    }
+
     await writeAudit({
       req,
       action: 'create',
