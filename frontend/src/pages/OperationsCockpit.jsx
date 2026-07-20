@@ -4,6 +4,7 @@ import api from '../services/api';
 import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -68,7 +69,7 @@ export default function OperationsCockpit() {
             {(data?.recentRequests || []).map((r) => (
               <div className="event compact" key={r.id}>
                 <strong>{r.requestNumber} • {r.Technician?.name}</strong>
-                <span>{r.status} · {Number(r.totalQuantity || 0)} item(ns) · {brl(r.totalValue)}</span>
+                <span>{r.status} · {formatQuantity(r.totalQuantity)} item(ns) · {brl(r.totalValue)}</span>
                 <small>{dt(r.createdAt)}</small>
               </div>
             ))}
@@ -82,7 +83,7 @@ export default function OperationsCockpit() {
       </section>
 
       <DetailsModal open={!!details} title="Detalhes da movimentação" onClose={() => setDetails(null)}>
-        {details && <DetailGrid fields={[["Data", details.movementAt], ["Tipo", details.type], ["Material", details.Material?.name], ["Origem", details.fromTechnician?.name || details.fromOwnerType], ["Destino", details.toTechnician?.name || details.toOwnerType], ["Referência", details.reference], ["Serial", details.serialNumber], ["Quantidade", details.quantity], ["Observação", details.notes]]} />}
+        {details && <DetailGrid fields={[["Data", details.movementAt], ["Tipo", details.type], ["Material", details.Material?.name], ["Origem", details.fromTechnician?.name || details.fromOwnerType], ["Destino", details.toTechnician?.name || details.toOwnerType], ["Referência", details.reference], ["Serial", details.serialNumber], ["Quantidade", formatQuantity(details.quantity)], ["Observação", details.notes]]} />}
       </DetailsModal>
     </div>
   );

@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 const osEmpty = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', materials: [] };
 const reqEmpty = { priority: 'media', requesterNotes: '', items: [] };
@@ -221,7 +222,7 @@ export default function TechnicianInbox() {
           <button type="button" className="ghost" onClick={() => showSection('caixa')}>Ver minha carga</button>
           <button type="button" className="ghost" onClick={() => setRequestModal(true)}>Solicitar material</button>
         </div>
-        {requests.slice(0, 4).map((r) => <button type="button" className="request-notice" key={r.id} onClick={() => setDetails({ type: 'request', item: r })}><b>{r.requestNumber}</b><span>{statusLabel(r.status)} • {Number(r.totalQuantity || 0)} item(ns) • {dt(r.updatedAt)}</span></button>)}
+        {requests.slice(0, 4).map((r) => <button type="button" className="request-notice" key={r.id} onClick={() => setDetails({ type: 'request', item: r })}><b>{r.requestNumber}</b><span>{statusLabel(r.status)} • {formatQuantity(r.totalQuantity)} item(ns) • {dt(r.updatedAt)}</span></button>)}
         {!requests.length && <div className="empty-state small">Nenhuma solicitação registrada para sua caixa.</div>}
       </section>
 
@@ -256,12 +257,12 @@ export default function TechnicianInbox() {
           <div className="technician-card-list">
             {flatBoxRows.map((row) => <button type="button" className="tech-stock-card" key={`${row.group}-${row.materialId}`} onClick={() => setDetails({ type: 'group', item: row })}>
               <span><b>{row.material}</b><small>{row.group} • {row.requiresSerial ? 'Serializado' : 'Consumível'}</small></span>
-              <strong>{row.quantity} {row.unit || ''}</strong>
+              <strong>{formatQuantity(row.quantity, row.unit)}</strong>
             </button>)}
             {!flatBoxRows.length && <div className="empty-state">Nenhum material em sua caixa.</div>}
           </div>
           <div className="category-box-list desktop-box-list">
-            {Object.entries(boxGroups).map(([group, rows]) => <div className="panel-soft" key={group}><h4>{group}</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Opções</th></tr></thead><tbody>{rows.map((row) => <tr key={`${group}-${row.materialId}`}><td><strong>{row.material}</strong><br /><small>{row.requiresSerial ? 'Serializado' : 'Consumível'}</small></td><td>{row.quantity} {row.unit || ''}</td><td>{brl(row.value)}</td><td><button className="info" onClick={() => setDetails({ type: 'group', item: row })}>Detalhes</button></td></tr>)}</tbody></table></div></div>)}
+            {Object.entries(boxGroups).map(([group, rows]) => <div className="panel-soft" key={group}><h4>{group}</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Opções</th></tr></thead><tbody>{rows.map((row) => <tr key={`${group}-${row.materialId}`}><td><strong>{row.material}</strong><br /><small>{row.requiresSerial ? 'Serializado' : 'Consumível'}</small></td><td>{formatQuantity(row.quantity, row.unit)}</td><td>{brl(row.value)}</td><td><button className="info" onClick={() => setDetails({ type: 'group', item: row })}>Detalhes</button></td></tr>)}</tbody></table></div></div>)}
           </div>
         </article>
       </section>
@@ -272,18 +273,18 @@ export default function TechnicianInbox() {
           {recentRequests.map((r) => <button key={r.id} type="button" className="mobile-request-card" onClick={() => setDetails({ type: 'request', item: r })}>
             <span><b>{r.requestNumber}</b><small>{dt(r.updatedAt)}</small></span>
             <em className={`badge ${r.status}`}>{statusLabel(r.status)}</em>
-            <strong>{r.totalQuantity || 0} item(ns)</strong>
+            <strong>{formatQuantity(r.totalQuantity)} item(ns)</strong>
           </button>)}
         </div>
-        <div className="table-wrap desktop-request-table"><table><thead><tr><th>Número</th><th>Status</th><th>Itens</th><th>Valor</th><th>Atualização</th><th>Opções</th></tr></thead><tbody>{recentRequests.map((r) => <tr key={r.id}><td>{r.requestNumber}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.totalQuantity}</td><td>{brl(r.totalValue)}</td><td>{dt(r.updatedAt)}</td><td><button className="info" onClick={() => setDetails({ type: 'request', item: r })}>Detalhes</button></td></tr>)}</tbody></table></div>
+        <div className="table-wrap desktop-request-table"><table><thead><tr><th>Número</th><th>Status</th><th>Itens</th><th>Valor</th><th>Atualização</th><th>Opções</th></tr></thead><tbody>{recentRequests.map((r) => <tr key={r.id}><td>{r.requestNumber}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.updatedAt)}</td><td><button className="info" onClick={() => setDetails({ type: 'request', item: r })}>Detalhes</button></td></tr>)}</tbody></table></div>
         {!recentRequests.length && <div className="empty-state small">Nenhuma solicitação registrada.</div>}
       </section>
 
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["Categoria", details.item.Material?.category], ["Status", details.item.status], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Último movimento", details.item.lastMovementAt]]} />}
-        {details?.type === 'group' && <><DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", `${details.item.quantity} ${details.item.unit || ''}`], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não']]} />{details.item.requiresSerial && <div className="table-wrap compact"><table><thead><tr><th>Serial</th></tr></thead><tbody>{(details.item.serials || []).map((serial) => <tr key={serial}><td>{serial}</td></tr>)}</tbody></table></div>}</>}
-        {details?.type === 'balance' && <DetailGrid fields={[["Material", details.item.Material?.name], ["Categoria", details.item.Material?.category], ["Quantidade", `${details.item.quantity} ${details.item.Material?.unit || ''}`], ["Valor unitário", brl(details.item.Material?.unitCost)], ["Valor estimado", brl(Number(details.item.quantity || 0) * Number(details.item.Material?.unitCost || 0))]]} />}
-        {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", details.item.totalQuantity], ["Valor", brl(details.item.totalValue)], ["Atualização", dt(details.item.updatedAt)], ["Observação", details.item.requesterNotes]]} />}
+        {details?.type === 'group' && <><DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity, details.item.unit)], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não']]} />{details.item.requiresSerial && <div className="table-wrap compact"><table><thead><tr><th>Serial</th></tr></thead><tbody>{(details.item.serials || []).map((serial) => <tr key={serial}><td>{serial}</td></tr>)}</tbody></table></div>}</>}
+        {details?.type === 'balance' && <DetailGrid fields={[["Material", details.item.Material?.name], ["Categoria", details.item.Material?.category], ["Quantidade", formatQuantity(details.item.quantity, details.item.Material?.unit)], ["Valor unitário", brl(details.item.Material?.unitCost)], ["Valor estimado", brl(Number(details.item.quantity || 0) * Number(details.item.Material?.unitCost || 0))]]} />}
+        {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", formatQuantity(details.item.totalQuantity)], ["Valor", brl(details.item.totalValue)], ["Atualização", dt(details.item.updatedAt)], ["Observação", details.item.requesterNotes]]} />}
       </DetailsModal>
 
       <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={sendRequest}>Enviar para aprovação</button></>}>

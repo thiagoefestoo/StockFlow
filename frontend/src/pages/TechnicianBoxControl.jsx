@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -176,7 +177,7 @@ export default function TechnicianBoxControl() {
             {(box?.groupedMaterials || []).map((row) => (
               <button type="button" className="event box-group-row" key={row.materialId} onClick={() => setDetails({ type: 'group', item: row })}>
                 <strong>{row.requiresSerial ? '🏷️' : '📦'} {row.material}</strong>
-                <span>{row.quantity} {row.unit || 'un'} • {brl(row.value)} • {row.category}</span>
+                <span>{formatQuantity(row.quantity, row.unit || 'un')} • {brl(row.value)} • {row.category}</span>
                 <small>{row.requiresSerial ? `${row.serials?.length || 0} serial(is)` : 'consumível sem serial'}</small>
               </button>
             ))}
@@ -256,9 +257,9 @@ export default function TechnicianBoxControl() {
 
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["MAC", details.item.mac], ["Marca/modelo", `${details.item.brand || '-'} ${details.item.model || ''}`], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Dias", details.item.custodyDays], ["Status", details.item.status]]} />}
-        {details?.type === 'group' && <DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", `${details.item.quantity} ${details.item.unit || ''}`], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não'], ["Seriais", details.item.serials?.join(', ') || '-']]} />}
-        {details?.type === 'movement' && <DetailGrid fields={[["Data", details.item.movementAt], ["Tipo", details.item.type], ["Material", details.item.Material?.name], ["Serial", details.item.serialNumber], ["Quantidade", details.item.quantity], ["Origem", details.item.fromOwnerType], ["Destino", details.item.toOwnerType], ["Referência", details.item.reference], ["Usuário", details.item.createdBy?.name], ["Notas", details.item.notes]]} />}
-        {details?.type === 'order' && <><DetailGrid fields={[["OS", details.item.osNumber], ["Cliente", details.item.customerName], ["CPF/CNPJ", details.item.customerCpf], ["Endereço", details.item.customerAddress], ["Cidade", details.item.city], ["Tipo", details.item.serviceType], ["Status", details.item.status], ["Concluída em", details.item.completedAt], ["Notas", details.item.notes]]} /><DetailList title="Materiais baixados" items={details.item.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {item.quantity} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details?.type === 'group' && <DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity, details.item.unit)], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não'], ["Seriais", details.item.serials?.join(', ') || '-']]} />}
+        {details?.type === 'movement' && <DetailGrid fields={[["Data", details.item.movementAt], ["Tipo", details.item.type], ["Material", details.item.Material?.name], ["Serial", details.item.serialNumber], ["Quantidade", formatQuantity(details.item.quantity)], ["Origem", details.item.fromOwnerType], ["Destino", details.item.toOwnerType], ["Referência", details.item.reference], ["Usuário", details.item.createdBy?.name], ["Notas", details.item.notes]]} />}
+        {details?.type === 'order' && <><DetailGrid fields={[["OS", details.item.osNumber], ["Cliente", details.item.customerName], ["CPF/CNPJ", details.item.customerCpf], ["Endereço", details.item.customerAddress], ["Cidade", details.item.city], ["Tipo", details.item.serviceType], ["Status", details.item.status], ["Concluída em", details.item.completedAt], ["Notas", details.item.notes]]} /><DetailList title="Materiais baixados" items={details.item.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );
@@ -278,7 +279,7 @@ function MovementItem({ item, index, materials, assetsByMaterial, balanceFor, up
             <option value="">Selecione o material</option>{materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
           </select>
         </label>
-        {!material?.requiresSerial && <label>Quantidade disponível: {Number(balance?.quantity || 0)} {material?.unit || ''}<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
+        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity, material?.unit)}<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
       </div>
       {material?.requiresSerial && (
         <div className="serial-picker compact-serial-picker">

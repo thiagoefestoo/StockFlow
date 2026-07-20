@@ -4,6 +4,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import { useAuth } from '../contexts/AuthContext';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 const empty = {
   sku: '',
@@ -217,7 +218,7 @@ export default function Stock() {
                   <td><b>{m.name}</b><br /><small>{m.storageLocation || m.category || 'Sem dados complementares'}</small></td>
                   <td>{m.category}</td>
                   <td>{m.requiresSerial ? 'Sim' : 'Não'}</td>
-                  <td>{m.mainStock}</td>
+                  <td>{formatQuantity(m.mainStock, m.unit)}</td>
                   <td>{m.minStock}</td>
                   <td>{brl(m.unitCost)}</td>
                   <td><span className={`badge ${m.movementPolicy || 'livre'}`}>{m.movementPolicy || 'livre'}</span></td>
@@ -325,7 +326,7 @@ export default function Stock() {
         {details && <>
           <DetailGrid fields={[
             ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', details.requiresSerial],
-            ['Estoque atual', details.mainStock], ['Estoque mínimo', details.minStock], ['Estoque máximo', details.maxStock], ['Ponto de pedido', details.reorderPoint], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
+            ['Estoque atual', formatQuantity(details.mainStock, details.unit)], ['Estoque mínimo', formatQuantity(details.minStock, details.unit)], ['Estoque máximo', formatQuantity(details.maxStock, details.unit)], ['Ponto de pedido', formatQuantity(details.reorderPoint, details.unit)], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
             ['Criticidade', details.criticality], ['Política', details.movementPolicy], ['Inspeção', details.qualityInspection], ['Pode ir para técnico', details.allowTechnicianTransfer], ['Pode ir para cliente', details.allowCustomerInstall], ['Exige retorno', details.requiresReturnOnRemoval],
             ['NCM', details.ncm], ['Código fiscal', details.fiscalCode], ['Código contábil', details.accountingCode], ['Centro de custo', details.costCenter], ['Prefixo patrimonial', details.patrimonyPrefix], ['Local', details.storageLocation], ['Prateleira', details.shelf],
             ['Garantia', `${details.warrantyDays || 0} dia(s)`], ['Vida útil', `${details.usefulLifeMonths || 0} mês(es)`], ['Peso', `${details.weightKg || 0} kg`], ['Dimensões', details.dimensions], ['Status', details.active ? 'Ativo' : 'Inativo'], ['Criado em', details.createdAt],

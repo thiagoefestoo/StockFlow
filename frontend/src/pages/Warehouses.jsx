@@ -4,6 +4,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import { useAuth } from '../contexts/AuthContext';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 const empty = {
   name: '',
@@ -244,7 +245,7 @@ export default function Warehouses() {
           return <div className="item-card" key={index}>
             <div className="item-head"><strong>Item {index + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeTransferItem(index)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {m.mainStock}</option>)}</select></label>
+              <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {formatQuantity(m.mainStock, m.unit)}</option>)}</select></label>
               {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => updateTransferItem(index, { quantity: e.target.value })} /></label>}
             </div>
             {material?.requiresSerial && <div className="serial-picker">
@@ -266,8 +267,8 @@ export default function Warehouses() {
         <DetailList title="Estoquistas/usuários vinculados" items={details.users || []} render={(u) => <><b>{u.name}</b><span>{u.email} • {u.role} • {u.status}</span><small>Limite de aprovação: {brl(u.approvalLimit)}</small></>} />
         <DetailList title="Técnicos com estoque padrão vinculado" items={details.technicians || []} render={(t) => <><b>{t.name}</b><span>{t.email || '-'} • {t.status}</span><small>{(t.serviceCities || []).join(', ')}</small></>} />
         <DetailList title="Equipamentos serializados no estoque" items={details.assets || []} render={(a) => <><b>{a.serialNumber}</b><span>{a.Material?.name} • {a.status} • {brl(a.acquisitionCost || a.Material?.unitCost)}</span></>} />
-        <DetailList title="Materiais consumíveis no estoque" items={details.balances || []} render={(b) => <><b>{b.Material?.name}</b><span>{b.quantity} {b.Material?.unit} • {brl(Number(b.quantity || 0) * Number(b.Material?.unitCost || 0))}</span></>} />
-        <DetailList title="Histórico e BI de movimentações deste estoque" items={details.movements || []} render={(m) => <><b>{m.reference || m.type} • {dt(m.movementAt)}</b><span>{m.Material?.name || '-'} • Qtd. {m.quantity} • {m.serialNumber || 'sem serial'}</span><small>{m.fromWarehouse?.name || m.fromOwnerType || '-'} → {m.toWarehouse?.name || m.toOwnerType || m.toTechnician?.name || '-'} • Operador: {m.createdBy?.name || 'Sistema'}</small></>} />
+        <DetailList title="Materiais consumíveis no estoque" items={details.balances || []} render={(b) => <><b>{b.Material?.name}</b><span>{formatQuantity(b.quantity, b.Material?.unit)} • {brl(Number(b.quantity || 0) * Number(b.Material?.unitCost || 0))}</span></>} />
+        <DetailList title="Histórico e BI de movimentações deste estoque" items={details.movements || []} render={(m) => <><b>{m.reference || m.type} • {dt(m.movementAt)}</b><span>{m.Material?.name || '-'} • Qtd. {formatQuantity(m.quantity)} • {m.serialNumber || 'sem serial'}</span><small>{m.fromWarehouse?.name || m.fromOwnerType || '-'} → {m.toWarehouse?.name || m.toOwnerType || m.toTechnician?.name || '-'} • Operador: {m.createdBy?.name || 'Sistema'}</small></>} />
       </>}
     </DetailsModal>
   </div>;

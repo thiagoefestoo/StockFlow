@@ -3,6 +3,7 @@ import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -66,7 +67,7 @@ function OperationalInfo({ payload, requestDetails, operationalSummary }) {
         <div className="detail-card"><span>Destino</span><strong>{summary.toWarehouseName || payload?.toWarehouse?.name || summary.warehouseName || requestDetails?.Warehouse?.name || '-'}</strong></div>
         <div className="detail-card"><span>Itens</span><strong>{rows.length}</strong></div>
       </div>
-      <div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Categoria</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th><th>Seriais</th><th>Observação</th></tr></thead><tbody>{rows.map((item, idx) => <tr key={idx}><td><strong>{item.material}</strong></td><td>{item.category}</td><td>{item.quantity}</td><td>{brl(item.unitCost)}</td><td>{brl(item.totalCost)}</td><td>{item.serialNumbers?.length ? item.serialNumbers.join(', ') : '-'}</td><td>{item.notes}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Categoria</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th><th>Seriais</th><th>Observação</th></tr></thead><tbody>{rows.map((item, idx) => <tr key={idx}><td><strong>{item.material}</strong></td><td>{item.category}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.unitCost)}</td><td>{brl(item.totalCost)}</td><td>{item.serialNumbers?.length ? item.serialNumbers.join(', ') : '-'}</td><td>{item.notes}</td></tr>)}</tbody></table></div>
       {!rows.length && <div className="empty-state">Nenhum item detalhado vinculado a esta aprovação.</div>}
     </div>
   );

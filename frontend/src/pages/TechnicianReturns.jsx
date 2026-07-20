@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
-function qtyLabel(value, unit = '') { return `${Number(value || 0).toLocaleString('pt-BR')} ${unit || ''}`.trim(); }
+function qtyLabel(value, unit = '') { return formatQuantityLabel(value, unit); }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
 function unique(values = []) { return Array.from(new Set(values.map((v) => String(v || '').trim()).filter(Boolean))); }
 
@@ -150,9 +151,9 @@ export default function TechnicianReturns() {
 
       <section className="kpi-grid small">
         <KpiCard label="Técnico" value={selectedTechnician?.name || '-'} />
-        <KpiCard label="Itens na caixa" value={box?.summary?.totalQuantity || 0} />
+        <KpiCard label="Itens na caixa" value={formatQuantity(box?.summary?.totalQuantity || 0)} />
         <KpiCard label="Valor em custódia" value={brl(box?.summary?.totalValue)} tone="warning" />
-        <KpiCard label="Qtd. selecionada" value={totalQty} tone="success" />
+        <KpiCard label="Qtd. selecionada" value={formatQuantity(totalQty)} tone="success" />
       </section>
 
       <section className="panel">

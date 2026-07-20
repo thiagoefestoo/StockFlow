@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import KpiCard from '../components/KpiCard';
+import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
 
 const emptyForm = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', materials: [] };
 
@@ -89,7 +90,7 @@ export default function TechnicianPortal() {
       {message && <div className="alert danger">{message}</div>}
       {isSupervisor && <section className="panel"><label>Selecionar técnico para simulação<select value={selectedTech} onChange={(e) => { setSelectedTech(e.target.value); loadStock(e.target.value); }}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></section>}
       <div className="kpi-grid small"><KpiCard label="ONUs/equipamentos comigo" value={stock?.assets?.length || 0} /><KpiCard label="Materiais consumíveis" value={stock?.balances?.length || 0} /><KpiCard label="Responsável" value={stock?.technician?.name || user?.name || '-'} /></div>
-      <section className="panel technician-notifications"><div className="panel-title"><div><h3>Notificações</h3><p>Acompanhe suas solicitações e cargas em andamento.</p></div><button className="ghost" onClick={() => loadStock(selectedTech)}>Atualizar</button></div><div className="notification-strip"><article><strong>{pendingRequests.length}</strong><span>em andamento</span></article><article><strong>{requests.filter((r) => r.status === 'aprovado').length}</strong><span>aprovada(s)</span></article><article><strong>{requests.filter((r) => r.status === 'entregue').length}</strong><span>entregue(s)</span></article></div>{requests.slice(0, 3).map((r) => <div className="request-notice" key={r.id}><b>{r.requestNumber}</b><span>{statusLabel(r.status)} • {Number(r.totalQuantity || 0)} item(ns)</span></div>)}</section>
+      <section className="panel technician-notifications"><div className="panel-title"><div><h3>Notificações</h3><p>Acompanhe suas solicitações e cargas em andamento.</p></div><button className="ghost" onClick={() => loadStock(selectedTech)}>Atualizar</button></div><div className="notification-strip"><article><strong>{pendingRequests.length}</strong><span>em andamento</span></article><article><strong>{requests.filter((r) => r.status === 'aprovado').length}</strong><span>aprovada(s)</span></article><article><strong>{requests.filter((r) => r.status === 'entregue').length}</strong><span>entregue(s)</span></article></div>{requests.slice(0, 3).map((r) => <div className="request-notice" key={r.id}><b>{r.requestNumber}</b><span>{statusLabel(r.status)} • {formatQuantity(r.totalQuantity)} item(ns)</span></div>)}</section>
       <section className="panel">
         <h3>Preencher OS</h3>
         <button type="button" className="ghost os-mobile-toggle" onClick={() => setOsFieldsOpen((open) => !open)}>{osFieldsOpen ? 'Ocultar dados da OS' : 'Preencher dados da OS'}</button>

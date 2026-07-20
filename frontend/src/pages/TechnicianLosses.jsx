@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -206,7 +207,7 @@ export default function TechnicianLosses() {
                 <td><strong>{loss.transferNumber}</strong></td>
                 <td>{loss.Technician?.name || '-'}</td>
                 <td>{dt(loss.deliveredAt || loss.createdAt)}</td>
-                <td>{loss.totalQuantity}</td>
+                <td>{formatQuantity(loss.totalQuantity)}</td>
                 <td>{brl(loss.totalValue)}</td>
                 <td><span className={`badge ${loss.status}`}>{loss.status}</span></td>
                 <td>{loss.attachmentName || <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
@@ -252,7 +253,7 @@ export default function TechnicianLosses() {
       </Modal>
 
       <DetailsModal open={!!details} title={`Detalhes da perda ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/perdas-tecnico/${details.id}`}>Abrir guia</Link>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", details.totalQuantity], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName], ["Observações", details.notes]]} /><DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {item.quantity} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName], ["Observações", details.notes]]} /><DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

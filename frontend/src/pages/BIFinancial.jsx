@@ -4,6 +4,7 @@ import KpiCard from '../components/KpiCard';
 import ChartPanel from '../components/ChartPanel';
 import SimpleBar from '../components/SimpleBar';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
+import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -247,7 +248,7 @@ export default function BIFinancial() {
           </section>
           <section className="panel three-col finance-lists">
             <div><h3>📥 Últimas entradas</h3>{(data.recentEntries || []).map((row) => <div className="event compact" key={row.id}><strong>{row.receiptNumber}</strong><span>{row.sourceCompany} • {row.status}</span><small>{brl(row.totalValue)} • doc. {row.fiscalDocumentNumber || '-'}</small></div>)}</div>
-            <div><h3>🔁 Últimas transferências</h3>{(data.recentTransfers || []).map((row) => <div className="event compact" key={row.id}><strong>{row.transferNumber}</strong><span>{row.technician} • {row.status}</span><small>{brl(row.totalValue)} • {row.totalQuantity} itens</small></div>)}</div>
+            <div><h3>🔁 Últimas transferências</h3>{(data.recentTransfers || []).map((row) => <div className="event compact" key={row.id}><strong>{row.transferNumber}</strong><span>{row.technician} • {row.status}</span><small>{brl(row.totalValue)} • {formatQuantity(row.totalQuantity)} itens</small></div>)}</div>
             <div><h3>📲 Últimas baixas por OS</h3>{(data.recentConsumption || []).map((row) => <div className="event compact" key={row.id}><strong>{row.osNumber}</strong><span>{row.technician} • {row.serviceType}</span><small>{brl(row.totalCost)} • {row.customerName}</small></div>)}</div>
           </section>
         </>
