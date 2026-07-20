@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import AttachmentPreview from '../components/AttachmentPreview';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -207,10 +207,10 @@ export default function TechnicianLosses() {
                 <td><strong>{loss.transferNumber}</strong></td>
                 <td>{loss.Technician?.name || '-'}</td>
                 <td>{dt(loss.deliveredAt || loss.createdAt)}</td>
-                <td>{formatQuantity(loss.totalQuantity)}</td>
+                <td>{loss.totalQuantity}</td>
                 <td>{brl(loss.totalValue)}</td>
                 <td><span className={`badge ${loss.status}`}>{loss.status}</span></td>
-                <td>{loss.attachmentName || <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
+                <td>{loss.attachmentName ? <AttachmentPreview compact name={loss.attachmentName} data={loss.attachmentData} /> : <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
                 <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(loss)}>Detalhes</button><Link className="ghost" to={`/perdas-tecnico/${loss.id}`}>Guia</Link></div></td>
               </tr>)}
               {!losses.length && <tr><td colSpan="8"><div className="empty-state">Nenhuma perda registrada.</div></td></tr>}
@@ -230,7 +230,7 @@ export default function TechnicianLosses() {
           <label>Técnico responsável<select value={form.technicianId} onChange={(e) => onSelectTechnician(e.target.value)}><option value="">Selecione</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
           <label>Motivo da perda/desconto<input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Ex.: material perdido, avaria, extravio..." /></label>
           <label className="span-2">Observações<textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Descreva detalhes da ocorrência, protocolo interno ou autorização." /></label>
-          <label className="span-2">Documento assinado/reconhecimento<input type="file" accept="image/*,.pdf" onChange={async (e) => { const file = await readFile(e.target.files?.[0]); if (file) setForm({ ...form, attachmentName: file.name, attachmentData: file.data }); }} /><small>Opcional na abertura: também será possível anexar depois na lista.</small></label>
+          <label className="span-2">Documento assinado/reconhecimento<input type="file" accept="image/*,.pdf" onChange={async (e) => { const file = await readFile(e.target.files?.[0]); if (file) setForm({ ...form, attachmentName: file.name, attachmentData: file.data }); }} /><small>Opcional na abertura: também será possível anexar depois na lista.</small></label>{form.attachmentName && <AttachmentPreview compact name={form.attachmentName} data={form.attachmentData} label="Documento selecionado" />}
         </div>
 
         <div className="subtoolbar"><h4>Material perdido</h4><button className="ghost" onClick={addItem}>Adicionar item</button></div>
@@ -253,7 +253,7 @@ export default function TechnicianLosses() {
       </Modal>
 
       <DetailsModal open={!!details} title={`Detalhes da perda ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/perdas-tecnico/${details.id}`}>Abrir guia</Link>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName], ["Observações", details.notes]]} /><DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", details.totalQuantity], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Documento de reconhecimento" />}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {item.quantity} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
+import AttachmentPreview from '../components/AttachmentPreview';
 import { useAuth } from '../contexts/AuthContext';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
-function qtyLabel(value, unit = '') { return formatQuantityLabel(value, unit); }
+function qtyLabel(value, unit = '') { return `${Number(value || 0).toLocaleString('pt-BR')} ${unit || ''}`.trim(); }
 
 function normalizeSerialText(value) { return String(value || '').trim().toLowerCase(); }
 function parseSerialTerms(value) {
@@ -100,7 +100,7 @@ export default function Transfers() {
           notes: `Entrega pela solicitação ${request.requestNumber}.`,
           items: (request.MaterialRequestItems || []).map((item) => ({
             materialId: item.materialId ? String(item.materialId) : '',
-            quantity: formatQuantityInput(item.approvedQuantity || item.quantity || 1),
+            quantity: item.approvedQuantity || item.quantity || 1,
             serialNumbers: [],
           })),
         });
@@ -291,14 +291,14 @@ export default function Transfers() {
         <button onClick={openNewTransfer}>➕ Nova transferência</button>
       </div>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Técnico</th><th>Estoque origem</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{transfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td>{tr.Technician?.name}</td><td>{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div></section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Técnico</th><th>Estoque origem</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{transfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td>{tr.Technician?.name}</td><td>{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{tr.totalQuantity}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div></section>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Entregar carga solicitada ao técnico' : '📦 Nova transferência para técnico'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Gerar guia e enviar para caixa</button></>}>
         <div className="transfer-wizard">
           <section className="transfer-summary-card">
             <div><small>Estoque de origem</small><strong>{selectedWarehouse?.name || 'Selecione um estoque'}</strong><span>{selectedWarehouse ? `${selectedWarehouse.city || '-'} • ${selectedWarehouse.code || 'sem código'}` : 'Materiais serão filtrados pelo estoque'}</span></div>
             <div><small>Técnico selecionado</small><strong>{selectedTechnician?.name || 'Selecione um técnico'}</strong><span>{selectedTechnician?.ContractorCompany?.name || 'Carga individual'}</span></div>
-            <div><small>Itens na guia</small><strong>{form.items.length}</strong><span>{formatQuantity(form.items.reduce((s, i) => s + Number(i.quantity || (i.serialNumbers || []).length || 0), 0))} unidade(s)</span></div>
+            <div><small>Itens na guia</small><strong>{form.items.length}</strong><span>{form.items.reduce((s, i) => s + Number(i.quantity || (i.serialNumbers || []).length || 0), 0)} unidade(s)</span></div>
             <div><small>Valor previsto</small><strong>{brl(totalPreview)}</strong><span>Equipamentos + consumíveis</span></div>
           </section>
           <div className="form-grid">
@@ -365,7 +365,7 @@ export default function Transfers() {
       </Modal>
 
       <DetailsModal open={!!details} title={`🔎 Detalhes da guia ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/transferencias/${details.id}`}>Abrir guia</Link>}{isAdmin && details && <button onClick={() => { setEdit({ open: true, item: details, form: { notes: details.notes || '', status: details.status || 'pendente_assinatura', deliveredAt: details.deliveredAt ? String(details.deliveredAt).slice(0, 16) : '', signatureResponsible: details.signatureResponsible || '' } }); setDetails(null); }}>Editar</button>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Estoque origem", details.Warehouse?.name || details.warehouseId || '-'], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName], ["Observações", details.notes]]} /><DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Estoque origem", details.Warehouse?.name || details.warehouseId || '-'], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", details.totalQuantity], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Anexo da guia" />}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {item.quantity} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );
