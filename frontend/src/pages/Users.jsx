@@ -4,7 +4,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import { useAuth } from '../contexts/AuthContext';
-import { MODULES, allowedModulesForRole, moduleLabel, normalizeModulePermissions } from '../config/modulePermissions';
+import { MODULES, assignableModulesForRole, moduleLabel, normalizeModulePermissions } from '../config/modulePermissions';
 
 const emptyUser = {
   name: '',
@@ -64,7 +64,7 @@ function randomPassword() {
 
 
 function modulesForRole(role) {
-  const allowed = new Set(allowedModulesForRole(role));
+  const allowed = new Set(assignableModulesForRole(role));
   return MODULES.filter((module) => allowed.has(module.key));
 }
 function modulesByGroupForRole(role) {
@@ -369,7 +369,7 @@ export default function Users() {
               <div className="module-permission-head">
                 <div>
                   <h4>Controle de acesso aos módulos</h4>
-                  <p>Marque somente os módulos que este usuário poderá ver e acessar. Administrador mantém acesso total.</p>
+                  <p>Todos os módulos ficam disponíveis para seleção. Marque apenas o que este usuário poderá ver e acessar. Administrador mantém acesso total.</p>
                 </div>
                 <span className="badge soft">{permissionSummary(normalizeModulePermissions(form.modulePermissions, form.role))}</span>
               </div>
@@ -384,7 +384,7 @@ export default function Users() {
                   </div>
                 </div>
               ))}
-              <small>Exemplo: libere BI Executivo/Operacional para o estoquista e mantenha BI Financeiro desmarcado.</small>
+              <small>Exemplo: libere BI Executivo/Operacional para o estoquista e mantenha BI Financeiro desmarcado. O módulo Usuários e permissões continua reservado ao administrador.</small>
             </div>
             <label>{form.id ? 'Nova senha manual opcional' : 'Senha inicial'}
               <div className="input-with-button"><input type="text" value={form.password || ''} onChange={(e) => patchForm({ password: e.target.value })} placeholder={form.id ? 'Digite uma nova senha ou deixe vazio para manter' : 'Digite uma senha ou gere automaticamente'} /><button type="button" className="ghost" onClick={() => patchForm({ password: randomPassword() })}>Gerar</button></div>

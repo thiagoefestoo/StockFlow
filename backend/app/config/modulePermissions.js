@@ -23,6 +23,8 @@ const MODULES = [
 ];
 
 const ALL_MODULE_KEYS = MODULES.map((module) => module.key);
+const ADMIN_ONLY_MODULE_KEYS = ['users'];
+const ASSIGNABLE_MODULE_KEYS = ALL_MODULE_KEYS.filter((key) => !ADMIN_ONLY_MODULE_KEYS.includes(key));
 
 const DEFAULT_MODULES_BY_ROLE = {
   admin: ALL_MODULE_KEYS,
@@ -49,13 +51,19 @@ const DEFAULT_MODULES_BY_ROLE = {
   tecnico: ['materialRequests', 'serviceOrders', 'technicianInbox', 'serialLife'],
 };
 
-function allowedForRole(role) {
+function assignableForRole(role) {
   if (role === 'admin') return ALL_MODULE_KEYS;
-  return MODULES.filter((module) => module.roles.includes(role)).map((module) => module.key);
+  return ASSIGNABLE_MODULE_KEYS;
+}
+
+// Compatibilidade: agora o admin pode liberar qualquer módulo operacional/BI
+// para qualquer perfil. Mantemos 'users' reservado ao administrador.
+function allowedForRole(role) {
+  return assignableForRole(role);
 }
 
 function normalizeModulePermissions(value, role = 'tecnico') {
-  const allowed = new Set(allowedForRole(role));
+  const allowed = new Set(assignableForRole(role));
   if (role === 'admin') return ALL_MODULE_KEYS;
 
   if (Array.isArray(value)) {
@@ -85,7 +93,10 @@ function hasModuleAccess(user, moduleKey) {
 module.exports = {
   MODULES,
   ALL_MODULE_KEYS,
+  ADMIN_ONLY_MODULE_KEYS,
+  ASSIGNABLE_MODULE_KEYS,
   DEFAULT_MODULES_BY_ROLE,
+  assignableForRole,
   allowedForRole,
   normalizeModulePermissions,
   hasModuleAccess,
