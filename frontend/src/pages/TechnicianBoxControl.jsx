@@ -18,10 +18,11 @@ const emptyClientForm = {
   notes: '',
   items: [],
 };
-const emptyReturnForm = { reference: '', notes: '', items: [] };
+const emptyReturnForm = { warehouseId: '', reference: '', notes: '', items: [] };
 
 export default function TechnicianBoxControl() {
   const [technicians, setTechnicians] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [selectedTech, setSelectedTech] = useState('');
   const [box, setBox] = useState(null);
   const [tab, setTab] = useState('cliente');
@@ -31,10 +32,16 @@ export default function TechnicianBoxControl() {
   const [details, setDetails] = useState(null);
 
   async function loadTechs() {
-    const res = await api.get('/technicians');
-    const list = res.data.data || [];
+    const [techRes, whRes] = await Promise.all([
+      api.get('/technicians'),
+      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+    ]);
+    const list = techRes.data.data || [];
+    const warehouseList = whRes.data.data || [];
     setTechnicians(list);
+    setWarehouses(warehouseList);
     if (!selectedTech && list[0]) setSelectedTech(String(list[0].id));
+    if (!returnForm.warehouseId && warehouseList[0]) setReturnForm((current) => ({ ...current, warehouseId: String(warehouseList[0].id) }));
   }
 
   async function loadBox(id = selectedTech) {
@@ -66,10 +73,10 @@ export default function TechnicianBoxControl() {
   }
 
   function addClientItem() {
-    setClientForm({ ...clientForm, items: [...clientForm.items, { materialId: materialsInBox[0]?.id || '', quantity: 1, serialNumbersText: '' }] });
+    setClientForm({ ...clientForm, items: [...clientForm.items, { materialId: '', quantity: '', serialNumbersText: '' }] });
   }
   function addReturnItem() {
-    setReturnForm({ ...returnForm, items: [...returnForm.items, { materialId: materialsInBox[0]?.id || '', quantity: 1, serialNumbersText: '' }] });
+    setReturnForm({ ...returnForm, items: [...returnForm.items, { materialId: '', quantity: '', serialNumbersText: '' }] });
   }
   function updateClientItem(i, patch) {
     const items = [...clientForm.items];
@@ -225,7 +232,7 @@ export default function TechnicianBoxControl() {
             <div>
               <h3>↩️ Devolver material do técnico para estoque</h3>
               <p className="muted">Use para recolhimento, conferência, ajuste operacional, troca de equipe ou material não utilizado.</p>
-              <div className="form-grid"><label>Referência<input value={returnForm.reference} onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })} placeholder="Ex.: DEV-001, conferência mensal..." /></label><label>Motivo<input value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Motivo do retorno" /></label></div>
+              <div className="form-grid"><label>Estoque de destino<select value={returnForm.warehouseId || ''} onChange={(e) => setReturnForm({ ...returnForm, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code || 'sem código'}</option>)}</select></label><label>Referência<input value={returnForm.reference} onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })} placeholder="Ex.: DEV-001, conferência mensal..." /></label><label>Motivo<input value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Motivo do retorno" /></label></div>
               <div className="subtoolbar"><h4>Itens para retornar ao estoque</h4><button className="ghost" onClick={addReturnItem}>➕ Adicionar item</button></div>
               {returnForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateReturnItem} remove={removeReturnItem} toggleSerial={(serial) => toggleSerial('return', i, serial)} />)}
               <button className="wide" onClick={returnToStock}>↩️ Confirmar devolução ao estoque</button>
@@ -268,7 +275,7 @@ function MovementItem({ item, index, materials, assetsByMaterial, balanceFor, up
       <div className="form-grid">
         <label>Material
           <select value={item.materialId} onChange={(e) => update(index, { materialId: e.target.value, quantity: 1, serialNumbersText: '' })}>
-            {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
+            <option value="">Selecione o material</option>{materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
           </select>
         </label>
         {!material?.requiresSerial && <label>Quantidade disponível: {Number(balance?.quantity || 0)} {material?.unit || ''}<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}

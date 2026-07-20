@@ -1751,3 +1751,69 @@ input[readonly], textarea[readonly] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Ajustes: busca múltipla de seriais, avaliação de perdas e retorno da caixa */
+.serial-picker-head-stacked {
+  align-items: stretch;
+  gap: 12px;
+}
+.serial-actions-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.serial-actions-row input {
+  min-width: min(100%, 280px);
+  flex: 1;
+}
+.bulk-serial-search-card {
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px dashed rgba(37, 99, 235, .35);
+  border-radius: 16px;
+  background: rgba(37, 99, 235, .06);
+}
+.bulk-serial-search-card label,
+.bulk-serial-search-card span {
+  display: block;
+  font-weight: 800;
+  color: var(--text, #0f172a);
+}
+.bulk-serial-search-card textarea {
+  margin-top: 8px;
+  width: 100%;
+  resize: vertical;
+}
+.bulk-serial-search-card small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted, #64748b);
+}
+.technician-return-page .submit-bar {
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, .04);
+}
+.loss-evaluation-grid .timeline .event compact,
+.loss-evaluation-page .timeline .event.compact {
+  min-height: auto;
+}
+.loss-evaluation-page table td div + div {
+  margin-top: 4px;
+}
+@media (max-width: 760px) {
+  .serial-actions-row,
+  .technician-return-page .submit-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .serial-actions-row input {
+    min-width: 100%;
+  }
+}

@@ -390,6 +390,8 @@ exports.executive = asyncHandler(async (req, res) => {
   const assetsInStock = stockPosition.rows.reduce((sum, row) => sum + Number(row.estoqueQty || 0), 0);
   const assetsWithTechnicians = stockPosition.rows.reduce((sum, row) => sum + Number(row.tecnicoQty || 0), 0);
   const installedAssets = stockPosition.rows.reduce((sum, row) => sum + Number(row.clienteQty || 0), 0);
+  const lostAssets = stockPosition.rows.reduce((sum, row) => sum + Number(row.perdidoQty || 0), 0);
+  const lostValue = money(stockPosition.totals.perdido || 0);
   const pendingSignatures = transfers.filter((transfer) => transfer.status === 'pendente_assinatura').length;
   const osMonth = orders.length;
   const custodyRiskAssets = await SerializedAsset.findAll({ where: { ownerType: 'tecnico', custodyStartedAt: { [Op.lte]: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) } }, include: [Material, Technician] });
@@ -412,7 +414,7 @@ exports.executive = asyncHandler(async (req, res) => {
   });
   const assetsByStatus = Object.entries(statusMap).map(([status, total]) => ({ status, total }));
   return ok(res, {
-    cards: { totalAssets: money(totalAssets), assetsInStock: money(assetsInStock), assetsWithTechnicians: money(assetsWithTechnicians), installedAssets: money(installedAssets), patrimonyInTechnicians: stockPosition.totals.tecnico, patrimonyTotal: stockPosition.totals.totalAtual, pendingSignatures, osMonth, custody60 },
+    cards: { totalAssets: money(totalAssets), assetsInStock: money(assetsInStock), assetsWithTechnicians: money(assetsWithTechnicians), installedAssets: money(installedAssets), lostAssets: money(lostAssets), lostValue, patrimonyInTechnicians: stockPosition.totals.tecnico, patrimonyTotal: stockPosition.totals.totalAtual, pendingSignatures, osMonth, custody60 },
     materials: materialRows,
     topTechnicians: technicianRows.slice(0, 10),
     transfers: transfers.map((t) => t.toJSON()),

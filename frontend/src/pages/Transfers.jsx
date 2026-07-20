@@ -9,6 +9,33 @@ function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style:
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function qtyLabel(value, unit = '') { return `${Number(value || 0).toLocaleString('pt-BR')} ${unit || ''}`.trim(); }
 
+function normalizeSerialText(value) { return String(value || '').trim().toLowerCase(); }
+function parseSerialTerms(value) {
+  return String(value || '')
+    .split(/[\n,;\t ]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+function assetSearchText(asset) {
+  return [asset.serialNumber, asset.mac, asset.brand, asset.model, asset.Material?.name]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+function uniqueSerials(values = []) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const serial = String(value || '').trim();
+    if (!serial) continue;
+    const key = serial.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(serial);
+  }
+  return out;
+}
+
 export default function Transfers() {
   const { isAdmin } = useAuth();
   const [transfers, setTransfers] = useState([]);
@@ -151,6 +178,44 @@ export default function Transfers() {
     updateItem(i, { serialNumbers: Array.from(selected), quantity: selected.size || 1 });
   }
 
+
+  function selectSerialsForItem(i, serials) {
+    const selected = uniqueSerials([...(form.items[i]?.serialNumbers || []), ...serials]);
+    updateItem(i, { serialNumbers: selected, quantity: selected.length || 1 });
+  }
+
+  function replaceSerialsForItem(i, serials) {
+    const selected = uniqueSerials(serials);
+    updateItem(i, { serialNumbers: selected, quantity: selected.length || 1 });
+  }
+
+  function selectBulkSearchedSerials(i, allAssets) {
+    const item = form.items[i];
+    const terms = parseSerialTerms(item.bulkSerialSearch || '');
+    if (!terms.length) {
+      window.alert('Digite ou cole um ou mais seriais para pesquisar. Separe por linha, vírgula, ponto e vírgula ou espaço.');
+      return;
+    }
+    const matched = [];
+    const notFound = [];
+    for (const term of terms) {
+      const q = normalizeSerialText(term);
+      const asset = allAssets.find((candidate) => {
+        const serial = normalizeSerialText(candidate.serialNumber);
+        const mac = normalizeSerialText(candidate.mac);
+        return serial === q || mac === q || serial.includes(q) || mac.includes(q);
+      });
+      if (asset) matched.push(asset.serialNumber);
+      else notFound.push(term);
+    }
+    if (!matched.length) {
+      window.alert('Nenhuma ONU/serial pesquisado foi encontrado no estoque selecionado.');
+      return;
+    }
+    selectSerialsForItem(i, matched);
+    if (notFound.length) window.alert(`Selecionado(s) ${uniqueSerials(matched).length} serial(is). Não encontrado(s): ${notFound.join(', ')}`);
+  }
+
   function validateBeforeSave() {
     if (!form.warehouseId) return 'Selecione o estoque de origem.';
     if (!form.technicianId) return 'Selecione o técnico de destino.';
@@ -247,10 +312,11 @@ export default function Transfers() {
           {form.items.length === 0 && <div className="empty-state">Clique em “Adicionar item” para montar a carga do técnico.</div>}
           {form.items.map((item, i) => {
             const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
-            const serialAssets = (stockByMaterial[item.materialId] || []).filter((asset) => {
-              const q = assetSearch.trim().toLowerCase();
+            const allSerialAssets = stockByMaterial[item.materialId] || [];
+            const serialAssets = allSerialAssets.filter((asset) => {
+              const q = String(item.assetSearch || '').trim().toLowerCase();
               if (!q) return true;
-              return [asset.serialNumber, asset.mac, asset.brand, asset.model].filter(Boolean).join(' ').toLowerCase().includes(q);
+              return assetSearchText(asset).includes(q);
             });
             return (
               <div className="item-card transfer-item-card" key={i}>
@@ -259,7 +325,34 @@ export default function Transfers() {
                   <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
                   {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" max={Number(material?.mainStock || 0)} step="0.001" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível neste estoque: {qtyLabel(material?.mainStock, material?.unit)}</small></label>}
                 </div>
-                {material?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><div><strong>🏷️ Seriais disponíveis no estoque selecionado</strong><span>{serialAssets.length} disponível(is) • {item.serialNumbers?.length || 0} selecionado(s)</span></div><input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Buscar serial, MAC, marca..." /></div><div className="serial-grid">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleSerial(i, asset.serialNumber)}><b>{checked ? '✅' : '🏷️'} {asset.serialNumber}</b><span>{asset.Material?.name} • {asset.Warehouse?.name || selectedWarehouse?.name || 'estoque'} • {asset.brand || '-'} {asset.model || ''}</span><small>{asset.mac || 'sem MAC'} • {brl(asset.acquisitionCost)}</small></button>; })}</div>{serialAssets.length === 0 && <div className="empty-state">Nenhum serial disponível para esse material no estoque selecionado.</div>}</div>}
+                {material?.requiresSerial && (
+                  <div className="serial-picker">
+                    <div className="serial-picker-head serial-picker-head-stacked">
+                      <div>
+                        <strong>🏷️ Seriais disponíveis no estoque selecionado</strong>
+                        <span>{serialAssets.length} disponível(is) filtrado(s) • {allSerialAssets.length} no estoque • {item.serialNumbers?.length || 0} selecionado(s)</span>
+                      </div>
+                      <div className="serial-actions-row">
+                        <input value={item.assetSearch || ''} onChange={(e) => updateItem(i, { assetSearch: e.target.value })} placeholder="Buscar serial, MAC, marca..." />
+                        <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, serialAssets.map((asset) => asset.serialNumber))}>Selecionar tudo filtrado</button>
+                        <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, [])}>Limpar seleção</button>
+                      </div>
+                    </div>
+                    <div className="bulk-serial-search-card">
+                      <label>
+                        <span>Pesquisar várias ONUs/seriais de uma vez</span>
+                        <textarea rows="3" value={item.bulkSerialSearch || ''} onChange={(e) => updateItem(i, { bulkSerialSearch: e.target.value })} placeholder="Cole aqui vários seriais, um por linha ou separados por vírgula. Ex.: 102003, 102002, 102001" />
+                      </label>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => selectBulkSearchedSerials(i, allSerialAssets)}>Selecionar ONUs pesquisadas</button>
+                        <button type="button" className="ghost" onClick={() => updateItem(i, { bulkSerialSearch: '' })}>Limpar pesquisa</button>
+                      </div>
+                      <small>O sistema seleciona somente seriais disponíveis no estoque de origem e evita duplicar o mesmo serial na guia.</small>
+                    </div>
+                    <div className="serial-grid">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleSerial(i, asset.serialNumber)}><b>{checked ? '✅' : '🏷️'} {asset.serialNumber}</b><span>{asset.Material?.name} • {asset.Warehouse?.name || selectedWarehouse?.name || 'estoque'} • {asset.brand || '-'} {asset.model || ''}</span><small>{asset.mac || 'sem MAC'} • {brl(asset.acquisitionCost)}</small></button>; })}</div>
+                    {serialAssets.length === 0 && <div className="empty-state">Nenhum serial disponível para esse material no estoque selecionado.</div>}
+                  </div>
+                )}
               </div>
             );
           })}

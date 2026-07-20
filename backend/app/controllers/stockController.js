@@ -158,17 +158,18 @@ exports.technicianBox = asyncHandler(async (req, res) => {
 });
 
 exports.returnFromTechnician = asyncHandler(async (req, res) => {
-  const { technicianId, reference, notes, warehouseId, items = [] } = req.body;
+  const { technicianId, reference, notes, warehouseId } = req.body;
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
   const targetWarehouseId = warehouseId || null;
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
-  if (!items.length) {
-    const defaults = await StockBalance.findAll({ where: { technicianId, ownerType: 'tecnico' }, include: [Material] });
-    items = defaults.filter((row) => ['drop', 'cabo', 'conector', 'esticador'].includes(String(row.Material?.category || '').toLowerCase())).map((row) => ({ materialId: row.materialId, quantity: Math.min(Number(row.quantity || 0), row.Material?.category === 'drop' || row.Material?.category === 'cabo' ? 50 : 2) })).filter((item) => item.quantity > 0);
-    if (!items.length) return fail(res, 400, 'Informe itens ou mantenha materiais padrão disponíveis na caixa do técnico.');
-  }
+  if (!targetWarehouseId) return fail(res, 400, 'Selecione o estoque de destino para retorno do material.');
+  if (!items.length) return fail(res, 400, 'Selecione pelo menos um item da caixa do técnico para retornar ao estoque.');
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
-  if (targetWarehouseId) { try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque de destino.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); } }
+  const targetWarehouse = await Warehouse.findByPk(targetWarehouseId);
+  if (!targetWarehouse) return fail(res, 404, 'Estoque de destino não encontrado.');
+  if (targetWarehouse.status && targetWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de destino precisa estar ativo.');
+  try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque de destino.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
   const result = await sequelize.transaction(async (transaction) => {
     let totalQuantity = 0;
@@ -212,13 +213,15 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
       }
     }
 
+    if (!affected.length || totalQuantity <= 0) throw new Error('Nenhum item válido foi selecionado para retorno ao estoque.');
+
     await writeAudit({
       req,
       action: 'return_to_stock',
       entity: 'TechnicianBox',
       entityId: String(technicianId),
-      message: `Retorno de ${qty(totalQuantity)} item(ns) da caixa de ${technician.name} para estoque.`,
-      afterData: { reference: movementReference, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
+      message: `Retorno de ${qty(totalQuantity)} item(ns) da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.`,
+      afterData: { reference: movementReference, warehouse: targetWarehouse.toJSON(), totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
       transaction,
     });
     return { reference: movementReference, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affectedCount: affected.length };

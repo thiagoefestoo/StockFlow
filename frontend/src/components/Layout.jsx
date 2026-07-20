@@ -8,11 +8,11 @@ import api from '../services/api';
 
 const adminGroups = [
   { title: 'Comando', links: [['/', 'OP', 'Cockpit'], ['/aprovacoes', 'AP', 'Aprovações'], ['/dashboard', 'DB', 'Dashboard legado']] },
-  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/perdas-tecnico', 'PD', 'Perdas/descontos'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa']] },
+  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/perdas-tecnico', 'PD', 'Perdas/descontos'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa'], ['/retorno-caixa-estoque', 'RT', 'Retorno técnico']] },
   { title: 'Cadastros e estoque', links: [['/estoque', 'MT', 'Materiais/Estoque'], ['/patrimonio', 'PA', 'Patrimônio'], ['/vida-serial', 'VS', 'Vida do serial'], ['/tecnicos', 'TE', 'Técnicos']] },
   { title: 'Administração', adminOnly: true, links: [['/usuarios', 'US', 'Usuários e permissões']] },
   { title: 'Minha conta', links: [['/minha-conta', 'CO', 'Configurações da conta']] },
-  { title: 'BI e auditoria', links: [['/bi/executivo', 'BE', 'BI Executivo'], ['/bi/financeiro', 'BF', 'BI Financeiro'], ['/bi/tecnicos', 'BT', 'BI Técnicos'], ['/bi/auditoria', 'BA', 'BI Auditoria'], ['/historico-movimentacoes', 'HM', 'Histórico'], ['/auditoria', 'AU', 'Auditoria']] },
+  { title: 'BI e auditoria', links: [['/bi/executivo', 'BE', 'BI Executivo'], ['/bi/financeiro', 'BF', 'BI Financeiro'], ['/bi/tecnicos', 'BT', 'BI Técnicos'], ['/bi/auditoria', 'BA', 'BI Auditoria'], ['/avaliacao-perdas', 'AV', 'Avaliação perdas'], ['/historico-movimentacoes', 'HM', 'Histórico'], ['/auditoria', 'AU', 'Auditoria']] },
 ];
 const technicianGroups = [
   { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/solicitacoes-material', 'SM', 'Solicitar material'], ['/vida-serial', 'VS', 'Vida do serial'], ['/minha-conta', 'CO', 'Minha conta']] },
@@ -123,6 +123,7 @@ function titleFor(path) {
   if (path.includes('/aprovacoes')) return 'Central de aprovações';
   if (path.includes('/solicitacoes-material')) return 'Workflow de solicitações';
   if (path.includes('/central-caixa-tecnico')) return 'Central administrativa da caixa do técnico';
+  if (path.includes('/retorno-caixa-estoque')) return 'Retorno da caixa do técnico para estoque';
   if (path.includes('/caixa-tecnico')) return 'Caixa do técnico';
   if (path.includes('/historico-movimentacoes')) return 'Histórico de movimentações';
   if (path.includes('/estoques-regionais')) return 'Estoques regionais';
@@ -130,6 +131,7 @@ function titleFor(path) {
   if (path.includes('/entrada')) return 'Entrada quinzenal de material';
   if (path.includes('/transferencias')) return 'Transferências e guias de assinatura';
   if (path.includes('/perdas-tecnico')) return 'Perdas e descontos do técnico';
+  if (path.includes('/avaliacao-perdas')) return 'Avaliação detalhada de perdas';
   if (path.includes('/portal-tecnico')) return 'Portal mobile do técnico';
   if (path.includes('/bi/financeiro')) return 'BI financeiro';
   if (path.includes('/bi/tecnicos')) return 'BI por técnico';

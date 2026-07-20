@@ -86,6 +86,7 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
     setRouteIfAllowed(routes, user, 'materialRequests', '/solicitacoes-material', approvedMaterialRequests);
     setRouteIfAllowed(routes, user, 'transfers', '/transferencias', pendingTransferSignatures);
     setRouteIfAllowed(routes, user, 'technicianLosses', '/perdas-tecnico', pendingLossSignatures);
+    setRouteIfAllowed(routes, user, 'lossEvaluation', '/avaliacao-perdas', pendingLossSignatures);
     setRouteIfAllowed(routes, user, 'serviceOrders', '/os', openOrders);
   } else if (user?.role === 'tecnico') {
     const requestScope = requestScopeFor(user);

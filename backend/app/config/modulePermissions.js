@@ -9,6 +9,7 @@ const MODULES = [
   { key: 'serviceOrders', label: 'Ordens de serviço', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/os'] },
   { key: 'technicianInbox', label: 'Caixa do técnico', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/caixa-tecnico', '/portal-tecnico'] },
   { key: 'technicianBoxControl', label: 'Central da caixa do técnico', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/central-caixa-tecnico'] },
+  { key: 'technicianReturns', label: 'Retorno caixa para estoque', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/retorno-caixa-estoque'] },
   { key: 'stock', label: 'Materiais/Estoque', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/estoque'] },
   { key: 'patrimony', label: 'Patrimônio', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/patrimonio'] },
   { key: 'serialLife', label: 'Vida do serial', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/vida-serial'] },
@@ -18,6 +19,7 @@ const MODULES = [
   { key: 'biFinancial', label: 'BI Financeiro', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/financeiro'] },
   { key: 'biTechnicians', label: 'BI Técnicos', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/tecnicos'] },
   { key: 'biAudit', label: 'BI Auditoria e patrimônio', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/auditoria'] },
+  { key: 'lossEvaluation', label: 'Avaliação de perdas', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/avaliacao-perdas'] },
   { key: 'movementHistory', label: 'Histórico de movimentações', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/historico-movimentacoes'] },
   { key: 'audit', label: 'Auditoria completa', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/auditoria'] },
 ];
@@ -47,6 +49,7 @@ const DEFAULT_MODULES_BY_ROLE = {
     'biExecutive',
     'biTechnicians',
     'movementHistory',
+    'lossEvaluation',
   ],
   tecnico: ['materialRequests', 'serviceOrders', 'technicianInbox', 'serialLife'],
 };

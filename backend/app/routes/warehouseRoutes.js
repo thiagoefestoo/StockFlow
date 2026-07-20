@@ -2,7 +2,7 @@ const router = require('express').Router();
 const controller = require('../controllers/warehouseController');
 const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate);
-router.get('/', requireModule('warehouses', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianBoxControl'), controller.list);
+router.get('/', requireModule('warehouses', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianBoxControl', 'technicianReturns'), controller.list);
 router.post('/transfer-stock', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('warehouses', 'transfers'), controller.transferStock);
 router.post('/:id/request-delete', requireRoles('admin', 'supervisor'), requireModule('warehouses'), controller.requestDelete);
 router.get('/:id', requireModule('warehouses'), controller.get);
