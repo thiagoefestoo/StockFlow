@@ -1831,3 +1831,83 @@ input[readonly], textarea[readonly] {
 .pdf-preview-frame iframe { width: 100%; min-height: 520px; border: 0; display: block; }
 .attachment-cell { display: grid; gap: 8px; min-width: 220px; }
 @media (max-width: 720px) { .pdf-preview-frame, .pdf-preview-frame iframe { min-height: 420px; } .attachment-preview-head { align-items: stretch; } .attachment-actions { width: 100%; } .attachment-actions button { flex: 1; } }
+
+/* Visualização de PDF sem pop-up bloqueado */
+.attachment-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(15, 23, 42, .62);
+  backdrop-filter: blur(3px);
+  padding: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.attachment-modal {
+  width: min(1120px, 96vw);
+  max-height: 94vh;
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, .45);
+  border-radius: 22px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, .35);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.attachment-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line, #d9e4f2);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+.attachment-modal-head strong {
+  display: block;
+  color: var(--text, #0f172a);
+  font-size: 1rem;
+}
+.attachment-modal-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: .82rem;
+  overflow-wrap: anywhere;
+}
+.attachment-modal-body {
+  flex: 1;
+  min-height: 0;
+  background: #f1f5f9;
+  overflow: auto;
+}
+.attachment-modal-body iframe {
+  width: 100%;
+  height: min(78vh, 820px);
+  border: 0;
+  display: block;
+  background: #fff;
+}
+.attachment-modal-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.attachment-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--line, #d9e4f2);
+  background: #fff;
+}
+@media (max-width: 720px) {
+  .attachment-modal-backdrop { padding: 8px; align-items: stretch; }
+  .attachment-modal { width: 100%; max-height: 100%; border-radius: 18px; }
+  .attachment-modal-head { align-items: flex-start; }
+  .attachment-modal-body iframe { height: 76vh; }
+  .attachment-modal-actions { justify-content: stretch; }
+  .attachment-modal-actions button { flex: 1; }
+}
