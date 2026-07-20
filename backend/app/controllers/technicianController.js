@@ -210,9 +210,8 @@ exports.update = asyncHandler(async (req, res) => {
 exports.stock = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
-
-  if (req.user.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
-    return fail(res, 403, 'Você só pode consultar a sua própria caixa.');
+  if (req.user?.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
+    return fail(res, 403, 'Você só pode acessar a própria caixa técnica.');
   }
 
   const assets = await SerializedAsset.findAll({
@@ -257,56 +256,17 @@ exports.stock = asyncHandler(async (req, res) => {
   const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
   const grouped = {};
   for (const asset of assets) {
-    const material = asset.Material || {};
-    const key = material.name || 'Equipamento serializado';
-
-    grouped[key] = grouped[key] || {
-      materialId: material.id || asset.materialId,
-      material: key,
-      category: material.category || 'equipamento',
-      unit: material.unit || 'un',
-      requiresSerial: true,
-      quantity: 0,
-      value: 0,
-      serials: [],
-      serialDetails: [],
-    };
-
+    const key = asset.Material?.name || 'Equipamento serializado';
+    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
     grouped[key].quantity += 1;
-    grouped[key].value += Number(asset.acquisitionCost || material.unitCost || 0);
-
-    if (asset.serialNumber) {
-      grouped[key].serials.push(asset.serialNumber);
-    }
-
-    grouped[key].serialDetails.push({
-      id: asset.id,
-      serialNumber: asset.serialNumber,
-      status: asset.status,
-      acquisitionCost: asset.acquisitionCost || material.unitCost || 0,
-      custodyStartedAt: asset.custodyStartedAt,
-      lastMovementAt: asset.lastMovementAt,
-    });
+    grouped[key].value += Number(asset.acquisitionCost || 0);
+    grouped[key].serials.push(asset.serialNumber);
   }
-
   for (const balance of balances) {
-    const material = balance.Material || {};
-    const key = material.name || 'Material consumível';
-
-    grouped[key] = grouped[key] || {
-      materialId: material.id || balance.materialId,
-      material: key,
-      category: material.category || 'consumivel',
-      unit: material.unit || '',
-      requiresSerial: Boolean(material.requiresSerial),
-      quantity: 0,
-      value: 0,
-      serials: [],
-      serialDetails: [],
-    };
-
+    const key = balance.Material?.name || 'Material consumível';
+    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
     grouped[key].quantity += Number(balance.quantity || 0);
-    grouped[key].value += Number(balance.quantity || 0) * Number(material.unitCost || 0);
+    grouped[key].value += Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0);
   }
 
   return ok(res, {

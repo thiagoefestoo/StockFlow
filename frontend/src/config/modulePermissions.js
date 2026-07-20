@@ -1,0 +1,115 @@
+export const MODULES = [
+  { key: 'operationsCockpit', label: 'Cockpit operacional', group: 'Comando', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/', '/dashboard'] },
+  { key: 'approvals', label: 'Aprovações', group: 'Comando', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/aprovacoes'] },
+  { key: 'materialRequests', label: 'Solicitações de material', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/solicitacoes-material'] },
+  { key: 'warehouses', label: 'Estoques regionais', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/estoques-regionais'] },
+  { key: 'receiving', label: 'Entrada de material', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/entrada'] },
+  { key: 'transfers', label: 'Transferências e guias', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/transferencias'] },
+  { key: 'technicianLosses', label: 'Perdas/descontos', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/perdas-tecnico'] },
+  { key: 'serviceOrders', label: 'Ordens de serviço', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/os'] },
+  { key: 'technicianInbox', label: 'Caixa do técnico', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/caixa-tecnico', '/portal-tecnico'] },
+  { key: 'technicianBoxControl', label: 'Central da caixa do técnico', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/central-caixa-tecnico'] },
+  { key: 'stock', label: 'Materiais/Estoque', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/estoque'] },
+  { key: 'patrimony', label: 'Patrimônio', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/patrimonio'] },
+  { key: 'serialLife', label: 'Vida do serial', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/vida-serial'] },
+  { key: 'technicians', label: 'Técnicos', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/tecnicos'] },
+  { key: 'users', label: 'Usuários e permissões', group: 'Administração', roles: ['admin'], routes: ['/usuarios'] },
+  { key: 'biExecutive', label: 'BI Executivo/Operacional', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/executivo'] },
+  { key: 'biFinancial', label: 'BI Financeiro', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/financeiro'] },
+  { key: 'biTechnicians', label: 'BI Técnicos', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/tecnicos'] },
+  { key: 'biAudit', label: 'BI Auditoria e patrimônio', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/auditoria'] },
+  { key: 'movementHistory', label: 'Histórico de movimentações', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/historico-movimentacoes'] },
+  { key: 'audit', label: 'Auditoria completa', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/auditoria'] },
+];
+
+export const ALL_MODULE_KEYS = MODULES.map((module) => module.key);
+
+export const DEFAULT_MODULES_BY_ROLE = {
+  admin: ALL_MODULE_KEYS,
+  supervisor: ALL_MODULE_KEYS.filter((key) => key !== 'users'),
+  estoquista: [
+    'operationsCockpit',
+    'approvals',
+    'materialRequests',
+    'warehouses',
+    'receiving',
+    'transfers',
+    'technicianLosses',
+    'serviceOrders',
+    'technicianInbox',
+    'technicianBoxControl',
+    'stock',
+    'patrimony',
+    'serialLife',
+    'technicians',
+    'biExecutive',
+    'biTechnicians',
+    'movementHistory',
+  ],
+  tecnico: ['materialRequests', 'serviceOrders', 'technicianInbox', 'serialLife'],
+};
+
+export function allowedModulesForRole(role) {
+  if (role === 'admin') return ALL_MODULE_KEYS;
+  return MODULES.filter((module) => module.roles.includes(role)).map((module) => module.key);
+}
+
+export function normalizeModulePermissions(value, role = 'tecnico') {
+  const allowed = new Set(allowedModulesForRole(role));
+  if (role === 'admin') return ALL_MODULE_KEYS;
+
+  if (Array.isArray(value)) {
+    const selected = value.map(String).filter((key) => allowed.has(key));
+    return Array.from(new Set(selected));
+  }
+
+  if (value && typeof value === 'object') {
+    const selected = Object.entries(value)
+      .filter(([, enabled]) => !!enabled)
+      .map(([key]) => key)
+      .filter((key) => allowed.has(key));
+    return Array.from(new Set(selected));
+  }
+
+  return (DEFAULT_MODULES_BY_ROLE[role] || []).filter((key) => allowed.has(key));
+}
+
+export function userCanAccessModule(user, moduleKey) {
+  if (!moduleKey) return true;
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const allowed = normalizeModulePermissions(user.modulePermissions, user.role);
+  return allowed.includes(moduleKey);
+}
+
+
+export function moduleForPath(pathname = '/') {
+  const clean = pathname || '/';
+  const candidates = [];
+  MODULES.forEach((module) => {
+    module.routes.forEach((route) => {
+      const match = route === '/' ? clean === '/' || clean === '/dashboard' : clean === route || clean.startsWith(`${route}/`);
+      if (match) candidates.push({ moduleKey: module.key, length: route.length });
+    });
+  });
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0]?.moduleKey || null;
+}
+
+export function userCanAccessPath(user, pathname) {
+  return userCanAccessModule(user, moduleForPath(pathname));
+}
+
+export function firstAllowedRoute(user) {
+  if (!user) return '/login';
+  if (user.role === 'admin' || userCanAccessModule(user, 'operationsCockpit')) return '/';
+  if (user.role === 'tecnico' && userCanAccessModule(user, 'technicianInbox')) return '/caixa-tecnico';
+  if (userCanAccessModule(user, 'materialRequests')) return '/solicitacoes-material';
+  const module = MODULES.find((item) => userCanAccessModule(user, item.key));
+  return module?.routes?.[0] || '/minha-conta';
+}
+
+export function moduleLabel(key) {
+  return MODULES.find((module) => module.key === key)?.label || key;
+}
+

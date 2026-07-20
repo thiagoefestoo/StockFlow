@@ -4,6 +4,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import { useAuth } from '../contexts/AuthContext';
+import { MODULES, allowedModulesForRole, moduleLabel, normalizeModulePermissions } from '../config/modulePermissions';
 
 const emptyUser = {
   name: '',
@@ -19,6 +20,7 @@ const emptyUser = {
   warehouseIds: [],
   cityAccessText: '',
   approvalLimit: 0,
+  modulePermissions: normalizeModulePermissions(null, 'tecnico'),
 };
 
 
@@ -60,6 +62,23 @@ function randomPassword() {
   return `Stock@${part}${tail}`;
 }
 
+
+function modulesForRole(role) {
+  const allowed = new Set(allowedModulesForRole(role));
+  return MODULES.filter((module) => allowed.has(module.key));
+}
+function modulesByGroupForRole(role) {
+  return modulesForRole(role).reduce((groups, module) => {
+    if (!groups[module.group]) groups[module.group] = [];
+    groups[module.group].push(module);
+    return groups;
+  }, {});
+}
+function permissionSummary(keys) {
+  const selected = Array.isArray(keys) ? keys : [];
+  return selected.length ? `${selected.length} módulo(s) liberado(s)` : 'Nenhum módulo liberado';
+}
+
 export default function Users() {
   const { user: loggedUser, isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
@@ -93,16 +112,19 @@ export default function Users() {
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openCreate(role = 'tecnico') {
-    setForm({ ...emptyUser, role, password: role === 'tecnico' ? 'tec123456' : '' });
+    setForm({ ...emptyUser, role, password: role === 'tecnico' ? 'tec123456' : '', modulePermissions: normalizeModulePermissions(null, role) });
     setModal(true);
   }
   function openEdit(user) {
-    setForm({ ...emptyUser, ...user, password: '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0, companyName: user.companyName || user.Technician?.ContractorCompany?.name || '' });
+    setForm({ ...emptyUser, ...user, password: '', mustChangePassword: !!user.mustChangePassword, warehouseIds: user.warehouseIds || [], cityAccessText: (user.cityAccess || []).join(', '), approvalLimit: user.approvalLimit || 0, companyName: user.companyName || user.Technician?.ContractorCompany?.name || '', modulePermissions: normalizeModulePermissions(user.modulePermissions, user.role) });
     setModal(true);
   }
   function patchForm(patch) {
     const next = { ...form, ...patch };
-    if (patch.role && patch.role !== 'tecnico') next.technicianId = '';
+    if (patch.role) {
+      next.modulePermissions = normalizeModulePermissions(null, patch.role);
+      if (patch.role !== 'tecnico') next.technicianId = '';
+    }
     setForm(next);
   }
   function selectedCitiesFromForm() {
@@ -132,6 +154,13 @@ export default function Users() {
 
     patchForm({ warehouseIds: Array.from(selected), cityAccessText: Array.from(selectedCities).join(', ') });
   }
+  function toggleModulePermission(moduleKey) {
+    if (form.role === 'admin') return;
+    const selected = new Set(normalizeModulePermissions(form.modulePermissions, form.role));
+    if (selected.has(moduleKey)) selected.delete(moduleKey);
+    else selected.add(moduleKey);
+    patchForm({ modulePermissions: normalizeModulePermissions(Array.from(selected), form.role) });
+  }
   async function saveUser() {
     try {
       setMessage('');
@@ -139,7 +168,7 @@ export default function Users() {
         setMessage('A senha precisa ter pelo menos 6 caracteres.');
         return;
       }
-      const payload = { ...form, warehouseIds: form.warehouseIds || [], cityAccess: String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean), approvalLimit: Number(form.approvalLimit || 0) };
+      const payload = { ...form, warehouseIds: form.warehouseIds || [], cityAccess: String(form.cityAccessText || '').split(',').map((x) => x.trim()).filter(Boolean), approvalLimit: Number(form.approvalLimit || 0), modulePermissions: normalizeModulePermissions(form.modulePermissions, form.role) };
       delete payload.technicianId;
       if (form.id) {
         if (!payload.password) delete payload.password;
@@ -336,6 +365,27 @@ export default function Users() {
             {form.role === 'estoquista' && <label>Limite de aprovação do usuário
               <input type="number" value={form.approvalLimit || 0} onChange={(e) => patchForm({ approvalLimit: e.target.value })} />
             </label>}
+            <div className="form-field full-span module-permission-panel">
+              <div className="module-permission-head">
+                <div>
+                  <h4>Controle de acesso aos módulos</h4>
+                  <p>Marque somente os módulos que este usuário poderá ver e acessar. Administrador mantém acesso total.</p>
+                </div>
+                <span className="badge soft">{permissionSummary(normalizeModulePermissions(form.modulePermissions, form.role))}</span>
+              </div>
+              {form.role === 'admin' ? <div className="viz-callout">Administrador possui acesso completo por segurança operacional.</div> : Object.entries(modulesByGroupForRole(form.role)).map(([group, modules]) => (
+                <div className="module-permission-group" key={group}>
+                  <strong>{group}</strong>
+                  <div className="module-permission-grid">
+                    {modules.map((module) => {
+                      const selected = normalizeModulePermissions(form.modulePermissions, form.role).includes(module.key);
+                      return <label className={`module-permission-check ${selected ? 'checked' : ''}`} key={module.key}><input type="checkbox" checked={selected} onChange={() => toggleModulePermission(module.key)} /><span>{module.label}</span></label>;
+                    })}
+                  </div>
+                </div>
+              ))}
+              <small>Exemplo: libere BI Executivo/Operacional para o estoquista e mantenha BI Financeiro desmarcado.</small>
+            </div>
             <label>{form.id ? 'Nova senha manual opcional' : 'Senha inicial'}
               <div className="input-with-button"><input type="text" value={form.password || ''} onChange={(e) => patchForm({ password: e.target.value })} placeholder={form.id ? 'Digite uma nova senha ou deixe vazio para manter' : 'Digite uma senha ou gere automaticamente'} /><button type="button" className="ghost" onClick={() => patchForm({ password: randomPassword() })}>Gerar</button></div>
               <small>Ao preencher manualmente e clicar em Salvar usuário, exatamente essa senha será gravada no banco Neon.</small>
@@ -371,9 +421,10 @@ export default function Users() {
             ['Telefone', details.data.user.phone], ['Cargo/função', details.data.user.jobTitle], ['Empresa do técnico', details.data.user.companyName || details.data.user.Technician?.ContractorCompany?.name],
             ['Último login', dt(details.data.user.lastLoginAt)], ['Senha alterada em', dt(details.data.user.passwordChangedAt)], ['Criado em', dt(details.data.user.createdAt)], ['Atualizado em', dt(details.data.user.updatedAt)],
             ['Bloqueado em', dt(details.data.user.blockedAt)], ['Motivo bloqueio', details.data.user.blockedReason], ['Excluído em', dt(details.data.user.deletedAt)], ['Motivo exclusão', details.data.user.deletedReason],
-            ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).length ? `${(details.data.user.cityAccess || []).length} cidade(s)` : '-'], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],
+            ['Estoques autorizados', (details.data.user.warehouseIds || []).join(', ') || '-'], ['Cidades autorizadas', (details.data.user.cityAccess || []).length ? `${(details.data.user.cityAccess || []).length} cidade(s)` : '-'], ['Módulos liberados', permissionSummary(normalizeModulePermissions(details.data.user.modulePermissions, details.data.user.role))], ['Limite aprovação', Number(details.data.user.approvalLimit || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })], ['Observações', details.data.user.notes],
           ]} />
           <div className="detail-section"><h4>Cidades autorizadas</h4><div className="city-chip-list">{(details.data.user.cityAccess || []).length ? details.data.user.cityAccess.map((city) => <span className="city-chip" key={city}>{city}</span>) : <span className="muted">Nenhuma cidade definida.</span>}</div></div>
+          <div className="detail-section"><h4>Módulos liberados</h4><div className="city-chip-list">{normalizeModulePermissions(details.data.user.modulePermissions, details.data.user.role).map((key) => <span className="city-chip" key={key}>{moduleLabel(key)}</span>)}</div></div>
           <DetailList title="🧾 Histórico de alterações do usuário" items={details.data.audits || []} render={(audit) => <><b>{audit.action} • {dt(audit.createdAt)}</b><span>{audit.message}</span><small>Operador: {audit.actor?.name || 'Sistema'} • IP: {audit.ip || '-'}</small></>} />
         </>}
       </DetailsModal>

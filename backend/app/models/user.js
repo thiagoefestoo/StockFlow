@@ -22,6 +22,7 @@ const User = sequelize.define('User', {
   warehouseIds: { type: DataTypes.JSONB, allowNull: true, defaultValue: [] },
   cityAccess: { type: DataTypes.JSONB, allowNull: true, defaultValue: [] },
   approvalLimit: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  modulePermissions: { type: DataTypes.JSONB, allowNull: true, defaultValue: null },
 }, { tableName: 'users' });
 
 module.exports = User;

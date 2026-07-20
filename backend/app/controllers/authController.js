@@ -6,6 +6,7 @@ const { User, Technician } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
+const { normalizeModulePermissions } = require('../config/modulePermissions');
 
 function publicUser(user) {
   const technician = user.Technician || user.technician || null;
@@ -14,6 +15,7 @@ function publicUser(user) {
     name: user.name,
     email: user.email,
     role: user.role,
+    modulePermissions: normalizeModulePermissions(user.modulePermissions, user.role),
     technicianId: user.technicianId,
     technician: technician ? {
       id: technician.id,

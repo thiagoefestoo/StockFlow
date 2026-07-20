@@ -1,11 +1,11 @@
 const router = require('express').Router();
 const controller = require('../controllers/warehouseController');
-const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
+const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate);
-router.get('/', controller.list);
-router.post('/transfer-stock', requireRoles('admin', 'supervisor', 'estoquista'), controller.transferStock);
-router.post('/:id/request-delete', requireRoles('admin', 'supervisor'), controller.requestDelete);
-router.get('/:id', controller.get);
-router.post('/', requireRoles('admin', 'supervisor'), controller.create);
-router.put('/:id', requireRoles('admin', 'supervisor'), controller.update);
+router.get('/', requireModule('warehouses', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianBoxControl'), controller.list);
+router.post('/transfer-stock', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('warehouses', 'transfers'), controller.transferStock);
+router.post('/:id/request-delete', requireRoles('admin', 'supervisor'), requireModule('warehouses'), controller.requestDelete);
+router.get('/:id', requireModule('warehouses'), controller.get);
+router.post('/', requireRoles('admin', 'supervisor'), requireModule('warehouses'), controller.create);
+router.put('/:id', requireRoles('admin', 'supervisor'), requireModule('warehouses'), controller.update);
 module.exports = router;

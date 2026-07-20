@@ -1,9 +1,9 @@
 const router = require('express').Router();
 const controller = require('../controllers/materialController');
-const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
+const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate);
-router.get('/', controller.list);
-router.get('/:id', controller.get);
-router.post('/', requireRoles('admin', 'supervisor', 'estoquista'), controller.create);
-router.put('/:id', requireRoles('admin', 'supervisor', 'estoquista'), controller.update);
+router.get('/', requireModule('stock', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianLosses'), controller.list);
+router.get('/:id', requireModule('stock', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianLosses'), controller.get);
+router.post('/', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('stock'), controller.create);
+router.put('/:id', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('stock'), controller.update);
 module.exports = router;

@@ -4,6 +4,7 @@ const { User, Technician, AuditLog, ContractorCompany } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
+const { normalizeModulePermissions } = require('../config/modulePermissions');
 
 function computedStatus(user) {
   if (user.deletedAt) return 'excluido';
@@ -22,6 +23,7 @@ function hide(user) {
     warehouseIds: raw.warehouseIds || [],
     cityAccess: raw.cityAccess || [],
     approvalLimit: raw.approvalLimit,
+    modulePermissions: normalizeModulePermissions(raw.modulePermissions, raw.role),
     status: raw.status,
     accessStatus: computedStatus(raw),
     technicianId: raw.technicianId,
@@ -145,7 +147,7 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false, warehouseIds = [], cityAccess = [], approvalLimit = 0, companyName = '' } = req.body;
+  const { name, email, password, role = 'tecnico', technicianId, status = 'ativo', phone, jobTitle, notes, mustChangePassword = false, warehouseIds = [], cityAccess = [], approvalLimit = 0, companyName = '', modulePermissions } = req.body;
   if (!name || !email || !password) return fail(res, 400, 'Nome, e-mail e senha são obrigatórios.');
   if (String(password).length < 6) return fail(res, 400, 'A senha precisa ter pelo menos 6 caracteres.');
   if (!['admin', 'supervisor', 'estoquista', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
@@ -165,6 +167,7 @@ exports.create = asyncHandler(async (req, res) => {
     warehouseIds: normalizedWarehouseIds,
     cityAccess: normalizedCityAccess,
     approvalLimit: Number(approvalLimit || 0),
+    modulePermissions: normalizeModulePermissions(modulePermissions, role),
     mustChangePassword: !!mustChangePassword,
     passwordChangedAt: new Date(),
     passwordHash: await bcrypt.hash(password, 10),
@@ -179,7 +182,7 @@ exports.update = asyncHandler(async (req, res) => {
   if (user.deletedAt) return fail(res, 409, 'Usuário excluído. Restaure antes de editar.');
 
   const before = hide(user);
-  const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword, warehouseIds, cityAccess, approvalLimit, companyName = '' } = req.body;
+  const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword, warehouseIds, cityAccess, approvalLimit, companyName = '', modulePermissions } = req.body;
   const nextRole = role || user.role;
   if (email && email !== user.email) await assertEmailAvailable(String(email).toLowerCase().trim(), user.id);
   const normalizedWarehouseIds = warehouseIds === undefined ? user.warehouseIds : (Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : []);
@@ -198,6 +201,7 @@ exports.update = asyncHandler(async (req, res) => {
     warehouseIds: normalizedWarehouseIds,
     cityAccess: normalizedCityAccess,
     approvalLimit: approvalLimit === undefined ? user.approvalLimit : Number(approvalLimit || 0),
+    modulePermissions: modulePermissions === undefined ? normalizeModulePermissions(user.modulePermissions, nextRole) : normalizeModulePermissions(modulePermissions, nextRole),
     mustChangePassword: mustChangePassword === undefined ? user.mustChangePassword : !!mustChangePassword,
   });
   if (password !== undefined && password !== null && String(password).length > 0) {

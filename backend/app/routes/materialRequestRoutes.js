@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const controller = require('../controllers/materialRequestController');
-const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
-router.use(authenticate);
+const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
+router.use(authenticate, requireModule('materialRequests'));
 router.get('/', controller.list);
 router.get('/summary', controller.summary);
 router.get('/:id', controller.get);

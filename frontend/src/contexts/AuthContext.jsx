@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import api from '../services/api';
+import { firstAllowedRoute, userCanAccessModule, userCanAccessPath } from '../config/modulePermissions';
 
 const AuthContext = createContext(null);
 
@@ -40,7 +41,28 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
-  const value = useMemo(() => ({ user, login, logout, updateUser, refreshUser, loading, isAdmin: user?.role === 'admin', isSupervisor: ['admin', 'supervisor', 'estoquista'].includes(user?.role), isTechnician: user?.role === 'tecnico' }), [user, loading]);
+  function canAccessModule(moduleKey) {
+    return userCanAccessModule(user, moduleKey);
+  }
+
+  function canAccessPath(pathname) {
+    return userCanAccessPath(user, pathname);
+  }
+
+  const value = useMemo(() => ({
+    user,
+    login,
+    logout,
+    updateUser,
+    refreshUser,
+    loading,
+    isAdmin: user?.role === 'admin',
+    isSupervisor: ['admin', 'supervisor', 'estoquista'].includes(user?.role),
+    isTechnician: user?.role === 'tecnico',
+    canAccessModule,
+    canAccessPath,
+    firstAllowedRoute: () => firstAllowedRoute(user),
+  }), [user, loading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

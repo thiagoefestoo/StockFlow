@@ -1685,3 +1685,69 @@ input[readonly], textarea[readonly] {
     display: grid;
   }
 }
+
+/* Controle de acesso por módulo no cadastro/edição de usuários */
+.module-permission-panel {
+  border: 1px solid var(--line, #d9e4f2);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+.module-permission-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.module-permission-head h4 {
+  margin: 0 0 4px;
+  color: var(--text, #0f172a);
+}
+.module-permission-head p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  max-width: 760px;
+}
+.module-permission-group {
+  display: grid;
+  gap: 8px;
+}
+.module-permission-group > strong {
+  font-size: .88rem;
+  color: var(--text, #0f172a);
+}
+.module-permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+.module-permission-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #d9e4f2);
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--muted, #64748b);
+}
+.module-permission-check.checked {
+  border-color: rgba(37, 99, 235, .32);
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+.module-permission-check input {
+  width: 17px;
+  height: 17px;
+  accent-color: #2563eb;
+}
+@media (max-width: 720px) {
+  .module-permission-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -14,6 +14,7 @@ const {
 const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
 const { userWarehouseIds } = require('../utils/warehouseAccess');
+const { hasModuleAccess } = require('../config/modulePermissions');
 
 
 function isManager(user) {
@@ -53,6 +54,10 @@ function positiveOnly(value) {
   return Number(value || 0) > 0 ? Number(value || 0) : 0;
 }
 
+function setRouteIfAllowed(routes, user, moduleKey, route, value) {
+  if (hasModuleAccess(user, moduleKey)) routes[route] = positiveOnly(value);
+}
+
 exports.pendingMenu = asyncHandler(async (req, res) => {
   const user = req.user;
   const routes = {};
@@ -77,11 +82,11 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
       ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
     ]);
 
-    routes['/aprovacoes'] = positiveOnly(pendingApprovals || pendingRequestApprovals);
-    routes['/solicitacoes-material'] = positiveOnly(approvedMaterialRequests);
-    routes['/transferencias'] = positiveOnly(pendingTransferSignatures);
-    routes['/perdas-tecnico'] = positiveOnly(pendingLossSignatures);
-    routes['/os'] = positiveOnly(openOrders);
+    setRouteIfAllowed(routes, user, 'approvals', '/aprovacoes', pendingApprovals || pendingRequestApprovals);
+    setRouteIfAllowed(routes, user, 'materialRequests', '/solicitacoes-material', approvedMaterialRequests);
+    setRouteIfAllowed(routes, user, 'transfers', '/transferencias', pendingTransferSignatures);
+    setRouteIfAllowed(routes, user, 'technicianLosses', '/perdas-tecnico', pendingLossSignatures);
+    setRouteIfAllowed(routes, user, 'serviceOrders', '/os', openOrders);
   } else if (user?.role === 'tecnico') {
     const requestScope = requestScopeFor(user);
     const transferScope = transferScopeFor(user);
@@ -98,8 +103,8 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
       ServiceOrder.count({ where: { technicianId: user.technicianId || -1, status: { [Op.in]: ['aberta', 'pendente'] } } }),
     ]);
 
-    routes['/solicitacoes-material'] = positiveOnly(requestsInProgress);
-    routes['/caixa-tecnico'] = positiveOnly(pendingSignatures + unreadNotifications + openOrders);
+    setRouteIfAllowed(routes, user, 'materialRequests', '/solicitacoes-material', requestsInProgress);
+    setRouteIfAllowed(routes, user, 'technicianInbox', '/caixa-tecnico', pendingSignatures + unreadNotifications + openOrders);
   }
 
   const total = Object.values(routes).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -160,11 +165,11 @@ exports.cockpit = asyncHandler(async (req, res) => {
   }
 
   const queue = [
-    { label: 'Solicitações para aprovar', value: pendingRequests, route: '/aprovacoes', tone: pendingRequests ? 'warning' : 'success' },
-    { label: 'Separações para entregar', value: approvedRequests, route: '/solicitacoes-material', tone: approvedRequests ? 'warning' : 'success' },
-    { label: 'Guias sem assinatura', value: pendingSignatures, route: '/transferencias', tone: pendingSignatures ? 'danger' : 'success' },
-    { label: 'OS abertas/pendentes', value: openOrders, route: '/os', tone: openOrders ? 'warning' : 'success' },
-  ];
+    hasModuleAccess(req.user, 'approvals') && { label: 'Solicitações para aprovar', value: pendingRequests, route: '/aprovacoes', tone: pendingRequests ? 'warning' : 'success' },
+    hasModuleAccess(req.user, 'materialRequests') && { label: 'Separações para entregar', value: approvedRequests, route: '/solicitacoes-material', tone: approvedRequests ? 'warning' : 'success' },
+    hasModuleAccess(req.user, 'transfers') && { label: 'Guias sem assinatura', value: pendingSignatures, route: '/transferencias', tone: pendingSignatures ? 'danger' : 'success' },
+    hasModuleAccess(req.user, 'serviceOrders') && { label: 'OS abertas/pendentes', value: openOrders, route: '/os', tone: openOrders ? 'warning' : 'success' },
+  ].filter(Boolean);
 
   return ok(res, {
     kpis: {

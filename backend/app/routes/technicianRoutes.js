@@ -1,10 +1,10 @@
 const router = require('express').Router();
 const controller = require('../controllers/technicianController');
-const { authenticate, requireRoles } = require('../middlewares/authMiddleware');
+const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate);
-router.get('/', requireRoles('admin', 'supervisor'), controller.list);
-router.get('/:id', requireRoles('admin', 'supervisor'), controller.get);
-router.get('/:id/stock', requireRoles('admin', 'supervisor', 'estoquista', 'tecnico'), controller.stock);
-router.post('/', requireRoles('admin', 'supervisor'), controller.create);
-router.put('/:id', requireRoles('admin', 'supervisor'), controller.update);
+router.get('/', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('technicians', 'transfers', 'technicianBoxControl', 'technicianLosses', 'materialRequests'), controller.list);
+router.get('/:id', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('technicians', 'technicianBoxControl', 'technicianLosses', 'transfers'), controller.get);
+router.get('/:id/stock', requireRoles('admin', 'supervisor', 'estoquista', 'tecnico'), requireModule('technicianInbox', 'technicianBoxControl'), controller.stock);
+router.post('/', requireRoles('admin', 'supervisor'), requireModule('technicians'), controller.create);
+router.put('/:id', requireRoles('admin', 'supervisor'), requireModule('technicians'), controller.update);
 module.exports = router;

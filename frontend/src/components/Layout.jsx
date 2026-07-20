@@ -19,10 +19,13 @@ const technicianGroups = [
 ];
 
 export default function Layout() {
-  const { user, logout, isSupervisor, isAdmin } = useAuth();
+  const { user, logout, isSupervisor, isAdmin, canAccessPath } = useAuth();
   const location = useLocation();
-  const groups = isSupervisor ? adminGroups.filter((group) => !group.adminOnly || isAdmin) : technicianGroups;
-  const defaultOpen = useMemo(() => Object.fromEntries(groups.map((g, i) => [g.title, i < 2])), [isSupervisor]);
+  const baseGroups = isSupervisor ? adminGroups.filter((group) => !group.adminOnly || isAdmin) : technicianGroups;
+  const groups = useMemo(() => baseGroups
+    .map((group) => ({ ...group, links: group.links.filter(([to]) => canAccessPath(to)) }))
+    .filter((group) => group.links.length > 0), [baseGroups, canAccessPath]);
+  const defaultOpen = useMemo(() => Object.fromEntries(groups.map((g, i) => [g.title, i < 2])), [groups]);
   const [openGroups, setOpenGroups] = useState(defaultOpen);
   const [pendingMenu, setPendingMenu] = useState({ total: 0, routes: {} });
 

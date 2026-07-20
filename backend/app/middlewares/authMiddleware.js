@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const { User, Technician } = require('../models');
+const { normalizeModulePermissions, hasModuleAccess } = require('../config/modulePermissions');
 
 async function authenticate(req, res, next) {
   try {
@@ -20,6 +21,7 @@ async function authenticate(req, res, next) {
       warehouseIds: user.warehouseIds || [],
       cityAccess: user.cityAccess || [],
       approvalLimit: user.approvalLimit,
+      modulePermissions: normalizeModulePermissions(user.modulePermissions, user.role),
       accessStatus: user.deletedAt ? 'excluido' : user.blockedAt ? 'bloqueado' : user.status,
       mustChangePassword: !!user.mustChangePassword,
     };
@@ -37,4 +39,15 @@ function requireRoles(...roles) {
   };
 }
 
-module.exports = { authenticate, requireRoles };
+
+function requireModule(...moduleKeys) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Não autenticado.' });
+    if (req.user.role === 'admin') return next();
+    const allowed = moduleKeys.some((moduleKey) => hasModuleAccess(req.user, moduleKey));
+    if (!allowed) return res.status(403).json({ success: false, message: 'Você não tem permissão para acessar este módulo.' });
+    return next();
+  };
+}
+
+module.exports = { authenticate, requireRoles, requireModule };

@@ -7,6 +7,7 @@ const env = require('./config/env');
 require('./app/models');
 const { startAutoIntelligence } = require('./app/services/intelligenceService');
 const { ensureBootstrapAdmin } = require('./app/services/adminBootstrapService');
+const { ensureRuntimeSchema } = require('./app/services/runtimeSchemaService');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -68,6 +69,7 @@ app.use((req, res) => res.status(404).json({ success: false, message: `Rota não
 async function start() {
   try {
     await sequelize.authenticate();
+    await ensureRuntimeSchema();
     if (env.dbSync) await sequelize.sync({ alter: true });
     await ensureBootstrapAdmin();
     startAutoIntelligence(env.autoIntelligenceMinutes);
