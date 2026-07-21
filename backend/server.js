@@ -1,4 +1,5 @@
 require('dotenv').config();
+const quantityResponseMiddleware = require('./app/middlewares/quantityResponseMiddleware');
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -10,6 +11,8 @@ const { ensureBootstrapAdmin } = require('./app/services/adminBootstrapService')
 const { ensureRuntimeSchema } = require('./app/services/runtimeSchemaService');
 
 const app = express();
+
+app.use(quantityResponseMiddleware);
 app.set('trust proxy', 1);
 
 function isAllowedOrigin(origin) {
