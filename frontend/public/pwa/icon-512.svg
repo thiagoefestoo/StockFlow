@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#071428"/>
+  <text x="256" y="230" text-anchor="middle" font-family="Arial, sans-serif" font-size="92" font-weight="700" fill="#3f7cff">SUPER</text>
+  <text x="256" y="318" text-anchor="middle" font-family="Arial, sans-serif" font-size="58" font-weight="700" fill="#ffffff">INFRA</text>
+</svg>
