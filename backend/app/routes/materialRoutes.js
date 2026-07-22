@@ -4,6 +4,6 @@ const { authenticate, requireRoles, requireModule } = require('../middlewares/au
 router.use(authenticate);
 router.get('/', requireModule('stock', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianLosses'), controller.list);
 router.get('/:id', requireModule('stock', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianLosses'), controller.get);
-router.post('/', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('stock'), controller.create);
-router.put('/:id', requireRoles('admin', 'supervisor', 'estoquista'), requireModule('stock'), controller.update);
+router.post('/', requireModule('stock'), controller.create);
+router.put('/:id', requireModule('stock'), controller.update);
 module.exports = router;

@@ -31,6 +31,9 @@ api.interceptors.response.use(
       localStorage.removeItem('telecomstock_token');
       localStorage.removeItem('telecomstock_user');
     }
+    if (error.response?.status === 403) {
+      window.dispatchEvent(new CustomEvent('superinfra:permission-denied', { detail: error.response?.data }));
+    }
     return Promise.reject(error);
   }
 );

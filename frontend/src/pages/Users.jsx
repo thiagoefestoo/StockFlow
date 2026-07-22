@@ -161,6 +161,14 @@ export default function Users() {
     else selected.add(moduleKey);
     patchForm({ modulePermissions: normalizeModulePermissions(Array.from(selected), form.role) });
   }
+  function selectAllModules() {
+    if (form.role === 'admin') return;
+    patchForm({ modulePermissions: normalizeModulePermissions(assignableModulesForRole(form.role), form.role) });
+  }
+  function clearAllModules() {
+    if (form.role === 'admin') return;
+    patchForm({ modulePermissions: [] });
+  }
   async function saveUser() {
     try {
       setMessage('');
@@ -371,7 +379,11 @@ export default function Users() {
                   <h4>Controle de acesso aos módulos</h4>
                   <p>Todos os módulos ficam disponíveis para seleção. Marque apenas o que este usuário poderá ver e acessar. Administrador mantém acesso total.</p>
                 </div>
-                <span className="badge soft">{permissionSummary(normalizeModulePermissions(form.modulePermissions, form.role))}</span>
+                <div className="row-actions compact-actions">
+                  {form.role !== 'admin' && <button type="button" className="ghost" onClick={selectAllModules}>Marcar todos</button>}
+                  {form.role !== 'admin' && <button type="button" className="ghost" onClick={clearAllModules}>Desmarcar todos</button>}
+                  <span className="badge soft">{permissionSummary(normalizeModulePermissions(form.modulePermissions, form.role))}</span>
+                </div>
               </div>
               {form.role === 'admin' ? <div className="viz-callout">Administrador possui acesso completo por segurança operacional.</div> : Object.entries(modulesByGroupForRole(form.role)).map(([group, modules]) => (
                 <div className="module-permission-group" key={group}>

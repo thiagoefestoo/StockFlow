@@ -1,10 +1,10 @@
 const router = require('express').Router();
 const controller = require('../controllers/transferController');
 const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
-router.use(authenticate, requireRoles('admin', 'supervisor', 'estoquista'), requireModule('transfers'));
+router.use(authenticate, requireModule('transfers'));
 router.get('/', controller.list);
 router.get('/:id', controller.get);
-router.put('/:id', requireRoles('admin'), controller.update);
+router.put('/:id', controller.update);
 router.post('/', controller.create);
 router.post('/:id/sign', controller.sign);
 module.exports = router;

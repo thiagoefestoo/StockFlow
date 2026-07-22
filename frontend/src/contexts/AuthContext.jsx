@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import { firstAllowedRoute, userCanAccessModule, userCanAccessPath } from '../config/modulePermissions';
 
@@ -40,6 +40,35 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('telecomstock_user');
     setUser(null);
   }
+
+
+  useEffect(() => {
+    const token = localStorage.getItem('telecomstock_token');
+    if (!token || !user) return undefined;
+
+    let cancelled = false;
+
+    async function superinfraAutoRefreshPermissions() {
+      try {
+        const { data } = await api.get('/auth/me');
+        if (!cancelled && data?.data?.user) {
+          updateUser(data.data.user);
+        }
+      } catch (error) {
+        if (error.response?.status === 401) logout();
+      }
+    }
+
+    superinfraAutoRefreshPermissions();
+    const id = setInterval(superinfraAutoRefreshPermissions, 60000);
+    window.addEventListener('focus', superinfraAutoRefreshPermissions);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener('focus', superinfraAutoRefreshPermissions);
+    };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function canAccessModule(moduleKey) {
     return userCanAccessModule(user, moduleKey);

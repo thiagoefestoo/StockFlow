@@ -14,14 +14,11 @@ const adminGroups = [
   { title: 'Minha conta', links: [['/minha-conta', 'CO', 'Configurações da conta']] },
   { title: 'BI e auditoria', links: [['/bi/executivo', 'BE', 'BI Executivo'], ['/bi/financeiro', 'BF', 'BI Financeiro'], ['/bi/tecnicos', 'BT', 'BI Técnicos'], ['/bi/auditoria', 'BA', 'BI Auditoria'], ['/avaliacao-perdas', 'AV', 'Avaliação perdas'], ['/historico-movimentacoes', 'HM', 'Histórico'], ['/auditoria', 'AU', 'Auditoria']] },
 ];
-const technicianGroups = [
-  { title: 'Minha operação', links: [['/caixa-tecnico', 'CX', 'Minha caixa'], ['/solicitacoes-material', 'SM', 'Solicitar material'], ['/vida-serial', 'VS', 'Vida do serial'], ['/minha-conta', 'CO', 'Minha conta']] },
-];
 
 export default function Layout() {
-  const { user, logout, isSupervisor, isAdmin, canAccessPath } = useAuth();
+  const { user, logout, isAdmin, canAccessPath } = useAuth();
   const location = useLocation();
-  const baseGroups = isSupervisor ? adminGroups.filter((group) => !group.adminOnly || isAdmin) : technicianGroups;
+  const baseGroups = adminGroups.filter((group) => !group.adminOnly || isAdmin);
   const groups = useMemo(() => baseGroups
     .map((group) => ({ ...group, links: group.links.filter(([to]) => canAccessPath(to)) }))
     .filter((group) => group.links.length > 0), [baseGroups, canAccessPath]);
