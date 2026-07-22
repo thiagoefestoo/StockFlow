@@ -15,6 +15,19 @@ function toQuantityNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function isReturnTransfer(transfer) {
+  return String(transfer?.transferNumber || '').toUpperCase().startsWith('RETORNO-');
+}
+
+function transferTypeLabel(transfer) {
+  return isReturnTransfer(transfer) ? 'Retorno técnico → estoque' : 'Entrega estoque → técnico';
+}
+
+function transferWarehouseLabel(transfer) {
+  return isReturnTransfer(transfer) ? 'Estoque destino' : 'Estoque origem';
+}
+
+
 function normalizeSerialText(value) { return String(value || '').trim().toLowerCase(); }
 function parseSerialTerms(value) {
   return String(value || '')
@@ -163,7 +176,7 @@ export default function Transfers() {
       window.alert('Este estoque não possui materiais disponíveis para transferência.');
       return;
     }
-    setForm({ ...form, items: [...form.items, { materialId: '', quantity: 1, serialNumbers: [] }] });
+    setForm({ ...form, items: [...form.items, { materialId: '', quantity: '', serialNumbers: [] }] });
   }
 
   function removeItem(i) {
@@ -181,7 +194,7 @@ export default function Transfers() {
     const selected = new Set(item.serialNumbers || []);
     if (selected.has(serialNumber)) selected.delete(serialNumber);
     else selected.add(serialNumber);
-    updateItem(i, { serialNumbers: Array.from(selected), quantity: selected.size || item.quantity || 1 });
+    updateItem(i, { serialNumbers: Array.from(selected) });
   }
 
 
@@ -250,7 +263,7 @@ export default function Transfers() {
         const available = stockByMaterial[item.materialId]?.length || 0;
         if (quantity <= 0) return `Informe a quantidade que deseja transferir de ${material.name}.`;
         if (quantity > available) return `Saldo insuficiente de ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
-        if (serialCount !== quantity) return `Para ${material.name}, selecione exatamente ${quantity} serial(is). Selecionado(s): ${serialCount}.`;
+        if (serialCount !== quantity) return `Para ${material.name}, selecione exatamente ${formatQuantity(quantity)} serial(is). Selecionado(s): ${formatQuantity(serialCount)}.`;
       } else {
         const quantity = toQuantityNumber(item.quantity);
         const available = Number(material.mainStock || 0);
@@ -320,7 +333,7 @@ export default function Transfers() {
         <button onClick={openNewTransfer}>➕ Nova transferência</button>
       </div>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Técnico</th><th>Estoque origem</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{transfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td>{tr.Technician?.name}</td><td>{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div></section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{transfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div></section>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Entregar carga solicitada ao técnico' : '📦 Nova transferência para técnico'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Gerar guia e enviar para caixa</button></>}>
         <div className="transfer-wizard">
@@ -352,8 +365,8 @@ export default function Transfers() {
               <div className="item-card transfer-item-card" key={i}>
                 <div className="item-head"><strong>📦 Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
                 <div className="form-grid">
-                  <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
-                  {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" max={Number(material?.mainStock || 0)} step="0.001" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível neste estoque: {qtyLabel(material?.mainStock, material?.unit)}</small></label>}
+                  <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: '' })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
+                  {material && <label>Quantidade a transferir<input type="number" min="1" max={material.requiresSerial ? allSerialAssets.length : Number(material?.mainStock || 0)} step={material.requiresSerial ? '1' : '0.001'} value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível neste estoque: {qtyLabel(material.requiresSerial ? allSerialAssets.length : material?.mainStock, material?.unit)}</small></label>}
                 </div>
                 {material?.requiresSerial && (
                   <div className="serial-picker">
@@ -362,13 +375,7 @@ export default function Transfers() {
                         <strong>🏷️ Seriais disponíveis no estoque selecionado</strong>
                         <span>{serialAssets.length} disponível(is) filtrado(s) • {allSerialAssets.length} no estoque • {item.serialNumbers?.length || 0} selecionado(s)</span>
                       </div>
-                      <div className="serial-transfer-quantity">
-                        <label>
-                          <span>Quantidade a transferir</span>
-                          <input type="number" min="1" max={allSerialAssets.length || 1} step="1" value={item.quantity || ''} onChange={(e) => updateItem(i, { quantity: e.target.value })} />
-                        </label>
-                        <button type="button" className="ghost" onClick={() => selectQuantityForItem(i, serialAssets)}>Selecionar quantidade informada</button>
-                      </div>
+                      <div className="serial-transfer-quantity"><button type="button" className="ghost" onClick={() => selectQuantityForItem(i, serialAssets)}>Selecionar quantidade informada</button></div>
                       <div className="serial-actions-row">
                         <input value={item.assetSearch || ''} onChange={(e) => updateItem(i, { assetSearch: e.target.value })} placeholder="Buscar serial, MAC, marca..." />
                         <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, serialAssets.map((asset) => asset.serialNumber))}>Selecionar tudo filtrado</button>
@@ -401,7 +408,7 @@ export default function Transfers() {
       </Modal>
 
       <DetailsModal open={!!details} title={`🔎 Detalhes da guia ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/transferencias/${details.id}`}>Abrir guia</Link>}{isAdmin && details && <button onClick={() => { setEdit({ open: true, item: details, form: { notes: details.notes || '', status: details.status || 'pendente_assinatura', deliveredAt: details.deliveredAt ? String(details.deliveredAt).slice(0, 16) : '', signatureResponsible: details.signatureResponsible || '' } }); setDetails(null); }}>Editar</button>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Estoque origem", details.Warehouse?.name || details.warehouseId || '-'], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Anexo da guia" />}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", transferTypeLabel(details)], ["Técnico", details.Technician?.name], [transferWarehouseLabel(details), details.Warehouse?.name || details.warehouseId || '-'], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Anexo da guia" />}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

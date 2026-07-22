@@ -34,7 +34,7 @@ export default function TechnicianReturns() {
 
   async function loadBox(id = selectedTech) {
     if (!id) { setBox(null); return; }
-    const res = await api.get(`/stock/technician-box/${id}`);
+    const res = await api.get(`/stock/technician-box/${id}?_=${Date.now()}`);
     setBox(res.data.data);
   }
 
@@ -115,7 +115,7 @@ export default function TechnicianReturns() {
     if (error) { setMessage(`❌ ${error}`); return; }
     setLoading(true);
     try {
-      await api.post('/stock/technician-box/return-to-stock', {
+      const response = await api.post('/stock/technician-box/return-to-stock', {
         technicianId: selectedTech,
         warehouseId: form.warehouseId,
         reference: form.reference,
@@ -126,7 +126,8 @@ export default function TechnicianReturns() {
           serialNumbers: Array.isArray(item.serialNumbers) ? item.serialNumbers : [],
         })),
       });
-      setMessage('✅ Material retornado para o estoque. Histórico, auditoria e BI foram atualizados.');
+      const transfer = response.data?.data;
+      setMessage(`✅ Material retornado para o estoque e guia ${transfer?.transferNumber || transfer?.reference || ''} gerada em Transferências para anexar documento.`);
       setForm({ ...emptyForm, warehouseId: form.warehouseId });
       await loadBox(selectedTech);
     } catch (error) {
@@ -143,7 +144,7 @@ export default function TechnicianReturns() {
   return (
     <div className="page-grid technician-return-page">
       <div className="toolbar">
-        <div><h2>↩️ Retorno da caixa do técnico para estoque</h2><p>Retire material da responsabilidade do técnico, escolha o estoque de destino e registre histórico, auditoria e BI.</p></div>
+        <div><h2>↩️ Retorno da caixa do técnico para estoque</h2><p>Retire material da responsabilidade do técnico, escolha o estoque de destino e gere uma guia em Transferências para anexar documento/assinatura.</p></div>
         <button className="ghost" onClick={() => loadBox(selectedTech)}>🔄 Atualizar</button>
       </div>
 

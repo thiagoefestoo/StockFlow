@@ -54,14 +54,23 @@ exports.create = asyncHandler(async (req, res) => {
     const record = await Transfer.create({ transferNumber: nextNumber(), technicianId, deliveredAt: deliveredAt || new Date(), notes, createdById: req.user.id, warehouseId: sourceWarehouseId }, { transaction });
     let totalQuantity = 0;
     let totalValue = 0;
+    const usedSerials = new Set();
     for (const item of items) {
       const material = await Material.findByPk(item.materialId, { transaction });
       if (!material) throw new Error('Material não encontrado.');
       const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
+      const requestedQuantity = qty(item.quantity);
       const quantity = qty(material.requiresSerial ? serials.length : item.quantity);
       const unitCost = money(item.unitCost ?? material.unitCost);
       if (quantity <= 0) throw new Error(`Quantidade inválida para ${material.name}.`);
       if (material.requiresSerial) {
+        if (requestedQuantity <= 0) throw new Error(`Informe a quantidade para ${material.name}.`);
+        if (serials.length !== requestedQuantity) throw new Error(`Para ${material.name}, a quantidade informada precisa ser igual aos seriais selecionados. Quantidade: ${qty(requestedQuantity)}. Seriais: ${serials.length}.`);
+        for (const serialNumber of serials) {
+          const serialKey = String(serialNumber).trim().toUpperCase();
+          if (usedSerials.has(serialKey)) throw new Error(`Serial repetido na guia: ${serialNumber}.`);
+          usedSerials.add(serialKey);
+        }
         for (const serialNumber of serials) {
           const asset = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
           if (!asset || asset.ownerType !== 'estoque' || asset.status !== 'em_estoque' || (sourceWarehouseId && Number(asset.warehouseId) !== Number(sourceWarehouseId))) throw new Error(`Serial indisponível no estoque de origem: ${serialNumber}.`);

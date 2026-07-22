@@ -6,6 +6,44 @@ function normalizeApiUrl(value) {
   return raw.replace(/\/$/, '');
 }
 
+
+function isQuantityField(key) {
+  const normalized = String(key || '').toLowerCase();
+  return (
+    normalized === 'qtd' ||
+    normalized === 'totalitems' ||
+    normalized === 'totalquantity' ||
+    normalized === 'approvedquantity' ||
+    normalized === 'requestedquantity' ||
+    normalized === 'availablequantity' ||
+    normalized.includes('quantity')
+  );
+}
+
+function normalizeQuantityValue(value) {
+  if (value === null || value === undefined || value === '') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : value;
+  if (typeof value !== 'string') return value;
+
+  const raw = value.trim();
+  if (!/^[-+]?\d+(\.\d+)?$/.test(raw)) return value;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
+function normalizeQuantityPayload(payload) {
+  if (Array.isArray(payload)) return payload.map(normalizeQuantityPayload);
+  if (!payload || typeof payload !== 'object') return payload;
+
+  const next = { ...payload };
+  for (const [key, value] of Object.entries(next)) {
+    if (isQuantityField(key)) next[key] = normalizeQuantityValue(value);
+    else next[key] = normalizeQuantityPayload(value);
+  }
+  return next;
+}
+
 const baseURL = normalizeApiUrl(process.env.REACT_APP_API_URL);
 
 if (process.env.NODE_ENV === 'production' && !process.env.REACT_APP_API_URL) {
@@ -25,7 +63,10 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    response.data = normalizeQuantityPayload(response.data);
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('telecomstock_token');

@@ -24,7 +24,7 @@ function normalizeQuantityValue(value) {
   const raw = value.trim();
 
   // Aceita valores decimais vindos do PostgreSQL/Sequelize: "1.000", "20.000"
-  if (!/^[-+]?\\d+(\\.\\d+)?$/.test(raw)) return value;
+  if (!/^[-+]?\d+(\.\d+)?$/.test(raw)) return value;
 
   const parsed = Number(raw);
 

@@ -157,8 +157,14 @@ exports.technicianBox = asyncHandler(async (req, res) => {
   });
 });
 
+function nextReturnNumber() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  return `RETORNO-${stamp}`;
+}
+
 exports.returnFromTechnician = asyncHandler(async (req, res) => {
-  const { technicianId, reference, notes, warehouseId } = req.body;
+  const { technicianId, reference, notes, warehouseId, attachmentName, attachmentData, signatureResponsible } = req.body;
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   const targetWarehouseId = warehouseId || null;
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
@@ -174,8 +180,25 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
   const result = await sequelize.transaction(async (transaction) => {
     let totalQuantity = 0;
     let totalValue = 0;
-    const movementReference = reference || `RETORNO-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
+    const movementReference = reference || nextReturnNumber();
     const affected = [];
+
+    const transfer = await Transfer.create({
+      transferNumber: movementReference,
+      technicianId,
+      deliveredAt: new Date(),
+      status: attachmentData ? 'assinado' : 'pendente_assinatura',
+      signedAt: attachmentData ? new Date() : null,
+      attachmentName: attachmentName || null,
+      attachmentData: attachmentData || null,
+      signatureResponsible: signatureResponsible || null,
+      notes: `RETORNO DA CAIXA DO TÉCNICO PARA ESTOQUE. ${notes || ''}`.trim(),
+      stampText: 'Declaro que os materiais listados foram devolvidos pelo técnico e conferidos para retorno ao estoque informado.',
+      createdById: req.user.id,
+      warehouseId: targetWarehouseId,
+    }, { transaction });
+
+    const usedSerials = new Set();
 
     for (const item of items) {
       const material = await Material.findByPk(item.materialId, { transaction });
@@ -185,9 +208,14 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
         const serials = parseSerials(item.serialNumbers);
         if (!serials.length) continue;
         for (const serialNumber of serials) {
+          const serialKey = String(serialNumber).trim().toUpperCase();
+          if (usedSerials.has(serialKey)) throw new Error(`Serial repetido no retorno: ${serialNumber}.`);
+          usedSerials.add(serialKey);
+
           const asset = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
           if (!asset || asset.ownerType !== 'tecnico' || Number(asset.technicianId) !== Number(technicianId)) throw new Error(`Serial não está na caixa do técnico: ${serialNumber}.`);
           const beforeAsset = asset.toJSON();
+          const cost = money(asset.acquisitionCost || unitCost);
           asset.ownerType = 'estoque';
           asset.status = 'em_estoque';
           asset.technicianId = null;
@@ -196,9 +224,10 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
           asset.lastMovementAt = new Date();
           asset.notes = [asset.notes, notes ? `Retorno ao estoque: ${notes}` : null].filter(Boolean).join(' | ');
           await asset.save({ transaction });
+          await TransferItem.create({ transferId: transfer.id, materialId: material.id, assetId: asset.id, quantity: 1, unitCost: cost, totalCost: cost, serialNumber }, { transaction });
           await StockMovement.create({ type: 'retorno_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'tecnico', toOwnerType: 'estoque', fromTechnicianId: technicianId, toWarehouseId: targetWarehouseId, reference: movementReference, notes: notes || 'Retorno administrativo da caixa do técnico.', createdById: req.user.id }, { transaction });
           totalQuantity += 1;
-          totalValue += Number(asset.acquisitionCost || unitCost);
+          totalValue += Number(cost);
           affected.push({ serialNumber, before: beforeAsset, after: asset.toJSON() });
         }
       } else {
@@ -206,29 +235,46 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
         if (quantity <= 0) continue;
         await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
         await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: targetWarehouseId, delta: quantity, transaction });
+        const totalCost = money(quantity * unitCost);
+        await TransferItem.create({ transferId: transfer.id, materialId: material.id, quantity, unitCost, totalCost }, { transaction });
         await StockMovement.create({ type: 'retorno_tecnico', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'estoque', fromTechnicianId: technicianId, toWarehouseId: targetWarehouseId, reference: movementReference, notes: notes || 'Retorno administrativo da caixa do técnico.', createdById: req.user.id }, { transaction });
         totalQuantity += quantity;
-        totalValue += quantity * unitCost;
+        totalValue += Number(totalCost);
         affected.push({ materialId: material.id, quantity });
       }
     }
 
     if (!affected.length || totalQuantity <= 0) throw new Error('Nenhum item válido foi selecionado para retorno ao estoque.');
 
+    transfer.totalQuantity = qty(totalQuantity);
+    transfer.totalValue = money(totalValue);
+    await transfer.save({ transaction });
+
+    await Notification.create({
+      role: 'admin',
+      type: 'estoque',
+      severity: 'info',
+      title: `Retorno registrado ${transfer.transferNumber}`,
+      message: `${qty(totalQuantity)} item(ns) retornaram da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.`,
+      route: '/transferencias',
+      metadata: { transferId: transfer.id, technicianId: Number(technicianId), warehouseId: targetWarehouseId, totalQuantity: qty(totalQuantity) },
+    }, { transaction });
+
     await writeAudit({
       req,
       action: 'return_to_stock',
-      entity: 'TechnicianBox',
-      entityId: String(technicianId),
-      message: `Retorno de ${qty(totalQuantity)} item(ns) da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.`,
-      afterData: { reference: movementReference, warehouse: targetWarehouse.toJSON(), totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
+      entity: 'Transfer',
+      entityId: transfer.id,
+      message: `Guia ${transfer.transferNumber} retornou ${qty(totalQuantity)} item(ns) da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.`,
+      afterData: { ...transfer.toJSON(), warehouse: targetWarehouse.toJSON(), totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
       transaction,
     });
-    return { reference: movementReference, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affectedCount: affected.length };
+    return { ...transfer.toJSON(), reference: movementReference, transferId: transfer.id, affectedCount: affected.length };
   });
 
-  return created(res, result, 'Material devolvido da caixa do técnico para o estoque.');
+  return created(res, result, 'Material devolvido da caixa do técnico para o estoque e guia de retorno gerada em Transferências.');
 });
+
 
 exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
   let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'outro', completedAt, reference, notes, items = [] } = req.body;
