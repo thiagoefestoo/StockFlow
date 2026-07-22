@@ -89,6 +89,16 @@ exports.create = asyncHandler(async (req, res) => {
     record.totalValue = money(totalValue);
     await record.save({ transaction });
 
+    await Notification.create({
+      role: 'tecnico',
+      type: 'estoque',
+      severity: 'success',
+      title: `Nova carga enviada ${record.transferNumber}`,
+      message: `${qty(totalQuantity)} item(ns) foram transferidos para a caixa do técnico ${technician.name}.`,
+      route: '/caixa-tecnico',
+      metadata: { transferId: record.id, technicianId: Number(technicianId), warehouseId: sourceWarehouseId, totalQuantity: qty(totalQuantity) },
+    }, { transaction });
+
     if (linkedRequest) {
       const beforeRequest = linkedRequest.toJSON();
       linkedRequest.status = 'entregue';

@@ -45,6 +45,29 @@ export default function TechnicianInbox() {
 
   useEffect(() => { loadTechs(); loadCatalog(); if (selectedTech) loadStock(selectedTech); }, []);
 
+  useEffect(() => {
+    if (!selectedTech) return undefined;
+
+    const refresh = () => loadStock(selectedTech);
+    const interval = setInterval(refresh, 15000);
+    const onFocus = () => refresh();
+    const onStorage = (event) => {
+      if (event.key === 'superinfra:technician-box-refresh') refresh();
+    };
+    const onLocalRefresh = () => refresh();
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('superinfra:technician-box-refresh', onLocalRefresh);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('superinfra:technician-box-refresh', onLocalRefresh);
+    };
+  }, [selectedTech]);
+
   const serialByMaterial = (materialId) => (stock?.assets || []).filter((a) => Number(a.materialId) === Number(materialId));
   const stockMaterials = useMemo(() => [...(stock?.balances || []).map((b) => b.Material), ...(stock?.assets || []).map((a) => a.Material)].filter(Boolean).filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i), [stock]);
   const boxGroups = useMemo(() => {
