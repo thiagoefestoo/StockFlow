@@ -26,6 +26,8 @@ export default function TechnicianBoxControl() {
   const [warehouses, setWarehouses] = useState([]);
   const [selectedTech, setSelectedTech] = useState('');
   const [box, setBox] = useState(null);
+  const [boxLoading, setBoxLoading] = useState(false);
+  const [lastBoxRefresh, setLastBoxRefresh] = useState(null);
   const [tab, setTab] = useState('cliente');
   const [clientForm, setClientForm] = useState(emptyClientForm);
   const [returnForm, setReturnForm] = useState(emptyReturnForm);
@@ -47,8 +49,14 @@ export default function TechnicianBoxControl() {
 
   async function loadBox(id = selectedTech) {
     if (!id) return;
-    const res = await api.get(`/stock/technician-box/${id}`);
-    setBox(res.data.data);
+    setBoxLoading(true);
+    try {
+      const res = await api.get(`/stock/technician-box/${id}?_=${Date.now()}`);
+      setBox(res.data.data);
+      setLastBoxRefresh(new Date());
+    } finally {
+      setBoxLoading(false);
+    }
   }
 
   useEffect(() => { loadTechs(); }, []);
@@ -86,6 +94,49 @@ export default function TechnicianBoxControl() {
       if (!map.has(balance.materialId)) map.set(balance.materialId, balance.Material);
     }
     return Array.from(map.values()).filter(Boolean);
+  }, [box]);
+
+  const custodyRows = useMemo(() => {
+    const rows = [];
+
+    for (const asset of box?.assets || []) {
+      rows.push({
+        key: `asset-${asset.id}`,
+        type: 'Equipamento serializado',
+        material: asset.Material?.name || 'Equipamento',
+        category: asset.Material?.category || '-',
+        unit: asset.Material?.unit || 'un',
+        quantity: 1,
+        serial: asset.serialNumber || '-',
+        mac: asset.mac || '-',
+        warehouse: asset.Warehouse?.name || '-',
+        value: Number(asset.acquisitionCost || asset.Material?.unitCost || 0),
+        custodyStartedAt: asset.custodyStartedAt,
+        custodyDays: asset.custodyDays || 0,
+      });
+    }
+
+    for (const balance of box?.balances || []) {
+      const quantity = Number(balance.quantity || 0);
+      if (quantity <= 0) continue;
+
+      rows.push({
+        key: `balance-${balance.id || balance.materialId}`,
+        type: 'Consumível / material sem serial',
+        material: balance.Material?.name || 'Material',
+        category: balance.Material?.category || '-',
+        unit: balance.Material?.unit || 'un',
+        quantity,
+        serial: '-',
+        mac: '-',
+        warehouse: balance.Warehouse?.name || '-',
+        value: quantity * Number(balance.Material?.unitCost || 0),
+        custodyStartedAt: balance.updatedAt || balance.createdAt,
+        custodyDays: '-',
+      });
+    }
+
+    return rows.sort((a, b) => String(a.material).localeCompare(String(b.material), 'pt-BR'));
   }, [box]);
 
   function assetsByMaterial(materialId) {
@@ -193,6 +244,61 @@ export default function TechnicianBoxControl() {
         <KpiCard label="Valor em custódia" value={brl(box?.summary?.totalValue)} hint="Equipamentos + consumíveis" tone="warning" />
       </div>
 
+
+      <section className="panel technician-custody-live-panel">
+        <div className="panel-title">
+          <div>
+            <h3>📦 Custódia atual do técnico</h3>
+            <p>Lista em tempo real de tudo que está na caixa do técnico selecionado: equipamentos com serial e consumíveis.</p>
+          </div>
+          <div className="live-refresh-pill">
+            <span className={boxLoading ? 'loading-dot' : 'online-dot'}></span>
+            {boxLoading ? 'Atualizando...' : lastBoxRefresh ? `Atualizado ${lastBoxRefresh.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Aguardando técnico'}
+          </div>
+        </div>
+
+        <div className="custody-summary-strip">
+          <div><strong>{formatQuantity(box?.summary?.totalQuantity || 0)}</strong><span>itens em custódia</span></div>
+          <div><strong>{box?.summary?.assetsCount || 0}</strong><span>equipamentos com serial</span></div>
+          <div><strong>{box?.summary?.consumableLines || 0}</strong><span>linhas de consumíveis</span></div>
+          <div><strong>{brl(box?.summary?.totalValue)}</strong><span>valor estimado</span></div>
+        </div>
+
+        <div className="table-wrap custody-live-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Material</th>
+                <th>Qtd.</th>
+                <th>Serial</th>
+                <th>MAC</th>
+                <th>Valor</th>
+                <th>Custódia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {custodyRows.map((row) => (
+                <tr key={row.key}>
+                  <td><span className={row.serial !== '-' ? 'badge transferencia_tecnico' : 'badge retorno_tecnico'}>{row.type}</span></td>
+                  <td><strong>{row.material}</strong><br /><small>{row.category}</small></td>
+                  <td>{formatQuantity(row.quantity)} {row.unit || 'un'}</td>
+                  <td>{row.serial}</td>
+                  <td>{row.mac}</td>
+                  <td>{brl(row.value)}</td>
+                  <td>{row.custodyDays === '-' ? '-' : `há ${row.custodyDays} dia(s)`}</td>
+                </tr>
+              ))}
+              {custodyRows.length === 0 && (
+                <tr>
+                  <td colSpan="7"><div className="empty-state">Nenhum material em custódia para o técnico selecionado.</div></td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="two-col">
         <article className="panel">
           <div className="panel-title"><div><h3>📦 Resumo da caixa</h3><p>Materiais agrupados e valores estimados em tempo real.</p></div></div>
@@ -280,7 +386,7 @@ export default function TechnicianBoxControl() {
 
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["MAC", details.item.mac], ["Marca/modelo", `${details.item.brand || '-'} ${details.item.model || ''}`], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Dias", details.item.custodyDays], ["Status", details.item.status]]} />}
-        {details?.type === 'group' && <DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity, details.item.unit)], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não'], ["Seriais", details.item.serials?.join(', ') || '-']]} />}
+        {details?.type === 'group' && <DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity) + ' ' + (details.item.unit || 'un')], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não'], ["Seriais", details.item.serials?.join(', ') || '-']]} />}
         {details?.type === 'movement' && <DetailGrid fields={[["Data", details.item.movementAt], ["Tipo", details.item.type], ["Material", details.item.Material?.name], ["Serial", details.item.serialNumber], ["Quantidade", formatQuantity(details.item.quantity)], ["Origem", details.item.fromOwnerType], ["Destino", details.item.toOwnerType], ["Referência", details.item.reference], ["Usuário", details.item.createdBy?.name], ["Notas", details.item.notes]]} />}
         {details?.type === 'order' && <><DetailGrid fields={[["OS", details.item.osNumber], ["Cliente", details.item.customerName], ["CPF/CNPJ", details.item.customerCpf], ["Endereço", details.item.customerAddress], ["Cidade", details.item.city], ["Tipo", details.item.serviceType], ["Status", details.item.status], ["Concluída em", details.item.completedAt], ["Notas", details.item.notes]]} /><DetailList title="Materiais baixados" items={details.item.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
@@ -302,7 +408,7 @@ function MovementItem({ item, index, materials, assetsByMaterial, balanceFor, up
             <option value="">Selecione o material</option>{materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
           </select>
         </label>
-        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity, material?.unit)}<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
+        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity) + ' ' + (material?.unit || 'un')}<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
       </div>
       {material?.requiresSerial && (
         <div className="serial-picker compact-serial-picker">
