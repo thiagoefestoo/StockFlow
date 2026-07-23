@@ -5,7 +5,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import AttachmentPreview from '../components/AttachmentPreview';
 import { useAuth } from '../contexts/AuthContext';
-import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
+import { formatQuantity, formatQuantityInput, formatQuantityWithUnit } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -13,6 +13,25 @@ function qtyLabel(value, unit = '') { return formatQuantityWithUnit(value, unit)
 function toQuantityNumber(value) {
   const parsed = Number(String(value ?? '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function availableQuantityForMaterial(material, serialAssets = []) {
+  if (!material) return 0;
+  return material.requiresSerial ? serialAssets.length : toQuantityNumber(material.mainStock);
+}
+
+function normalizeTransferQuantityInput(value) {
+  const raw = String(value ?? '').replace(',', '.').trim();
+  if (!raw) return '';
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return '';
+  return formatQuantityInput(parsed);
+}
+
+function defaultQuantityForMaterial(material, serialAssets = []) {
+  const available = availableQuantityForMaterial(material, serialAssets);
+  if (available <= 0) return '';
+  return '1';
 }
 
 function isReturnTransfer(transfer) {
@@ -167,6 +186,21 @@ export default function Transfers() {
     setModal(true);
   }
 
+  function handleMaterialChange(index, materialId) {
+    const material = materialOptions.find((m) => Number(m.id) === Number(materialId));
+    const serialAssets = stockByMaterial[materialId] || [];
+    const currentQuantity = normalizeTransferQuantityInput(form.items[index]?.quantity);
+    const nextQuantity = materialId ? (currentQuantity || defaultQuantityForMaterial(material, serialAssets)) : '';
+
+    updateItem(index, {
+      materialId,
+      quantity: nextQuantity,
+      serialNumbers: [],
+      assetSearch: '',
+      bulkSerialSearch: '',
+    });
+  }
+
   function addItem() {
     if (!form.warehouseId) {
       window.alert('Selecione primeiro o estoque de origem.');
@@ -260,13 +294,13 @@ export default function Transfers() {
       if (material.requiresSerial) {
         const quantity = Math.trunc(toQuantityNumber(item.quantity));
         const serialCount = Array.isArray(item.serialNumbers) ? item.serialNumbers.length : 0;
-        const available = stockByMaterial[item.materialId]?.length || 0;
+        const available = availableQuantityForMaterial(material, stockByMaterial[item.materialId] || []);
         if (quantity <= 0) return `Informe a quantidade que deseja transferir de ${material.name}.`;
         if (quantity > available) return `Saldo insuficiente de ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
         if (serialCount !== quantity) return `Para ${material.name}, selecione exatamente ${formatQuantity(quantity)} serial(is). Selecionado(s): ${formatQuantity(serialCount)}.`;
       } else {
         const quantity = toQuantityNumber(item.quantity);
-        const available = Number(material.mainStock || 0);
+        const available = availableQuantityForMaterial(material, []);
         if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
         if (quantity > available) return `Saldo insuficiente de ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
       }
@@ -285,7 +319,7 @@ export default function Transfers() {
       warehouseId: form.warehouseId,
       items: form.items.map((it) => ({
         ...it,
-        quantity: Number(it.quantity || 0),
+        quantity: toQuantityNumber(it.quantity),
         serialNumbers: Array.isArray(it.serialNumbers) ? it.serialNumbers : [],
       })),
     };
@@ -365,8 +399,8 @@ export default function Transfers() {
               <div className="item-card transfer-item-card" key={i}>
                 <div className="item-head"><strong>📦 Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
                 <div className="form-grid">
-                  <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: '' })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
-                  {material && <label>Quantidade a transferir<input type="number" min="1" max={material.requiresSerial ? allSerialAssets.length : Number(material?.mainStock || 0)} step={material.requiresSerial ? '1' : '0.001'} value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível neste estoque: {qtyLabel(material.requiresSerial ? allSerialAssets.length : material?.mainStock, material?.unit)}</small></label>}
+                  <label>Material<select value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
+                  <label>Quantidade a transferir<input type="number" min="1" max={material ? availableQuantityForMaterial(material, allSerialAssets) : undefined} step={material?.requiresSerial ? '1' : '1'} value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder={material ? 'Ex.: 30, 40, 50' : 'Selecione o material primeiro'} />{material ? <small>Disponível neste estoque: {qtyLabel(availableQuantityForMaterial(material, allSerialAssets), material?.unit)}</small> : <small>Escolha o material e informe a quantidade que será transferida.</small>}</label>
                 </div>
                 {material?.requiresSerial && (
                   <div className="serial-picker">

@@ -9,15 +9,22 @@ function normalizeApiUrl(value) {
 
 function isQuantityField(key) {
   const normalized = String(key || '').toLowerCase();
-  return (
-    normalized === 'qtd' ||
-    normalized === 'totalitems' ||
-    normalized === 'totalquantity' ||
-    normalized === 'approvedquantity' ||
-    normalized === 'requestedquantity' ||
-    normalized === 'availablequantity' ||
-    normalized.includes('quantity')
-  );
+  const exactQuantityKeys = new Set([
+    'qtd',
+    'totalitems',
+    'totalquantity',
+    'approvedquantity',
+    'requestedquantity',
+    'availablequantity',
+    'mainstock',
+    'technicianstock',
+    'installedstock',
+    'availableqty',
+    'assetscount',
+    'consumablelines',
+  ]);
+
+  return exactQuantityKeys.has(normalized) || normalized.includes('quantity');
 }
 
 function normalizeQuantityValue(value) {

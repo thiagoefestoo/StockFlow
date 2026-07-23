@@ -1,15 +1,21 @@
 function isQuantityField(key) {
   const normalized = String(key || '').toLowerCase();
+  const exactQuantityKeys = new Set([
+    'qtd',
+    'totalitems',
+    'totalquantity',
+    'approvedquantity',
+    'requestedquantity',
+    'availablequantity',
+    'mainstock',
+    'technicianstock',
+    'installedstock',
+    'availableqty',
+    'assetscount',
+    'consumablelines',
+  ]);
 
-  return (
-    normalized === 'qtd' ||
-    normalized === 'totalitems' ||
-    normalized === 'totalquantity' ||
-    normalized === 'approvedquantity' ||
-    normalized === 'requestedquantity' ||
-    normalized === 'availablequantity' ||
-    normalized.includes('quantity')
-  );
+  return exactQuantityKeys.has(normalized) || normalized.includes('quantity');
 }
 
 function normalizeQuantityValue(value) {

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function qtyLabel(value, unit = '') { return formatQuantityLabel(value, unit); }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
 function unique(values = []) { return Array.from(new Set(values.map((v) => String(v || '').trim()).filter(Boolean))); }
+function quantityNumber(value) { const parsed = Number(String(value ?? '').replace(',', '.')); return Number.isFinite(parsed) ? parsed : 0; }
 
 const emptyForm = { warehouseId: '', reference: '', notes: '', items: [] };
 
@@ -101,7 +102,7 @@ export default function TechnicianReturns() {
       if (material.requiresSerial) {
         if (!Array.isArray(item.serialNumbers) || item.serialNumbers.length === 0) return `Selecione pelo menos um serial de ${material.name}.`;
       } else {
-        const quantity = Number(item.quantity || 0);
+        const quantity = quantityNumber(item.quantity);
         const available = Number(balanceFor(material.id)?.quantity || 0);
         if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
         if (quantity > available) return `Saldo insuficiente para ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
@@ -122,7 +123,7 @@ export default function TechnicianReturns() {
         notes: form.notes,
         items: form.items.map((item) => ({
           materialId: item.materialId,
-          quantity: Number(item.quantity || 0),
+          quantity: quantityNumber(item.quantity),
           serialNumbers: Array.isArray(item.serialNumbers) ? item.serialNumbers : [],
         })),
       });
@@ -139,7 +140,7 @@ export default function TechnicianReturns() {
 
   const selectedTechnician = technicians.find((tech) => String(tech.id) === String(selectedTech));
   const selectedWarehouse = warehouses.find((warehouse) => String(warehouse.id) === String(form.warehouseId));
-  const totalQty = form.items.reduce((sum, item) => sum + Number(item.quantity || (item.serialNumbers || []).length || 0), 0);
+  const totalQty = form.items.reduce((sum, item) => sum + quantityNumber(item.quantity || (item.serialNumbers || []).length || 0), 0);
 
   return (
     <div className="page-grid technician-return-page">
@@ -192,13 +193,13 @@ export default function TechnicianReturns() {
               <div className="item-head"><strong>📦 Item {index + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(index)}>Remover</button></div>
               <div className="form-grid">
                 <label>Material
-                  <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '', serialNumbers: [], search: '' })}>
+                  <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '1', serialNumbers: [], search: '' })}>
                     <option value="">Selecione o material</option>
                     {materialsInBox.map((mat) => <option key={mat.id} value={mat.id}>{mat.name} — disponível {qtyLabel(mat.availableQty, mat.unit)}</option>)}
                   </select>
                 </label>
                 {!material?.requiresSerial && <label>Quantidade
-                  <input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} />
+                  <input type="number" min="1" step="1" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} placeholder="Ex.: 30, 40, 50" />
                   <small>Disponível na caixa: {qtyLabel(balanceFor(material?.id)?.quantity, material?.unit)}</small>
                 </label>}
               </div>
