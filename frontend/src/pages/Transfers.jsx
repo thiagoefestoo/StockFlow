@@ -296,13 +296,13 @@ export default function Transfers() {
         const serialCount = Array.isArray(item.serialNumbers) ? item.serialNumbers.length : 0;
         const available = availableQuantityForMaterial(material, stockByMaterial[item.materialId] || []);
         if (quantity <= 0) return `Informe a quantidade que deseja transferir de ${material.name}.`;
-        if (quantity > available) return `Saldo insuficiente de ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
+        if (quantity > available) return `Quantidade acima do que consta em estoque para ${material.name}. Disponível neste estoque: ${qtyLabel(available, material.unit)}.`;
         if (serialCount !== quantity) return `Para ${material.name}, selecione exatamente ${formatQuantity(quantity)} serial(is). Selecionado(s): ${formatQuantity(serialCount)}.`;
       } else {
         const quantity = toQuantityNumber(item.quantity);
         const available = availableQuantityForMaterial(material, []);
         if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
-        if (quantity > available) return `Saldo insuficiente de ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
+        if (quantity > available) return `Quantidade acima do que consta em estoque para ${material.name}. Disponível neste estoque: ${qtyLabel(available, material.unit)}.`;
       }
     }
     return null;
@@ -400,7 +400,25 @@ export default function Transfers() {
                 <div className="item-head"><strong>📦 Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
                 <div className="form-grid">
                   <label>Material<select value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
-                  <label>Quantidade a transferir<input type="number" min="1" max={material ? availableQuantityForMaterial(material, allSerialAssets) : undefined} step={material?.requiresSerial ? '1' : '1'} value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder={material ? 'Ex.: 30, 40, 50' : 'Selecione o material primeiro'} />{material ? <small>Disponível neste estoque: {qtyLabel(availableQuantityForMaterial(material, allSerialAssets), material?.unit)}</small> : <small>Escolha o material e informe a quantidade que será transferida.</small>}</label>
+                  <label>Quantidade a transferir<input type="number" min="1" max={material ? availableQuantityForMaterial(material, allSerialAssets) || undefined : undefined} step={material?.requiresSerial ? '1' : '1'} value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder={material ? 'Ex.: 30, 40, 50' : 'Selecione o material primeiro'} />
+                    {(() => {
+                      if (!material) return <small>Escolha o material e informe a quantidade que será transferida.</small>;
+                      const available = availableQuantityForMaterial(material, allSerialAssets);
+                      const requested = toQuantityNumber(item.quantity);
+                      const exceeds = requested > available;
+                      return (
+                        <>
+                          <small className={exceeds ? 'field-warning' : ''}>Disponível neste estoque: {qtyLabel(available, material?.unit)}</small>
+                          {exceeds && (
+                            <small className="field-warning">⚠️ Quantidade acima do que consta em estoque. Máximo disponível: {qtyLabel(available, material?.unit)}.</small>
+                          )}
+                          {material.requiresSerial && available === 0 && (
+                            <small className="field-warning">Este material está cadastrado como "Exige número de série", mas não há nenhum serial disponível neste estoque. Se este item deveria ser controlado por quantidade (ex.: consumível), edite o cadastro em Estoque → Materiais e desmarque "Exige número de série".</small>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </label>
                 </div>
                 {material?.requiresSerial && (
                   <div className="serial-picker">

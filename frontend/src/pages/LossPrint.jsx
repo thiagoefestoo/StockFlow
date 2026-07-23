@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../services/api';
 import AttachmentPreview from '../components/AttachmentPreview';
+import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 
@@ -33,7 +34,7 @@ export default function LossPrint() {
           <p><b>Valor para desconto:</b> {brl(loss.totalValue)}</p>
           <p><b>Responsável pelo lançamento:</b> {loss.createdBy?.name || '-'}</p>
         </div>
-        <table><thead><tr><th>Material</th><th>Serial</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>{loss.TransferItems?.map((item) => <tr key={item.id}><td>{item.Material?.name}</td><td>{item.serialNumber || '-'}</td><td>{item.quantity}</td><td>{brl(item.totalCost)}</td></tr>)}</tbody></table>
+        <table><thead><tr><th>Material</th><th>Serial</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>{loss.TransferItems?.map((item) => <tr key={item.id}><td>{item.Material?.name}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.totalCost)}</td></tr>)}</tbody></table>
         <div className="stamp-box"><strong>RECONHECIMENTO DE PERDA/DESCONTO</strong><p>{loss.stampText || 'Reconheço a perda do(s) material(is) listado(s), autorizo a conferência/desconto conforme política interna e declaro ciência da baixa em minha caixa técnica.'}</p><div className="stamp-grid"><span>Data: ____/____/______</span><span>Hora: ____:____</span><span>Matrícula: __________</span></div></div>
         <div className="signature-area"><div><span></span><p>Assinatura do Técnico</p></div><div><span></span><p>Responsável pelo Estoque/Administração</p></div></div>
         <p className="paper-note">Este documento registra a baixa do material da caixa do técnico por perda/extravio/avaria, gerando histórico, auditoria e reflexo nos indicadores operacionais e financeiros.</p>

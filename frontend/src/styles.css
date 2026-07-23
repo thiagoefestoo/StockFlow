@@ -122,6 +122,7 @@ th { color: #475569; font-size: .8rem; text-transform: uppercase; letter-spacing
 .paper-note { font-size: .9rem; color: #475569; }
 .signed-img { max-width: 100%; border-radius: 18px; border: 1px solid var(--line); }
 .empty-state { background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 18px; padding: 24px; color: var(--muted); }
+.field-warning { display: block; color: #b91c1c; font-weight: 600; margin-top: 4px; }
 .muted { color: var(--muted); }
 @media (max-width: 1100px) { .shell { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; } .sidebar nav { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .two-col { grid-template-columns: 1fr; } .login-screen { grid-template-columns: 1fr; padding: 20px; } .login-hero { min-height: auto; } }
 @media (max-width: 720px) { .main { padding: 14px; } .topbar, .toolbar, .hero-panel { flex-direction: column; align-items: stretch; } .top-actions { flex-wrap: wrap; } .kpi-grid, .kpi-grid.small, .form-grid, .paper-grid, .signature-area { grid-template-columns: 1fr; } .sidebar { padding: 14px; } .sidebar nav { grid-template-columns: 1fr 1fr; } .sidebar a span { font-size: .86rem; } th, td { padding: 10px 8px; } .login-hero h2 { margin-top: 36px; } .hero-grid { grid-template-columns: 1fr 1fr; } .rank-row { grid-template-columns: 1fr; } }
