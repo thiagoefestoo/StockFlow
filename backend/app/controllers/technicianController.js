@@ -32,8 +32,33 @@ function normalizeCities(value) {
   return [];
 }
 
+function canEditTechnician(user) {
+  return hasModuleAccess(user, 'technicianEdit');
+}
+
 function canManageTransferApprovalLimit(user) {
   return hasModuleAccess(user, 'technicianTransferLimitManage');
+}
+
+const TECHNICIAN_EDIT_FIELDS = [
+  'name',
+  'document',
+  'phone',
+  'email',
+  'type',
+  'status',
+  'companyId',
+  'vehiclePlate',
+  'notes',
+  'serviceCities',
+  'defaultWarehouseId',
+  'createPortalUser',
+  'portalPassword',
+  'mustChangePassword',
+];
+
+function hasTechnicianEditFields(body) {
+  return TECHNICIAN_EDIT_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(body || {}, field));
 }
 
 function hasOwnTransferApprovalLimit(body) {
@@ -191,6 +216,10 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
+  if (hasTechnicianEditFields(req.body) && !canEditTechnician(req.user)) {
+    return fail(res, 403, 'Você não tem permissão para editar o cadastro do técnico.');
+  }
+
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
 

@@ -42,6 +42,7 @@ function formFromTechnician(technician) {
 
 export default function Technicians() {
   const { isAdmin, canAccessModule } = useAuth();
+  const canEditTechnician = isAdmin || canAccessModule('technicianEdit');
   const canManageTransferLimit = isAdmin || canAccessModule('technicianTransferLimitManage');
   const [technicians, setTechnicians] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -75,6 +76,7 @@ export default function Technicians() {
   }
 
   function openEdit(technician) {
+    if (!canEditTechnician) return;
     setError('');
     setForm(formFromTechnician(technician));
     setModal(true);
@@ -198,7 +200,7 @@ export default function Technicians() {
                     <div className="action-toolbar">
                       <button className="info" onClick={() => openDetails(t)}>Detalhes</button>
                       {canManageTransferLimit && <button className="ghost" onClick={() => openLimitEdit(t)}>Editar limite</button>}
-                      {isAdmin && <button className="ghost" onClick={() => openEdit(t)}>Editar</button>}
+                      {canEditTechnician && <button className="ghost" onClick={() => openEdit(t)}>Editar</button>}
                     </div>
                   </td>
                 </tr>
@@ -252,7 +254,7 @@ export default function Technicians() {
         </div>
       </Modal>
 
-      <DetailsModal open={details.open} title={`Central do técnico: ${details.technician?.name || ''}`} onClose={() => setDetails({ open: false, technician: null, stock: null })} footer={<><button className="ghost" onClick={() => setDetails({ open: false, technician: null, stock: null })}>Fechar</button><button className="ghost" onClick={refreshDetails}>Atualizar</button>{canManageTransferLimit && details.technician && <button className="ghost" onClick={() => { openLimitEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar limite</button>}{isAdmin && details.technician && <button onClick={() => { openEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar técnico</button>}</>}>
+      <DetailsModal open={details.open} title={`Central do técnico: ${details.technician?.name || ''}`} onClose={() => setDetails({ open: false, technician: null, stock: null })} footer={<><button className="ghost" onClick={() => setDetails({ open: false, technician: null, stock: null })}>Fechar</button><button className="ghost" onClick={refreshDetails}>Atualizar</button>{canManageTransferLimit && details.technician && <button className="ghost" onClick={() => { openLimitEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar limite</button>}{canEditTechnician && details.technician && <button onClick={() => { openEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar técnico</button>}</>}>
         {details.technician && <div className="technician-command-center"><DetailGrid fields={[["Nome", details.technician.name], ["Documento", details.technician.document], ["Telefone", details.technician.phone], ["E-mail", details.technician.email], ["Empresa", details.technician.ContractorCompany?.name], ["Tipo", details.technician.type], ["Status", details.technician.status], ["Cidades atendidas", citiesToText(details.technician.serviceCities)], ["Estoque padrão", details.technician.defaultWarehouse?.name], ["Limite sem aprovação", brl(details.technician.transferApprovalLimit ?? 500)], ["Acesso de login", details.technician.portalUser ? 'Liberado' : 'Sem login'], ["Equipamentos", details.stock?.summary?.assetsCount ?? details.technician.assetCount], ["Valor equipamentos", brl(details.stock?.summary?.assetsValue ?? details.technician.assetValue)], ["Valor consumíveis", brl(details.stock?.summary?.consumableValue)], ["Valor total em nome", brl(details.stock?.summary?.totalValue ?? details.technician.totalCustodyValue)], ["OS abertas", details.stock?.summary?.openOrders], ["Custódia +60 dias", details.stock?.summary?.oldCustody], ["Criado em", dt(details.technician.createdAt)]]} />
           <section className="panel-soft"><h4>Resumo por material</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Seriais</th></tr></thead><tbody>{(details.stock?.groupedMaterials || []).map((row) => <tr key={row.material}><td>{row.material}</td><td>{formatQuantity(row.quantity)}</td><td>{brl(row.value)}</td><td>{(row.serials || []).slice(0, 6).join(', ')}{(row.serials || []).length > 6 ? '...' : ''}</td></tr>)}</tbody></table></div></section>
           <DetailList title="Equipamentos serializados na caixa" items={details.stock?.assets || []} render={(asset) => <><b>{asset.serialNumber}</b><span>{asset.Material?.name} • {asset.status} • {brl(asset.acquisitionCost)} • {asset.custodyDays ?? 0} dia(s) em custódia</span><small>{asset.brand || '-'} {asset.model || ''} • {asset.mac || 'sem MAC'}</small></>} />
