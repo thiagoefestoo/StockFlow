@@ -6,6 +6,7 @@ import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal
 import AttachmentPreview from '../components/AttachmentPreview';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityWithUnit } from '../utils/formatQuantity';
+import { TRANSFER_REASON_OPTIONS } from '../constants/operationOptions';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -88,6 +89,9 @@ export default function Transfers() {
   const [form, setForm] = useState({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
   const [assetSearch, setAssetSearch] = useState('');
   const [requestPrefilled, setRequestPrefilled] = useState(false);
+  const [transferSearch, setTransferSearch] = useState('');
+  const [transferStatusFilter, setTransferStatusFilter] = useState('');
+  const [transferTypeFilter, setTransferTypeFilter] = useState('');
 
   async function load() {
     const [t, tec, wh] = await Promise.all([
@@ -198,7 +202,6 @@ export default function Transfers() {
       serialNumbers: [],
       assetSearch: '',
       assetSearchApplied: '',
-      bulkSerialSearch: '',
     });
   }
 
@@ -233,10 +236,6 @@ export default function Transfers() {
   }
 
 
-  function selectSerialsForItem(i, serials) {
-    const selected = uniqueSerials([...(form.items[i]?.serialNumbers || []), ...serials]);
-    updateItem(i, { serialNumbers: selected, quantity: selected.length || 1 });
-  }
 
   function replaceSerialsForItem(i, serials) {
     const selected = uniqueSerials(serials);
@@ -255,33 +254,6 @@ export default function Transfers() {
       return;
     }
     replaceSerialsForItem(i, assets.slice(0, desired).map((asset) => asset.serialNumber));
-  }
-
-  function selectBulkSearchedSerials(i, allAssets) {
-    const item = form.items[i];
-    const terms = parseSerialTerms(item.bulkSerialSearch || '');
-    if (!terms.length) {
-      window.alert('Digite ou cole um ou mais seriais para pesquisar. Separe por linha, vírgula, ponto e vírgula ou espaço.');
-      return;
-    }
-    const matched = [];
-    const notFound = [];
-    for (const term of terms) {
-      const q = normalizeSerialText(term);
-      const asset = allAssets.find((candidate) => {
-        const serial = normalizeSerialText(candidate.serialNumber);
-        const mac = normalizeSerialText(candidate.mac);
-        return serial === q || mac === q || serial.includes(q) || mac.includes(q);
-      });
-      if (asset) matched.push(asset.serialNumber);
-      else notFound.push(term);
-    }
-    if (!matched.length) {
-      window.alert('Nenhuma ONU/serial pesquisado foi encontrado no estoque selecionado.');
-      return;
-    }
-    selectSerialsForItem(i, matched);
-    if (notFound.length) window.alert(`Selecionado(s) ${uniqueSerials(matched).length} serial(is). Não encontrado(s): ${notFound.join(', ')}`);
   }
 
   function validateBeforeSave() {
@@ -354,6 +326,26 @@ export default function Transfers() {
     reader.readAsDataURL(file);
   }
 
+  const filteredTransfers = useMemo(() => {
+    const search = transferSearch.trim().toLowerCase();
+    return transfers.filter((transfer) => {
+      const isReturn = isReturnTransfer(transfer);
+      if (transferTypeFilter === 'entrega' && isReturn) return false;
+      if (transferTypeFilter === 'retorno' && !isReturn) return false;
+      if (transferStatusFilter && transfer.status !== transferStatusFilter) return false;
+      if (!search) return true;
+      const text = [
+        transfer.transferNumber,
+        transfer.Technician?.name,
+        transfer.Warehouse?.name,
+        transfer.status,
+        transfer.notes,
+        ...(transfer.TransferItems || []).flatMap((item) => [item.Material?.name, item.serialNumber]),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return text.includes(search);
+    });
+  }, [transfers, transferSearch, transferStatusFilter, transferTypeFilter]);
+
   const totalPreview = form.items.reduce((sum, item) => {
     const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
     if (!material) return sum;
@@ -368,7 +360,16 @@ export default function Transfers() {
         <button onClick={openNewTransfer}>➕ Nova transferência</button>
       </div>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{transfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div></section>
+      <section className="panel filters">
+        <div className="form-grid">
+          <label>🔎 Pesquisar<input value={transferSearch} onChange={(e) => setTransferSearch(e.target.value)} placeholder="Guia, técnico, estoque, material ou serial" /></label>
+          <label>Tipo<select value={transferTypeFilter} onChange={(e) => setTransferTypeFilter(e.target.value)}><option value="">Todos</option><option value="entrega">Entrega para técnico</option><option value="retorno">Retorno para estoque</option></select></label>
+          <label>Status<select value={transferStatusFilter} onChange={(e) => setTransferStatusFilter(e.target.value)}><option value="">Todos</option><option value="pendente_assinatura">Pendente de assinatura</option><option value="assinado">Assinado</option><option value="cancelado">Cancelado</option></select></label>
+          <label className="filter-action"><span>&nbsp;</span><button type="button" className="ghost" onClick={() => { setTransferSearch(''); setTransferTypeFilter(''); setTransferStatusFilter(''); }}>Limpar filtros</button></label>
+        </div>
+      </section>
+
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Entregar carga solicitada ao técnico' : '📦 Nova transferência para técnico'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Gerar guia e enviar para caixa</button></>}>
         <div className="transfer-wizard">
@@ -381,7 +382,7 @@ export default function Transfers() {
           <div className="form-grid">
             <label>🏬 Estoque de origem<select value={form.warehouseId} onChange={(e) => { setForm({ ...form, warehouseId: e.target.value, items: [] }); setAssetSearch(''); }}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code}</option>)}</select></label>
             <label>👷 Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
-            <label className="span-2">📝 Observações<input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Motivo, rota, lote, responsável..." /></label>
+            <label className="span-2">📝 Motivo/observação<input list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           </div>
           {form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria.</div>}
           {loadingStock && <div className="empty-state">Carregando materiais do estoque selecionado...</div>}
@@ -450,17 +451,6 @@ export default function Transfers() {
                         <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, serialAssets.map((asset) => asset.serialNumber))}>Selecionar tudo filtrado</button>
                         <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, [])}>Limpar seleção</button>
                       </div>
-                    </div>
-                    <div className="bulk-serial-search-card">
-                      <label>
-                        <span>Pesquisar várias ONUs/seriais de uma vez</span>
-                        <textarea rows="3" value={item.bulkSerialSearch || ''} onChange={(e) => updateItem(i, { bulkSerialSearch: e.target.value })} placeholder="Cole aqui vários seriais, um por linha ou separados por vírgula. Ex.: 102003, 102002, 102001" />
-                      </label>
-                      <div className="row-actions">
-                        <button type="button" onClick={() => selectBulkSearchedSerials(i, allSerialAssets)}>Selecionar ONUs pesquisadas</button>
-                        <button type="button" className="ghost" onClick={() => updateItem(i, { bulkSerialSearch: '' })}>Limpar pesquisa</button>
-                      </div>
-                      <small>O sistema seleciona somente seriais disponíveis no estoque de origem e evita duplicar o mesmo serial na guia.</small>
                     </div>
                     <div className="serial-grid">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleSerial(i, asset.serialNumber)}><b>{checked ? '✅' : '🏷️'} {asset.serialNumber}</b><span>{asset.Material?.name} • {asset.Warehouse?.name || selectedWarehouse?.name || 'estoque'} • {asset.brand || '-'} {asset.model || ''}</span><small>{asset.mac || 'sem MAC'} • {brl(asset.acquisitionCost)}</small></button>; })}</div>
                     {serialAssets.length === 0 && <div className="empty-state">Nenhum serial disponível para esse material no estoque selecionado.</div>}

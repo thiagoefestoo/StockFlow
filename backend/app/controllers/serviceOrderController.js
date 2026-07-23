@@ -7,6 +7,22 @@ const { money, qty, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 
+function serviceRequiresSerial(serviceType, addressChangeType) {
+  return serviceType === 'instalacao'
+    || serviceType === 'troca_onu'
+    || (serviceType === 'outro' && addressChangeType === 'com_troca');
+}
+
+function composeServiceNotes(notes, serviceType, addressChangeType) {
+  const addressLabel = addressChangeType === 'com_troca'
+    ? 'com troca de equipamento'
+    : addressChangeType === 'sem_troca'
+      ? 'sem troca de equipamento'
+      : '';
+  const addressNote = serviceType === 'outro' && addressLabel ? `Mudança de endereço: ${addressLabel}.` : '';
+  return [addressNote, String(notes || '').trim()].filter(Boolean).join(' | ');
+}
+
 exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
@@ -16,12 +32,14 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType, status, completedAt, notes, materials = [] } = req.body;
+  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
   if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome do cliente e número do contrato são obrigatórios.');
+  if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   if (!Array.isArray(materials) || !materials.length) return fail(res, 400, 'Adicione ao menos um material usado na OS.');
 
+  const serialRequired = serviceRequiresSerial(serviceType, addressChangeType);
   let totalSerials = 0;
   for (const item of materials) {
     const material = await Material.findByPk(item.materialId);
@@ -29,10 +47,15 @@ exports.create = asyncHandler(async (req, res) => {
     const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
     if (material.requiresSerial) {
       if (serials.length > 1) return fail(res, 400, 'Selecione apenas 1 serial por OS.');
+      if (serials.length === 0) return fail(res, 400, `Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`);
       totalSerials += serials.length;
+    } else if (qty(item.quantity) <= 0) {
+      return fail(res, 400, `Informe uma quantidade válida para ${material.name}.`);
     }
   }
-  if (totalSerials !== 1) return fail(res, 400, 'Selecione exatamente 1 serial que será transferido para o cliente.');
+  if (serialRequired && totalSerials !== 1) return fail(res, 400, 'Este tipo de serviço exige exatamente 1 serial de equipamento.');
+  if (!serialRequired && totalSerials > 1) return fail(res, 400, 'Selecione no máximo 1 serial por OS.');
+  const normalizedNotes = composeServiceNotes(notes, serviceType, addressChangeType);
 
   const order = await sequelize.transaction(async (transaction) => {
     const record = await ServiceOrder.create({
@@ -45,7 +68,7 @@ exports.create = asyncHandler(async (req, res) => {
       serviceType,
       status: status || 'concluida',
       completedAt: completedAt || new Date(),
-      notes,
+      notes: normalizedNotes,
       createdById: req.user.id,
     }, { transaction });
 

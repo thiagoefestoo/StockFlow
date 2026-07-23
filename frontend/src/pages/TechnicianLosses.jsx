@@ -5,6 +5,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import AttachmentPreview from '../components/AttachmentPreview';
 import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
+import { LOSS_REASON_OPTIONS } from '../constants/operationOptions';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -229,7 +230,7 @@ export default function TechnicianLosses() {
 
         <div className="form-grid">
           <label>Técnico responsável<select value={form.technicianId} onChange={(e) => onSelectTechnician(e.target.value)}><option value="">Selecione</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
-          <label>Motivo da perda/desconto<input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Ex.: material perdido, avaria, extravio..." /></label>
+          <label>Motivo da perda/desconto<input list="loss-reason-options" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="loss-reason-options">{LOSS_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           <label className="span-2">Observações<textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Descreva detalhes da ocorrência, protocolo interno ou autorização." /></label>
           <label className="span-2">Documento assinado/reconhecimento<input type="file" accept="image/*,.pdf" onChange={async (e) => { const file = await readFile(e.target.files?.[0]); if (file) setForm({ ...form, attachmentName: file.name, attachmentData: file.data }); }} /><small>Opcional na abertura: também será possível anexar depois na lista.</small></label>{form.attachmentName && <AttachmentPreview compact name={form.attachmentName} data={form.attachmentData} label="Documento selecionado" />}
         </div>

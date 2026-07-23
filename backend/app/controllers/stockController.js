@@ -27,6 +27,22 @@ function parseSerials(value) {
   return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean);
 }
 
+function serviceRequiresSerial(serviceType, addressChangeType) {
+  return serviceType === 'instalacao'
+    || serviceType === 'troca_onu'
+    || (serviceType === 'outro' && addressChangeType === 'com_troca');
+}
+
+function composeServiceNotes(notes, serviceType, addressChangeType) {
+  const addressLabel = addressChangeType === 'com_troca'
+    ? 'com troca de equipamento'
+    : addressChangeType === 'sem_troca'
+      ? 'sem troca de equipamento'
+      : '';
+  const addressNote = serviceType === 'outro' && addressLabel ? `Mudança de endereço: ${addressLabel}.` : '';
+  return [addressNote, String(notes || '').trim()].filter(Boolean).join(' | ');
+}
+
 exports.overview = asyncHandler(async (req, res) => {
   const materials = await Material.findAll({ order: [['name', 'ASC']] });
   const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
@@ -277,7 +293,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
 
 
 exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
-  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'outro', completedAt, reference, notes, items = [] } = req.body;
+  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'outro', addressChangeType, completedAt, reference, notes, items = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
   if (!items.length) {
@@ -286,8 +302,27 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
     if (!items.length) return fail(res, 400, 'Informe itens ou mantenha materiais padrão disponíveis na caixa do técnico.');
   }
   if (!customerName || !customerCpf) return fail(res, 400, 'Nome do cliente e número do contrato são obrigatórios.');
+  if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+
+  const serialRequired = serviceRequiresSerial(serviceType, addressChangeType);
+  let totalSerials = 0;
+  for (const item of items) {
+    const material = await Material.findByPk(item.materialId);
+    if (!material) return fail(res, 404, 'Material não encontrado.');
+    const serials = parseSerials(item.serialNumbers);
+    if (material.requiresSerial) {
+      if (serials.length > 1) return fail(res, 400, 'Selecione apenas 1 serial por OS.');
+      if (!serials.length) return fail(res, 400, `Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`);
+      totalSerials += serials.length;
+    } else if (qty(item.quantity) <= 0) {
+      return fail(res, 400, `Informe uma quantidade válida para ${material.name}.`);
+    }
+  }
+  if (serialRequired && totalSerials !== 1) return fail(res, 400, 'Este tipo de serviço exige exatamente 1 serial de equipamento.');
+  if (!serialRequired && totalSerials > 1) return fail(res, 400, 'Selecione no máximo 1 serial por OS.');
+  const normalizedNotes = composeServiceNotes(notes, serviceType, addressChangeType);
 
   const result = await sequelize.transaction(async (transaction) => {
     let totalQuantity = 0;
@@ -305,7 +340,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
         serviceType,
         status: 'concluida',
         completedAt: completedAt || new Date(),
-        notes,
+        notes: normalizedNotes,
         createdById: req.user.id,
       }, { transaction });
     }
@@ -328,10 +363,10 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
           asset.customerName = customerName;
           asset.customerCpf = normalizeDoc(customerCpf);
           asset.lastMovementAt = new Date();
-          asset.notes = [asset.notes, notes ? `Transferido para cliente: ${notes}` : null].filter(Boolean).join(' | ');
+          asset.notes = [asset.notes, normalizedNotes ? `Transferido para cliente: ${normalizedNotes}` : null].filter(Boolean).join(' | ');
           await asset.save({ transaction });
           if (order) await ServiceOrderMaterial.create({ serviceOrderId: order.id, materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, unitCost: cost, totalCost: cost }, { transaction });
-          await StockMovement.create({ type: 'baixa_os', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: movementReference, notes: notes || 'Movimentação administrativa da caixa do técnico para cliente.', createdById: req.user.id }, { transaction });
+          await StockMovement.create({ type: 'baixa_os', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: movementReference, notes: normalizedNotes || 'Movimentação administrativa da caixa do técnico para cliente.', createdById: req.user.id }, { transaction });
           totalQuantity += 1;
           totalValue += Number(cost);
           affected.push({ serialNumber, customerName });
@@ -342,7 +377,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
         await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
         const totalCost = money(quantity * unitCost);
         if (order) await ServiceOrderMaterial.create({ serviceOrderId: order.id, materialId: material.id, quantity, unitCost, totalCost }, { transaction });
-        await StockMovement.create({ type: 'baixa_os', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: movementReference, notes: notes || 'Movimentação administrativa da caixa do técnico para cliente.', createdById: req.user.id }, { transaction });
+        await StockMovement.create({ type: 'baixa_os', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: movementReference, notes: normalizedNotes || 'Movimentação administrativa da caixa do técnico para cliente.', createdById: req.user.id }, { transaction });
         totalQuantity += quantity;
         totalValue += totalCost;
         affected.push({ materialId: material.id, quantity, customerName });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
 import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
+import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/operationOptions';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function qtyLabel(value, unit = '') { return formatQuantityLabel(value, unit); }
@@ -45,7 +46,7 @@ export default function TechnicianReturns() {
   const materialsInBox = useMemo(() => {
     const map = new Map();
     for (const asset of box?.assets || []) if (asset.Material) map.set(asset.materialId, { ...asset.Material, availableQty: (map.get(asset.materialId)?.availableQty || 0) + 1 });
-    for (const balance of box?.balances || []) if (balance.Material) map.set(balance.materialId, { ...balance.Material, availableQty: Number(balance.quantity || 0) });
+    for (const balance of box?.balances || []) if (balance.Material && Number(balance.quantity || 0) > 0) map.set(balance.materialId, { ...balance.Material, availableQty: Number(balance.quantity || 0) });
     return Array.from(map.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }, [box]);
 
@@ -173,10 +174,12 @@ export default function TechnicianReturns() {
             </select>
           </label>
           <label>Referência
-            <input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="Ex.: DEV-001, conferência mensal" />
+            <input list="return-reference-options" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="Selecione ou digite uma referência" />
+            <datalist id="return-reference-options">{RETURN_REFERENCE_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist>
           </label>
           <label>Motivo/observação
-            <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Motivo do retorno" />
+            <input list="return-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione ou digite o motivo do retorno" />
+            <datalist id="return-reason-options">{RETURN_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist>
           </label>
         </div>
         <div className="viz-callout">O item sai da caixa do técnico e volta para o estoque selecionado. Estoques listados respeitam o acesso liberado ao usuário.</div>

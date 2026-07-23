@@ -4,6 +4,8 @@ import api from '../services/api';
 import KpiCard from '../components/KpiCard';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial, serviceTypeLabel } from '../utils/serviceOrderRules';
+import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/operationOptions';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -16,6 +18,7 @@ const emptyClientForm = {
   customerAddress: '',
   city: '',
   serviceType: 'instalacao',
+  addressChangeType: '',
   notes: '',
   items: [],
 };
@@ -91,10 +94,11 @@ export default function TechnicianBoxControl() {
       if (!map.has(asset.materialId)) map.set(asset.materialId, asset.Material);
     }
     for (const balance of box?.balances || []) {
-      if (!map.has(balance.materialId)) map.set(balance.materialId, balance.Material);
+      if (Number(balance.quantity || 0) > 0 && !map.has(balance.materialId)) map.set(balance.materialId, balance.Material);
     }
     return Array.from(map.values()).filter(Boolean);
   }, [box]);
+  const clientSerialRequired = serviceRequiresSerial(clientForm.serviceType, clientForm.addressChangeType);
 
   const custodyRows = useMemo(() => {
     const rows = [];
@@ -179,8 +183,25 @@ export default function TechnicianBoxControl() {
 
   async function moveToClient() {
     try {
+      if (clientForm.serviceType === 'outro' && !clientForm.addressChangeType) throw new Error('Informe se a mudança de endereço terá troca de equipamento.');
+      if (!clientForm.items.length) throw new Error('Adicione ao menos um material usado no cliente.');
+      let serialCount = 0;
+      for (const item of clientForm.items) {
+        const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
+        if (!material) throw new Error('Selecione o material em todos os itens adicionados.');
+        const serials = splitSerials(item.serialNumbersText);
+        if (material.requiresSerial) {
+          if (!serials.length) throw new Error(`Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`);
+          serialCount += serials.length;
+        } else if (Number(item.quantity || 0) <= 0) {
+          throw new Error(`Informe uma quantidade válida para ${material.name}.`);
+        }
+      }
+      if (clientSerialRequired && serialCount !== 1) throw new Error('Este tipo de serviço exige exatamente 1 serial de equipamento.');
+      if (!clientSerialRequired && serialCount > 1) throw new Error('Selecione no máximo 1 serial por OS.');
       const payload = {
         ...clientForm,
+        notes: clientForm.notes,
         technicianId: selectedTech,
         items: clientForm.items.map((item) => ({ ...item, quantity: Number(item.quantity || 0), serialNumbers: splitSerials(item.serialNumbersText) })),
       };
@@ -342,7 +363,7 @@ export default function TechnicianBoxControl() {
               <p className="muted">Use quando o técnico não conseguir dar baixa pelo celular. Se informar OS, o sistema cria a OS concluída e vincula os materiais.</p>
               <div className="form-grid">
                 <label>Nº da OS <input value={clientForm.osNumber} onChange={(e) => setClientForm({ ...clientForm, osNumber: e.target.value })} placeholder="Ex.: OS-12345" /></label>
-                <label>Tipo <select value={clientForm.serviceType} onChange={(e) => setClientForm({ ...clientForm, serviceType: e.target.value })}><option value="instalacao">Instalação</option><option value="manutencao">Manutenção</option><option value="troca_onu">Troca de ONU</option><option value="retirada">Retirada</option><option value="outro">Outro</option></select></label>
+                <label>Tipo de serviço executado <select value={clientForm.serviceType} onChange={(e) => setClientForm({ ...clientForm, serviceType: e.target.value, addressChangeType: e.target.value === 'outro' ? clientForm.addressChangeType : '' })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>{clientForm.serviceType === 'outro' && <label>Troca de equipamento? <select value={clientForm.addressChangeType} onChange={(e) => setClientForm({ ...clientForm, addressChangeType: e.target.value })}><option value="">Selecione</option>{ADDRESS_CHANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
                 <label>Número do contrato <input value={clientForm.customerCpf} onChange={(e) => setClientForm({ ...clientForm, customerCpf: e.target.value })} /></label>
                 <label>Nome do cliente <input value={clientForm.customerName} onChange={(e) => setClientForm({ ...clientForm, customerName: e.target.value })} /></label>
                 <label>Endereço <input value={clientForm.customerAddress} onChange={(e) => setClientForm({ ...clientForm, customerAddress: e.target.value })} /></label>
@@ -362,7 +383,7 @@ export default function TechnicianBoxControl() {
             <div>
               <h3>↩️ Devolver material do técnico para estoque</h3>
               <p className="muted">Use para recolhimento, conferência, ajuste operacional, troca de equipe ou material não utilizado.</p>
-              <div className="form-grid"><label>Estoque de destino<select value={returnForm.warehouseId || ''} onChange={(e) => setReturnForm({ ...returnForm, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code || 'sem código'}</option>)}</select></label><label>Referência<input value={returnForm.reference} onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })} placeholder="Ex.: DEV-001, conferência mensal..." /></label><label>Motivo<input value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Motivo do retorno" /></label></div>
+              <div className="form-grid"><label>Estoque de destino<select value={returnForm.warehouseId || ''} onChange={(e) => setReturnForm({ ...returnForm, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code || 'sem código'}</option>)}</select></label><label>Referência<input list="box-return-reference-options" value={returnForm.reference} onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })} placeholder="Selecione ou digite uma referência" /><datalist id="box-return-reference-options">{RETURN_REFERENCE_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label><label>Motivo<input list="box-return-reason-options" value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Selecione ou digite o motivo do retorno" /><datalist id="box-return-reason-options">{RETURN_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label></div>
               <div className="subtoolbar"><h4>Itens para retornar ao estoque</h4><button className="ghost" onClick={addReturnItem}>➕ Adicionar item</button></div>
               {returnForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateReturnItem} remove={removeReturnItem} toggleSerial={(serial) => toggleSerial('return', i, serial)} />)}
               <button className="wide" onClick={returnToStock}>↩️ Confirmar devolução ao estoque</button>
@@ -381,14 +402,14 @@ export default function TechnicianBoxControl() {
 
       <section className="panel">
         <div className="panel-title"><div><h3>📲 OS e baixas recentes</h3><p>Últimos registros associados ao técnico selecionado.</p></div></div>
-        <div className="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Tipo</th><th>Status</th><th>Data</th><th>Itens</th><th>Opções</th></tr></thead><tbody>{(box?.orders || []).map((order) => <tr key={order.id}><td>{order.osNumber}</td><td>{order.customerName}<br /><small>{order.customerCpf}</small></td><td>{order.serviceType}</td><td><span className={`badge ${order.status}`}>{order.status}</span></td><td>{dt(order.completedAt || order.createdAt)}</td><td>{order.ServiceOrderMaterials?.length || 0}</td><td><button className="info" onClick={() => setDetails({ type: 'order', item: order })}>Detalhes</button></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Tipo</th><th>Status</th><th>Data</th><th>Itens</th><th>Opções</th></tr></thead><tbody>{(box?.orders || []).map((order) => <tr key={order.id}><td>{order.osNumber}</td><td>{order.customerName}<br /><small>{order.customerCpf}</small></td><td>{serviceTypeLabel(order.serviceType)}</td><td><span className={`badge ${order.status}`}>{order.status}</span></td><td>{dt(order.completedAt || order.createdAt)}</td><td>{order.ServiceOrderMaterials?.length || 0}</td><td><button className="info" onClick={() => setDetails({ type: 'order', item: order })}>Detalhes</button></td></tr>)}</tbody></table></div>
       </section>
 
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["MAC", details.item.mac], ["Marca/modelo", `${details.item.brand || '-'} ${details.item.model || ''}`], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Dias", details.item.custodyDays], ["Status", details.item.status]]} />}
         {details?.type === 'group' && <DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity) + ' ' + (details.item.unit || 'un')], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não'], ["Seriais", details.item.serials?.join(', ') || '-']]} />}
         {details?.type === 'movement' && <DetailGrid fields={[["Data", details.item.movementAt], ["Tipo", details.item.type], ["Material", details.item.Material?.name], ["Serial", details.item.serialNumber], ["Quantidade", formatQuantity(details.item.quantity)], ["Origem", details.item.fromOwnerType], ["Destino", details.item.toOwnerType], ["Referência", details.item.reference], ["Usuário", details.item.createdBy?.name], ["Notas", details.item.notes]]} />}
-        {details?.type === 'order' && <><DetailGrid fields={[["OS", details.item.osNumber], ["Cliente", details.item.customerName], ["Número do contrato", details.item.customerCpf], ["Endereço", details.item.customerAddress], ["Cidade", details.item.city], ["Tipo", details.item.serviceType], ["Status", details.item.status], ["Concluída em", details.item.completedAt], ["Notas", details.item.notes]]} /><DetailList title="Materiais baixados" items={details.item.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details?.type === 'order' && <><DetailGrid fields={[["OS", details.item.osNumber], ["Cliente", details.item.customerName], ["Número do contrato", details.item.customerCpf], ["Endereço", details.item.customerAddress], ["Cidade", details.item.city], ["Tipo", serviceTypeLabel(details.item.serviceType)], ["Status", details.item.status], ["Concluída em", details.item.completedAt], ["Notas", details.item.notes]]} /><DetailList title="Materiais baixados" items={details.item.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

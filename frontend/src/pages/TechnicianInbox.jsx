@@ -6,8 +6,9 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial } from '../utils/serviceOrderRules';
 
-const osEmpty = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', materials: [] };
+const osEmpty = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', addressChangeType: '', notes: '', materials: [] };
 const reqEmpty = { priority: 'media', requesterNotes: '', items: [] };
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
@@ -69,7 +70,14 @@ export default function TechnicianInbox() {
   }, [selectedTech]);
 
   const serialByMaterial = (materialId) => (stock?.assets || []).filter((a) => Number(a.materialId) === Number(materialId));
-  const stockMaterials = useMemo(() => [...(stock?.balances || []).map((b) => b.Material), ...(stock?.assets || []).map((a) => a.Material)].filter(Boolean).filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i), [stock]);
+  const stockMaterials = useMemo(() => {
+    const available = [
+      ...(stock?.balances || []).filter((balance) => Number(balance.quantity || 0) > 0).map((balance) => balance.Material),
+      ...(stock?.assets || []).map((asset) => asset.Material),
+    ];
+    return available.filter(Boolean).filter((material, index, list) => list.findIndex((item) => item.id === material.id) === index);
+  }, [stock]);
+  const serialRequiredForService = serviceRequiresSerial(osForm.serviceType, osForm.addressChangeType);
   const boxGroups = useMemo(() => {
     const map = {};
     for (const row of stock?.groupedMaterials || []) {
@@ -143,6 +151,7 @@ export default function TechnicianInbox() {
     if (!String(osForm.osNumber || '').trim()) return 'Informe o número da OS.';
     if (!String(osForm.customerName || '').trim()) return 'Informe o nome do cliente.';
     if (!String(osForm.customerCpf || '').trim()) return 'Informe o número do contrato.';
+    if (osForm.serviceType === 'outro' && !osForm.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!osForm.materials.length) return 'Adicione ao menos um material usado na OS.';
 
     let serialCount = 0;
@@ -152,12 +161,14 @@ export default function TechnicianInbox() {
       if (material.requiresSerial) {
         const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.filter(Boolean) : [];
         if (serials.length > 1) return 'Selecione apenas 1 serial por OS.';
+        if (serials.length === 0) return `Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`;
         serialCount += serials.length;
       } else if (Number(item.quantity || 0) <= 0) {
         return `Informe uma quantidade válida para ${material.name}.`;
       }
     }
-    if (serialCount !== 1) return 'Selecione exatamente 1 serial que será transferido para o cliente.';
+    if (serialRequiredForService && serialCount !== 1) return 'Este tipo de serviço exige exatamente 1 serial de equipamento.';
+    if (!serialRequiredForService && serialCount > 1) return 'Selecione no máximo 1 serial por OS.';
     return null;
   }
 
@@ -170,7 +181,7 @@ export default function TechnicianInbox() {
       return;
     }
     try {
-      const payload = { ...osForm, technicianId: selectedTech, materials: osForm.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
+      const payload = { ...osForm, notes: osForm.notes, technicianId: selectedTech, materials: osForm.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
       await api.post('/service-orders', payload);
       setMessage('OS baixada com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
       setOsForm(osEmpty);
@@ -251,7 +262,7 @@ export default function TechnicianInbox() {
 
       <section className="two-col technician-work-area">
         <article className={`panel os-work-card ${mobileSectionClass('baixa')}`}>
-          <div className="panel-title compact-title"><div><h3>Baixar material por OS</h3><p>Informe nome, número do contrato e selecione exatamente 1 serial que será transferido para o cliente.</p></div></div>
+          <div className="panel-title compact-title"><div><h3>Baixar material por OS</h3><p>Informe o serviço executado. Ativação, upgrade e mudança com troca exigem serial; reparo e mudança sem troca não exigem.</p></div></div>
           <button type="button" className="ghost os-mobile-toggle" onClick={() => setOsFieldsOpen((open) => !open)}>{osFieldsOpen ? 'Ocultar dados da OS' : 'Preencher dados da OS'}</button>
           <div className={`form-grid os-mobile-fields ${osFieldsOpen ? 'open' : ''}`}>
             <label>Nº da OS<input value={osForm.osNumber} onChange={(e) => setOsForm({ ...osForm, osNumber: e.target.value })} required /></label>
@@ -259,7 +270,8 @@ export default function TechnicianInbox() {
             <label>Nome do cliente *<input value={osForm.customerName} onChange={(e) => setOsForm({ ...osForm, customerName: e.target.value })} required /></label>
             <label>Endereço<input value={osForm.customerAddress} onChange={(e) => setOsForm({ ...osForm, customerAddress: e.target.value })} /></label>
             <label>Cidade<input value={osForm.city} onChange={(e) => setOsForm({ ...osForm, city: e.target.value })} /></label>
-            <label>Tipo<select value={osForm.serviceType} onChange={(e) => setOsForm({ ...osForm, serviceType: e.target.value })}><option value="instalacao">Instalação</option><option value="manutencao">Manutenção</option><option value="troca_onu">Troca de ONU</option><option value="retirada">Retirada</option><option value="outro">Outro</option></select></label>
+            <label>Tipo de serviço executado<select value={osForm.serviceType} onChange={(e) => setOsForm({ ...osForm, serviceType: e.target.value, addressChangeType: e.target.value === 'outro' ? osForm.addressChangeType : '' })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            {osForm.serviceType === 'outro' && <label>Troca de equipamento?<select value={osForm.addressChangeType} onChange={(e) => setOsForm({ ...osForm, addressChangeType: e.target.value })}><option value="">Selecione</option>{ADDRESS_CHANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
           </div>
           <div className="subtoolbar"><h4>Material usado</h4><div className="row-actions"><button className="ghost desktop-action" onClick={addStandardKit}>Usar kit padrão</button><button className="ghost" onClick={addOsMaterial}>Adicionar item</button></div></div>
           {osForm.materials.map((m, i) => {
@@ -268,7 +280,7 @@ export default function TechnicianInbox() {
             return <div className="item-card technician-os-item" key={i}>
               <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeOsMaterial(i)}>Remover</button></div>
               <label>Material<select value={m.materialId} onChange={(e) => updateOsMaterial(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{stockMaterials.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial obrigatório</strong><small>Selecione apenas 1 serial por OS.</small></div><div className="serial-list compact-serial-list">{serials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" min="1" value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /></label>}
+              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><div className="serial-list compact-serial-list">{serials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" min="1" value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /></label>}
             </div>;
           })}
           {!osForm.materials.length && <div className="empty-state small">Clique em “Adicionar item” para informar o material usado na OS.</div>}
