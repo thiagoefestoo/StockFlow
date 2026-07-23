@@ -285,7 +285,7 @@ export default function Stock() {
               <MaterialField label="Nome comercial"><input value={form.commercialName || ''} onChange={(e) => change('commercialName', e.target.value)} placeholder="Nome usado pelo fornecedor ou telecom" /></MaterialField>
               <MaterialField label="Categoria"><select value={form.category} onChange={(e) => change('category', e.target.value)}>{categories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></MaterialField>
               <MaterialField label="Unidade de medida"><select value={form.unit} onChange={(e) => change('unit', e.target.value)}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></MaterialField>
-              <MaterialField label="Unidade"><input type="number" min="0" step="0.001" value={form.packageQuantity} onChange={(e) => change('packageQuantity', e.target.value)} /></MaterialField>
+              <MaterialField label="Unidade" hint="Fixada em 1. Cada registro representa 1 unidade."><input type="number" value={1} disabled readOnly /></MaterialField>
             </div>
           </section>
 
