@@ -140,7 +140,9 @@ exports.create = asyncHandler(async (req, res) => {
   }
   if (req.user.role === 'estoquista' && !requestType) requestType = 'recarga_estoque';
   requestType = requestType || 'reposicao_carga';
+  requesterNotes = String(requesterNotes || '').trim();
 
+  if (!requesterNotes) return fail(res, 400, 'Selecione uma justificativa para a solicitação.');
   if (!Array.isArray(items) || !items.length) return fail(res, 400, 'Inclua ao menos um item solicitado.');
 
   let technician = null;

@@ -7,6 +7,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { MATERIAL_REQUEST_JUSTIFICATION_OPTIONS } from '../constants/operationOptions';
 
 const baseForm = { requestType: 'reposicao_carga', technicianId: '', warehouseId: '', priority: 'media', neededBy: '', requesterNotes: '', items: [] };
 
@@ -20,6 +21,10 @@ function requestTypeLabel(value) {
 }
 function splitSerials(value) {
   return String(value || '').split(/\n|,|;/).map((item) => item.trim()).filter(Boolean);
+}
+
+function justificationOptions(requestType) {
+  return MATERIAL_REQUEST_JUSTIFICATION_OPTIONS[requestType] || MATERIAL_REQUEST_JUSTIFICATION_OPTIONS.reposicao_carga;
 }
 
 export default function MaterialRequests() {
@@ -121,6 +126,10 @@ export default function MaterialRequests() {
       setMessage('Selecione o estoque que receberá a recarga.');
       return;
     }
+    if (!form.requesterNotes) {
+      setMessage('Selecione uma justificativa para a solicitação.');
+      return;
+    }
     try {
       const response = await api.post('/material-requests', requestPayload());
       setMessage(response.data?.message || (form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação do admin.' : 'Solicitação registrada.'));
@@ -212,14 +221,14 @@ export default function MaterialRequests() {
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>
         <form className="form-stack" onSubmit={save}>
           <div className="form-grid">
-            {!isTechnician && <label>Tipo de solicitação<select value={form.requestType} onChange={(e) => setForm({ ...form, requestType: e.target.value, technicianId: '', warehouseId: e.target.value === 'recarga_estoque' ? warehouses[0]?.id || '' : '' })}><option value="recarga_estoque">Recarga de estoque regional</option><option value="reposicao_carga">Carga para técnico</option></select></label>}
+            {!isTechnician && <label>Tipo de solicitação<select value={form.requestType} onChange={(e) => setForm({ ...form, requestType: e.target.value, technicianId: '', warehouseId: e.target.value === 'recarga_estoque' ? warehouses[0]?.id || '' : '', requesterNotes: '' })}><option value="recarga_estoque">Recarga de estoque regional</option><option value="reposicao_carga">Carga para técnico</option></select></label>}
             {isTechnician && <div className="mini-card"><small>Solicitante</small><strong>{user?.name}</strong><span>Reposição da minha caixa</span></div>}
             {!isTechnician && form.requestType === 'reposicao_carga' && <label>Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
             {form.requestType === 'recarga_estoque' && <label>Estoque que receberá a recarga<select value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city} {w.state}</option>)}</select></label>}
             <label>Prioridade<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
             <label>Necessário até<input type="date" value={form.neededBy} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} /></label>
           </div>
-          <label>Justificativa<textarea rows="3" value={form.requesterNotes} onChange={(e) => setForm({ ...form, requesterNotes: e.target.value })} placeholder="Ex.: reposição para instalações da semana ou recarga do estoque regional" /></label>
+          <label>Justificativa<select value={form.requesterNotes} onChange={(e) => setForm({ ...form, requesterNotes: e.target.value })} required><option value="">Selecione uma justificativa</option>{justificationOptions(form.requestType).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
           <div className="subtoolbar"><h4>Itens solicitados</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
           {form.items.map((item, i) => {
             const material = selectedMaterial(item.materialId);

@@ -41,7 +41,8 @@ function formFromTechnician(technician) {
 }
 
 export default function Technicians() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, canAccessModule } = useAuth();
+  const canManageTransferLimit = isAdmin || canAccessModule('technicianTransferLimitManage');
   const [technicians, setTechnicians] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -50,6 +51,9 @@ export default function Technicians() {
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [limitModal, setLimitModal] = useState({ open: false, technician: null, value: 500 });
+  const [limitSaving, setLimitSaving] = useState(false);
+  const [limitError, setLimitError] = useState('');
 
   async function load() {
     const [t, c, w] = await Promise.all([
@@ -90,6 +94,7 @@ export default function Technicians() {
         mustChangePassword: !!form.mustChangePassword,
         transferApprovalLimit: Number(form.transferApprovalLimit || 0),
       };
+      if (!canManageTransferLimit) delete payload.transferApprovalLimit;
       delete payload.serviceCitiesText;
       if (!payload.createPortalUser && !payload.portalPassword) {
         delete payload.portalPassword;
@@ -104,6 +109,30 @@ export default function Technicians() {
       setError(err.response?.data?.message || 'Não foi possível salvar o técnico.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openLimitEdit(technician) {
+    setLimitError('');
+    setLimitModal({ open: true, technician, value: technician.transferApprovalLimit ?? 500 });
+  }
+
+  async function saveTransferLimit() {
+    const value = Number(limitModal.value);
+    if (!Number.isFinite(value) || value < 0) {
+      setLimitError('Informe um limite válido, igual ou maior que zero.');
+      return;
+    }
+    setLimitSaving(true);
+    setLimitError('');
+    try {
+      await api.put(`/technicians/${limitModal.technician.id}`, { transferApprovalLimit: value });
+      setLimitModal({ open: false, technician: null, value: 500 });
+      await load();
+    } catch (err) {
+      setLimitError(err.response?.data?.message || 'Não foi possível atualizar o limite do técnico.');
+    } finally {
+      setLimitSaving(false);
     }
   }
 
@@ -168,6 +197,7 @@ export default function Technicians() {
                   <td>
                     <div className="action-toolbar">
                       <button className="info" onClick={() => openDetails(t)}>Detalhes</button>
+                      {canManageTransferLimit && <button className="ghost" onClick={() => openLimitEdit(t)}>Editar limite</button>}
                       {isAdmin && <button className="ghost" onClick={() => openEdit(t)}>Editar</button>}
                     </div>
                   </td>
@@ -188,7 +218,7 @@ export default function Technicians() {
             <label>E-mail de login<input type="email" value={form.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="tecnico@empresa.com" /></label>
             <label>Empresa<select value={form.companyId || ''} onChange={(e) => setForm({ ...form, companyId: e.target.value })}><option value="">Sem empresa</option>{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <label>Tipo<select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}><option value="interno">Interno</option><option value="terceirizado">Terceirizado</option></select></label>
-            <label>Limite de transferência sem aprovação<input type="number" min="0" step="0.01" value={form.transferApprovalLimit ?? 500} onChange={(e) => setForm({ ...form, transferApprovalLimit: e.target.value })} /><small>Acima deste valor, a carga será enviada para aprovação do administrador.</small></label>
+            {canManageTransferLimit && <label>Limite de transferência sem aprovação<input type="number" min="0" step="0.01" value={form.transferApprovalLimit ?? 500} onChange={(e) => setForm({ ...form, transferApprovalLimit: e.target.value })} /><small>Acima deste valor, a carga será enviada para aprovação do administrador.</small></label>}
             <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="ativo">Ativo</option><option value="inativo">Inativo</option><option value="bloqueado">Bloqueado</option></select></label>
             <label>Estoque regional vinculado ao técnico<select value={form.defaultWarehouseId || ''} onChange={(e) => selectDefaultWarehouse(e.target.value)}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} {w.city ? `- ${w.city}` : ''}</option>)}</select><small>Ao selecionar o estoque, a cidade dele é marcada automaticamente abaixo.</small></label>
           </div>
@@ -215,7 +245,14 @@ export default function Technicians() {
         </div>
       </Modal>
 
-      <DetailsModal open={details.open} title={`Central do técnico: ${details.technician?.name || ''}`} onClose={() => setDetails({ open: false, technician: null, stock: null })} footer={<><button className="ghost" onClick={() => setDetails({ open: false, technician: null, stock: null })}>Fechar</button><button className="ghost" onClick={refreshDetails}>Atualizar</button>{isAdmin && details.technician && <button onClick={() => { openEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar técnico</button>}</>}>
+      <Modal open={limitModal.open} title={`Limite sem aprovação: ${limitModal.technician?.name || ''}`} onClose={() => setLimitModal({ open: false, technician: null, value: 500 })} footer={<><button className="ghost" onClick={() => setLimitModal({ open: false, technician: null, value: 500 })}>Cancelar</button><button disabled={limitSaving} onClick={saveTransferLimit}>{limitSaving ? 'Salvando...' : 'Salvar limite'}</button></>}>
+        <div className="form-stack">
+          {limitError && <div className="alert danger">{limitError}</div>}
+          <label>Limite de transferência sem aprovação<input type="number" min="0" step="0.01" value={limitModal.value} onChange={(e) => setLimitModal({ ...limitModal, value: e.target.value })} /><small>Transferências acima deste valor serão enviadas para aprovação do administrador. A alteração ficará registrada na auditoria.</small></label>
+        </div>
+      </Modal>
+
+      <DetailsModal open={details.open} title={`Central do técnico: ${details.technician?.name || ''}`} onClose={() => setDetails({ open: false, technician: null, stock: null })} footer={<><button className="ghost" onClick={() => setDetails({ open: false, technician: null, stock: null })}>Fechar</button><button className="ghost" onClick={refreshDetails}>Atualizar</button>{canManageTransferLimit && details.technician && <button className="ghost" onClick={() => { openLimitEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar limite</button>}{isAdmin && details.technician && <button onClick={() => { openEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar técnico</button>}</>}>
         {details.technician && <div className="technician-command-center"><DetailGrid fields={[["Nome", details.technician.name], ["Documento", details.technician.document], ["Telefone", details.technician.phone], ["E-mail", details.technician.email], ["Empresa", details.technician.ContractorCompany?.name], ["Tipo", details.technician.type], ["Status", details.technician.status], ["Cidades atendidas", citiesToText(details.technician.serviceCities)], ["Estoque padrão", details.technician.defaultWarehouse?.name], ["Limite sem aprovação", brl(details.technician.transferApprovalLimit ?? 500)], ["Acesso de login", details.technician.portalUser ? 'Liberado' : 'Sem login'], ["Equipamentos", details.stock?.summary?.assetsCount ?? details.technician.assetCount], ["Valor equipamentos", brl(details.stock?.summary?.assetsValue ?? details.technician.assetValue)], ["Valor consumíveis", brl(details.stock?.summary?.consumableValue)], ["Valor total em nome", brl(details.stock?.summary?.totalValue ?? details.technician.totalCustodyValue)], ["OS abertas", details.stock?.summary?.openOrders], ["Custódia +60 dias", details.stock?.summary?.oldCustody], ["Criado em", dt(details.technician.createdAt)]]} />
           <section className="panel-soft"><h4>Resumo por material</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Seriais</th></tr></thead><tbody>{(details.stock?.groupedMaterials || []).map((row) => <tr key={row.material}><td>{row.material}</td><td>{formatQuantity(row.quantity)}</td><td>{brl(row.value)}</td><td>{(row.serials || []).slice(0, 6).join(', ')}{(row.serials || []).length > 6 ? '...' : ''}</td></tr>)}</tbody></table></div></section>
           <DetailList title="Equipamentos serializados na caixa" items={details.stock?.assets || []} render={(asset) => <><b>{asset.serialNumber}</b><span>{asset.Material?.name} • {asset.status} • {brl(asset.acquisitionCost)} • {asset.custodyDays ?? 0} dia(s) em custódia</span><small>{asset.brand || '-'} {asset.model || ''} • {asset.mac || 'sem MAC'}</small></>} />

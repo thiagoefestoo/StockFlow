@@ -17,6 +17,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
 const { money, daysBetween } = require('../utils/number');
+const { hasModuleAccess } = require('../config/modulePermissions');
 
 const technicianInclude = [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }];
 
@@ -29,6 +30,14 @@ function normalizeCities(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
   if (typeof value === 'string') return value.split(',').map((item) => item.trim()).filter(Boolean);
   return [];
+}
+
+function canManageTransferApprovalLimit(user) {
+  return hasModuleAccess(user, 'technicianTransferLimitManage');
+}
+
+function hasOwnTransferApprovalLimit(body) {
+  return Object.prototype.hasOwnProperty.call(body || {}, 'transferApprovalLimit');
 }
 
 function technicianPayload(body) {
@@ -158,6 +167,9 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
+  if (hasOwnTransferApprovalLimit(req.body) && !canManageTransferApprovalLimit(req.user)) {
+    return fail(res, 403, 'Você não tem permissão para definir o limite de transferência sem aprovação.');
+  }
   const payload = technicianPayload(req.body);
   if (!payload.name || payload.name.length < 3) return fail(res, 400, 'Informe o nome do técnico.');
   const technician = await Technician.create(payload);
@@ -181,6 +193,17 @@ exports.create = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+
+  const currentTransferApprovalLimit = money(technician.transferApprovalLimit ?? 500);
+  const requestedTransferApprovalLimit = hasOwnTransferApprovalLimit(req.body)
+    ? money(req.body.transferApprovalLimit)
+    : currentTransferApprovalLimit;
+  const transferApprovalLimitChanged = requestedTransferApprovalLimit !== currentTransferApprovalLimit;
+
+  if (transferApprovalLimitChanged && !canManageTransferApprovalLimit(req.user)) {
+    return fail(res, 403, 'Você não tem permissão para editar o limite de transferência sem aprovação.');
+  }
+
   const before = technician.toJSON();
   await technician.update(technicianPayload({ ...technician.toJSON(), ...req.body }));
 
@@ -204,7 +227,17 @@ exports.update = asyncHandler(async (req, res) => {
   }
 
   const updated = await Technician.findByPk(technician.id, { include: technicianInclude });
-  await writeAudit({ req, action: 'update', entity: 'Técnico', entityId: technician.id, message: 'Técnico atualizado.', beforeData: before, afterData: updated.toJSON() });
+  await writeAudit({
+    req,
+    action: transferApprovalLimitChanged ? 'update_transfer_approval_limit' : 'update',
+    entity: 'Técnico',
+    entityId: technician.id,
+    message: transferApprovalLimitChanged
+      ? `Limite sem aprovação de ${technician.name} alterado de ${currentTransferApprovalLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} para ${requestedTransferApprovalLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`
+      : 'Técnico atualizado.',
+    beforeData: before,
+    afterData: updated.toJSON(),
+  });
   return ok(res, { ...updated.toJSON(), portalUser: publicPortalUser(portalUser) }, portalUser ? 'Técnico atualizado e acesso sincronizado.' : 'Técnico atualizado.');
 });
 
