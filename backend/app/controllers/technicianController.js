@@ -44,6 +44,7 @@ function technicianPayload(body) {
     notes: body.notes ? String(body.notes).trim() : null,
     serviceCities: normalizeCities(body.serviceCities),
     defaultWarehouseId: body.defaultWarehouseId || null,
+    transferApprovalLimit: money(body.transferApprovalLimit === undefined ? 500 : body.transferApprovalLimit),
   };
 }
 

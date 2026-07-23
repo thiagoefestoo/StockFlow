@@ -8,6 +8,26 @@ const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
 
+
+async function estimateTransferValue(items = [], sourceWarehouseId) {
+  let totalValue = 0;
+  for (const item of items) {
+    const material = await Material.findByPk(item.materialId);
+    if (!material) throw new Error('Material não encontrado.');
+    const unitCost = money(item.unitCost ?? material.unitCost);
+    if (material.requiresSerial) {
+      const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((value) => String(value).trim()).filter(Boolean) : [];
+      for (const serialNumber of serials) {
+        const asset = await SerializedAsset.findOne({ where: { serialNumber, warehouseId: sourceWarehouseId, ownerType: 'estoque', status: 'em_estoque' } });
+        totalValue += Number(asset?.acquisitionCost || unitCost);
+      }
+    } else {
+      totalValue += qty(item.quantity) * unitCost;
+    }
+  }
+  return money(totalValue);
+}
+
 function nextNumber() {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
@@ -48,6 +68,17 @@ exports.create = asyncHandler(async (req, res) => {
     if (linkedRequest.requestType === 'recarga_estoque') return fail(res, 400, 'Recarga de estoque deve ser recebida pela tela de solicitações.');
     if (Number(linkedRequest.technicianId) !== Number(technicianId)) return fail(res, 400, 'O técnico selecionado não corresponde à solicitação.');
     if (linkedRequest.warehouseId && Number(linkedRequest.warehouseId) !== Number(sourceWarehouseId)) return fail(res, 400, 'O estoque de origem não corresponde ao estoque da solicitação.');
+  }
+
+  const estimatedTotalValue = await estimateTransferValue(items, sourceWarehouseId);
+  const technicianApprovalLimit = money(technician.transferApprovalLimit === undefined ? 500 : technician.transferApprovalLimit);
+  if (!linkedRequest && estimatedTotalValue > technicianApprovalLimit) {
+    return fail(
+      res,
+      409,
+      `A transferência soma ${estimatedTotalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} e excede o limite sem aprovação de ${technician.name}, definido em ${technicianApprovalLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. Envie a carga para aprovação antes de gerar a guia.`,
+      { code: 'TECHNICIAN_APPROVAL_REQUIRED', technicianId: technician.id, technicianApprovalLimit, totalValue: estimatedTotalValue },
+    );
   }
 
   const transfer = await sequelize.transaction(async (transaction) => {
@@ -134,7 +165,7 @@ exports.create = asyncHandler(async (req, res) => {
       entity: 'Transfer',
       entityId: record.id,
       message: `Guia ${record.transferNumber} transferiu material do estoque ${sourceWarehouse.name} para ${technician.name}.`,
-      afterData: { ...record.toJSON(), sourceWarehouse: sourceWarehouse.toJSON(), items },
+      afterData: { ...record.toJSON(), sourceWarehouse: sourceWarehouse.toJSON(), technicianApprovalLimit, estimatedTotalValue, linkedMaterialRequestId: linkedRequest?.id || null, items },
       transaction,
     });
     return record;

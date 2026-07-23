@@ -13,6 +13,7 @@ const Technician = sequelize.define('Technician', {
   notes: { type: DataTypes.TEXT, allowNull: true },
   serviceCities: { type: DataTypes.JSONB, allowNull: true, defaultValue: [] },
   defaultWarehouseId: { type: DataTypes.INTEGER, allowNull: true },
+  transferApprovalLimit: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 500 },
 }, { tableName: 'technicians' });
 
 module.exports = Technician;

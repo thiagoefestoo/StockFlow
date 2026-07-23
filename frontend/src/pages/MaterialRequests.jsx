@@ -122,8 +122,8 @@ export default function MaterialRequests() {
       return;
     }
     try {
-      await api.post('/material-requests', requestPayload());
-      setMessage(form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação do admin.' : 'Solicitação enviada para aprovação.');
+      const response = await api.post('/material-requests', requestPayload());
+      setMessage(response.data?.message || (form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação do admin.' : 'Solicitação registrada.'));
       setModal(false);
       setForm(baseForm);
       load();
@@ -209,7 +209,7 @@ export default function MaterialRequests() {
         <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" onClick={() => openDecision('reject', r)}>Reprovar</button></>}{canDeliver && r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : <Link className="ghost" to={`/transferencias?requestId=${r.id}`}>Entregar carga</Link>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
       </section>
 
-      <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar para aprovação</button></>}>
+      <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>
         <form className="form-stack" onSubmit={save}>
           <div className="form-grid">
             {!isTechnician && <label>Tipo de solicitação<select value={form.requestType} onChange={(e) => setForm({ ...form, requestType: e.target.value, technicianId: '', warehouseId: e.target.value === 'recarga_estoque' ? warehouses[0]?.id || '' : '' })}><option value="recarga_estoque">Recarga de estoque regional</option><option value="reposicao_carga">Carga para técnico</option></select></label>}

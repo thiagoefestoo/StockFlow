@@ -212,9 +212,28 @@ exports.create = asyncHandler(async (req, res) => {
 
     record.totalQuantity = qty(totalQuantity);
     record.totalValue = money(totalValue);
+
+    const technicianApprovalLimit = isStockRecharge(requestType)
+      ? 0
+      : money(technician?.transferApprovalLimit === undefined ? 500 : technician.transferApprovalLimit);
+    const requiresApproval = isStockRecharge(requestType) || Number(record.totalValue || 0) > technicianApprovalLimit;
+
+    if (!requiresApproval) {
+      record.status = 'aprovado';
+      record.approvedAt = new Date();
+      record.approvedById = req.user.id;
+      record.approvalNotes = `Aprovação automática: valor dentro do limite individual de ${technician.name} (${technicianApprovalLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}).`;
+    }
+    record.metadata = {
+      ...(record.metadata || {}),
+      approvalPolicy: isStockRecharge(requestType) ? 'stock_recharge_admin' : 'technician_transfer_limit',
+      technicianApprovalLimit,
+      requiresApproval,
+      automaticApproval: !requiresApproval,
+    };
     await record.save({ transaction });
 
-    const title = isStockRecharge(requestType) ? `Aprovar recarga ${record.requestNumber}` : `Aprovar ${record.requestNumber}`;
+    const title = isStockRecharge(requestType) ? `Aprovar recarga ${record.requestNumber}` : `${requiresApproval ? 'Aprovar' : 'Liberada automaticamente'} ${record.requestNumber}`;
     const description = isStockRecharge(requestType)
       ? `Solicitação de recarga para o estoque ${warehouse?.name || warehouseId}.`
       : `Solicitação de material para ${technician.name}.`;
@@ -225,10 +244,13 @@ exports.create = asyncHandler(async (req, res) => {
       entityId: String(record.id),
       title,
       description,
-      status: 'pendente',
+      status: requiresApproval ? 'pendente' : 'aprovado',
       priority: record.priority,
       amount: record.totalValue,
       requestedById: req.user.id,
+      decidedAt: requiresApproval ? null : new Date(),
+      decidedById: requiresApproval ? null : req.user.id,
+      decisionNotes: requiresApproval ? null : record.approvalNotes,
       payload: {
         requestId: record.id,
         requestNumber: record.requestNumber,
@@ -237,35 +259,52 @@ exports.create = asyncHandler(async (req, res) => {
         technicianName: technician?.name,
         warehouseId: warehouseId || null,
         warehouseName: warehouse?.name,
+        technicianApprovalLimit,
+        requiresApproval,
+        automaticApproval: !requiresApproval,
         items: approvalItems,
       },
     }, { transaction });
 
     await Notification.create({
-      role: 'admin',
-      type: 'tarefa',
-      severity: record.priority === 'critica' ? 'danger' : 'warning',
-      title: isStockRecharge(requestType) ? `Nova recarga ${record.requestNumber}` : `Nova solicitação ${record.requestNumber}`,
+      role: requiresApproval ? 'admin' : 'estoquista',
+      type: requiresApproval ? 'tarefa' : 'estoque',
+      severity: requiresApproval ? (record.priority === 'critica' ? 'danger' : 'warning') : 'success',
+      title: isStockRecharge(requestType)
+        ? `Nova recarga ${record.requestNumber}`
+        : (requiresApproval ? `Nova solicitação ${record.requestNumber}` : `Solicitação liberada ${record.requestNumber}`),
       message: isStockRecharge(requestType)
         ? `${req.user.name} solicitou recarga de ${record.totalQuantity} item(ns) para ${warehouse?.name || 'estoque regional'}.`
-        : `${technician.name} solicitou ${record.totalQuantity} item(ns) para a carga técnica.`,
-      route: '/aprovacoes',
-      metadata: { requestId: record.id, requestNumber: record.requestNumber, warehouseId },
+        : (requiresApproval
+          ? `${technician.name} solicitou ${record.totalQuantity} item(ns), no valor de ${Number(record.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}, acima do limite individual de ${technicianApprovalLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`
+          : `${record.requestNumber} foi liberada automaticamente para separação. Valor dentro do limite individual de ${technician.name}.`),
+      route: requiresApproval ? '/aprovacoes' : '/solicitacoes-material',
+      metadata: { requestId: record.id, requestNumber: record.requestNumber, warehouseId, technicianId: record.technicianId, technicianApprovalLimit, totalValue: record.totalValue, requiresApproval },
     }, { transaction });
 
     await writeAudit({
       req,
-      action: isStockRecharge(requestType) ? 'stock_recharge_request' : 'request',
+      action: isStockRecharge(requestType) ? 'stock_recharge_request' : (requiresApproval ? 'request_pending_approval' : 'request_auto_approved'),
       entity: 'MaterialRequest',
       entityId: record.id,
-      message: isStockRecharge(requestType) ? `Recarga ${record.requestNumber} aberta para ${warehouse?.name || warehouseId}.` : `Solicitação ${record.requestNumber} aberta para ${technician.name}.`,
-      afterData: record.toJSON(),
+      message: isStockRecharge(requestType)
+        ? `Recarga ${record.requestNumber} aberta para ${warehouse?.name || warehouseId}.`
+        : (requiresApproval
+          ? `Solicitação ${record.requestNumber} aberta para ${technician.name}; valor acima do limite individual e enviada para aprovação.`
+          : `Solicitação ${record.requestNumber} aberta e aprovada automaticamente para ${technician.name}; valor dentro do limite individual.`),
+      afterData: { ...record.toJSON(), technicianApprovalLimit, requiresApproval },
       transaction,
     });
     return record;
   });
 
-  return created(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), isStockRecharge(requestType) ? 'Solicitação de recarga enviada para aprovação do admin.' : 'Solicitação enviada para aprovação.');
+  const createdRequest = await MaterialRequest.findByPk(request.id, { include: includeFull() });
+  const message = isStockRecharge(requestType)
+    ? 'Solicitação de recarga enviada para aprovação do admin.'
+    : (createdRequest.status === 'aprovado'
+      ? 'Solicitação liberada automaticamente dentro do limite individual do técnico.'
+      : 'Solicitação enviada para aprovação por exceder o limite individual do técnico.');
+  return created(res, createdRequest, message);
 });
 
 exports.approve = asyncHandler(async (req, res) => {
@@ -277,10 +316,11 @@ exports.approve = asyncHandler(async (req, res) => {
     return fail(res, 403, 'Recarga de estoque precisa ser aprovada por administrador.');
   }
 
-  const adminMinAmount = Number(process.env.APPROVAL_ADMIN_MIN_AMOUNT || 500);
   const amount = Number(request.totalValue || 0);
-  if (amount >= adminMinAmount && req.user.role !== 'admin') {
-    return fail(res, 403, `Esta solicitação soma ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} e exige aprovação de administrador a partir de ${adminMinAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`);
+  const technicianLimit = Number(request.metadata?.technicianApprovalLimit || request.Technician?.transferApprovalLimit || 500);
+  const requiresAdminApproval = request.requestType === 'recarga_estoque' || request.metadata?.requiresApproval === true || amount > technicianLimit;
+  if (requiresAdminApproval && req.user.role !== 'admin') {
+    return fail(res, 403, `Esta solicitação soma ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} e excede o limite individual do técnico de ${technicianLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. A aprovação deve ser realizada por administrador.`);
   }
 
   const before = request.toJSON();

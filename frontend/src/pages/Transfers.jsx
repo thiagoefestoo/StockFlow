@@ -296,6 +296,30 @@ export default function Transfers() {
         serialNumbers: Array.isArray(it.serialNumbers) ? it.serialNumbers : [],
       })),
     };
+    const technicianLimit = Number(selectedTechnician?.transferApprovalLimit ?? 500);
+    if (!form.materialRequestId && totalPreview > technicianLimit) {
+      const requestPayload = {
+        technicianId: form.technicianId,
+        warehouseId: form.warehouseId,
+        requestType: 'reposicao_carga',
+        priority: 'media',
+        requesterNotes: form.notes || `Transferência acima do limite individual de ${selectedTechnician?.name || 'técnico'}.`,
+        items: payload.items.map((item) => ({
+          materialId: item.materialId,
+          quantity: item.quantity,
+          serialNumbers: item.serialNumbers,
+        })),
+      };
+      const response = await api.post('/material-requests', requestPayload);
+      window.alert(response.data?.message || 'Carga enviada para aprovação por exceder o limite individual do técnico.');
+      setModal(false);
+      setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
+      setAssetSearch('');
+      setWarehouseMaterials([]);
+      setAvailableAssets([]);
+      return;
+    }
+
     await api.post('/transfers', payload);
     try {
       localStorage.setItem('superinfra:technician-box-refresh', String(Date.now()));
@@ -378,13 +402,14 @@ export default function Transfers() {
             <div><small>Técnico selecionado</small><strong>{selectedTechnician?.name || 'Selecione um técnico'}</strong><span>{selectedTechnician?.ContractorCompany?.name || 'Carga individual'}</span></div>
             <div><small>Itens na guia</small><strong>{form.items.length}</strong><span>{formatQuantity(form.items.reduce((s, i) => s + toQuantityNumber(i.quantity || (i.serialNumbers || []).length || 0), 0))} unidade(s)</span></div>
             <div><small>Valor previsto</small><strong>{brl(totalPreview)}</strong><span>Equipamentos + consumíveis</span></div>
+            <div><small>Limite sem aprovação</small><strong>{selectedTechnician ? brl(selectedTechnician.transferApprovalLimit ?? 500) : '-'}</strong><span>{selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500) ? 'Exige aprovação do administrador' : 'Liberação direta permitida'}</span></div>
           </section>
           <div className="form-grid">
             <label>🏬 Estoque de origem<select value={form.warehouseId} onChange={(e) => { setForm({ ...form, warehouseId: e.target.value, items: [] }); setAssetSearch(''); }}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code}</option>)}</select></label>
             <label>👷 Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
             <label className="span-2">📝 Motivo/observação<input list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           </div>
-          {form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria.</div>}
+          {form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
           {loadingStock && <div className="empty-state">Carregando materiais do estoque selecionado...</div>}
           <div className="subtoolbar"><h4>Itens da guia</h4><button className="ghost" onClick={addItem}>➕ Adicionar item</button></div>
           {!loadingStock && form.warehouseId && materialOptions.length === 0 && <div className="empty-state">Este estoque não possui saldo disponível para transferência.</div>}

@@ -197,8 +197,8 @@ export default function TechnicianInbox() {
     try {
       const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
       if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
-      await api.post('/material-requests', { ...requestForm, items: cleanItems, technicianId: selectedTech });
-      setMessage('Solicitação enviada para aprovação do supervisor.');
+      const response = await api.post('/material-requests', { ...requestForm, items: cleanItems, technicianId: selectedTech });
+      setMessage(response.data?.message || 'Solicitação registrada.');
       setRequestModal(false);
       setRequestForm(reqEmpty);
       setActiveMobileSection('solicitacoes');
@@ -322,7 +322,7 @@ export default function TechnicianInbox() {
         {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", formatQuantity(details.item.totalQuantity)], ["Valor", brl(details.item.totalValue)], ["Atualização", dt(details.item.updatedAt)], ["Observação", details.item.requesterNotes]]} />}
       </DetailsModal>
 
-      <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={sendRequest}>Enviar para aprovação</button></>}>
+      <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={sendRequest}>Enviar solicitação</button></>}>
         <div className="form-stack">
           <label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
           <label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label>
