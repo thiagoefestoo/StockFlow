@@ -4,6 +4,8 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import AttachmentPreview from '../components/AttachmentPreview';
+import FloatingAlert from '../components/FloatingAlert';
+import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
@@ -29,6 +31,14 @@ function emptyForm() {
     items: [],
   };
 }
+
+function isSerialRequired(material) {
+  if (!material) return false;
+  if (material.requiresSerial === true || material.requiresSerial === 1 || material.requiresSerial === '1') return true;
+  const raw = String(material.requiresSerial ?? '').trim().toLowerCase();
+  return ['true', 'sim', 's', 'yes', 'on'].includes(raw);
+}
+
 function duplicateValues(values) {
   const seen = new Set();
   const repeated = new Set();
@@ -44,9 +54,9 @@ function serialStatus(item) {
   const quantity = Number(item.quantity || 0);
   const serials = splitSerials(item.serialsText);
   if (!quantity) return `${serials.length} serial(is) informado(s). Informe a quantidade.`;
-  if (serials.length === quantity) return `${serials.length}/${quantity} serial(is) informado(s). Quantidade correta.`;
-  if (serials.length < quantity) return `${serials.length}/${quantity} serial(is) informado(s). Faltam ${quantity - serials.length}.`;
-  return `${serials.length}/${quantity} serial(is) informado(s). Remova ${serials.length - quantity} excedente(s).`;
+  if (serials.length === quantity) return `${serials.length}/${formatQuantity(quantity)} serial(is) informado(s). Quantidade correta.`;
+  if (serials.length < quantity) return `${serials.length}/${formatQuantity(quantity)} serial(is) informado(s). Faltam ${formatQuantity(quantity - serials.length)}.`;
+  return `${serials.length}/${formatQuantity(quantity)} serial(is) informado(s). Remova ${formatQuantity(serials.length - quantity)} excedente(s).`;
 }
 
 export default function Receiving() {
@@ -126,10 +136,10 @@ export default function Receiving() {
       if (!quantity || quantity <= 0) return `${itemLabel}: informe uma quantidade válida.`;
       if (!unitCost || unitCost <= 0) return `${itemLabel}: informe o valor unitário da entrada.`;
 
-      if (material.requiresSerial) {
+      if (isSerialRequired(material)) {
         const repeatedInItem = duplicateValues(serials);
         if (repeatedInItem.length) return `Serial digitado repetido no ${itemLabel}: ${repeatedInItem.join(', ')}.`;
-        if (serials.length !== quantity) return `${itemLabel}: informe exatamente ${quantity} serial(is). Você informou ${serials.length}.`;
+        if (serials.length !== quantity) return `${itemLabel}: informe exatamente ${formatQuantity(quantity)} serial(is). Você informou ${serials.length}.`;
         allSerials.push(...serials);
       }
     }
@@ -158,12 +168,15 @@ export default function Receiving() {
 
       const payload = {
         ...form,
-        items: form.items.map((item) => ({
-          ...item,
-          quantity: Number(item.quantity || 0),
-          serialNumbers: splitSerials(item.serialsText),
-          unitCost: Number(item.unitCost || 0),
-        })),
+        items: form.items.map((item) => {
+          const material = materials.find((m) => Number(m.id) === Number(item.materialId));
+          return {
+            ...item,
+            quantity: Number(item.quantity || 0),
+            serialNumbers: isSerialRequired(material) ? splitSerials(item.serialsText) : [],
+            unitCost: Number(item.unitCost || 0),
+          };
+        }),
       };
       await api.post('/batches', payload);
       setMessage('Entrada registrada com comprovante, estoque/região, valores e seriais conferidos.');
@@ -177,9 +190,9 @@ export default function Receiving() {
 
   return <div className="page-grid erp-page">
     <section className="toolbar"><div><span className="eyebrow">Entrada fiscal e logística</span><h2>Entrada completa de material</h2><p>Registre materiais diretamente no estoque regional de destino, com documento fiscal, valor obrigatório e seriais conferidos.</p></div><button onClick={() => { setForm({ ...emptyForm(), warehouseId: warehouses[0]?.id || '' }); setModal(true); }}>Nova entrada</button></section>
-    {message && <div className={message.startsWith('Entrada registrada') ? 'alert success' : 'alert danger'}>{message}</div>}
-    <div className="kpi-grid small"><KpiCard label="Entradas" value={batches.length} /><KpiCard label="Itens recebidos" value={totals.totalItems} /><KpiCard label="Valor recebido" value={brl(totals.totalValue)} /><KpiCard label="Com comprovante" value={totals.withProof} /></div>
-    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}</td><td>{b.sourceCompany}</td><td>{b.totalItems}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <AttachmentPreview compact name={b.proofAttachmentName} data={b.proofAttachmentData} /> : '-'}</td><td><button className="info" onClick={() => setDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div></section>
+    <FloatingAlert message={message} type={message.startsWith('Entrada registrada') ? 'success' : 'danger'} onClose={() => setMessage('')} />
+    <div className="kpi-grid small"><KpiCard label="Entradas" value={batches.length} /><KpiCard label="Itens recebidos" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor recebido" value={brl(totals.totalValue)} /><KpiCard label="Com comprovante" value={totals.withProof} /></div>
+    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}</td><td>{b.sourceCompany}</td><td>{formatQuantity(b.totalItems)}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <AttachmentPreview compact name={b.proofAttachmentName} data={b.proofAttachmentData} /> : '-'}</td><td><button className="info" onClick={() => setDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div></section>
 
     <Modal open={modal} title="Nova entrada com comprovante" onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Registrar entrada</button></>}>
       <div className="form-stack receiving-form">
@@ -189,28 +202,29 @@ export default function Receiving() {
         <div className="subtoolbar"><h4>Itens da entrada</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
         {form.items.map((item, i) => {
           const material = materials.find((m) => Number(m.id) === Number(item.materialId));
-          const serials = splitSerials(item.serialsText);
+          const requiresSerial = isSerialRequired(material);
+          const serials = requiresSerial ? splitSerials(item.serialsText) : [];
           const repeated = duplicateValues(serials);
           return <div className="item-card" key={i}>
             <div className="item-head"><strong>Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => { const mat = materials.find((m) => Number(m.id) === Number(e.target.value)); updateItem(i, { materialId: e.target.value, unitCost: mat?.unitCost && Number(mat.unitCost) > 0 ? mat.unitCost : '', serialsText: '' }); }}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label>
+              <label>Material<select value={item.materialId} onChange={(e) => { const mat = materials.find((m) => Number(m.id) === Number(e.target.value)); updateItem(i, { materialId: e.target.value, unitCost: mat?.unitCost && Number(mat.unitCost) > 0 ? mat.unitCost : '', serialsText: '' }); }}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • {isSerialRequired(m) ? 'com serial' : 'sem serial'}</option>)}</select></label>
               <label>Quantidade<input type="number" min="1" step="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label>
               <label>Valor unitário obrigatório<input type="number" min="0.01" step="0.01" value={item.unitCost} onChange={(e) => updateItem(i, { unitCost: e.target.value })} placeholder="Informe o valor unitário" /></label>
               <label>Pedido/OC<input value={item.purchaseOrder || ''} onChange={(e) => updateItem(i, { purchaseOrder: e.target.value })} /></label>
               <label>Condição<select value={item.condition} onChange={(e) => updateItem(i, { condition: e.target.value })}><option value="novo">Novo</option><option value="usado">Usado</option><option value="recondicionado">Recondicionado</option><option value="defeito">Defeito</option><option value="outro">Outro</option></select></label>
             </div>
-            {material?.requiresSerial && <div className="serial-bulk panel-soft">
+            {requiresSerial ? <div className="serial-bulk panel-soft">
               <h4>Seriais obrigatórios</h4>
               <label>Lista de seriais<textarea rows={Math.min(Math.max(Number(item.quantity || 5), 5), 12)} value={item.serialsText || ''} onChange={(e) => updateItem(i, { serialsText: e.target.value })} placeholder={`Digite exatamente ${Number(item.quantity || 0) || 'a quantidade de'} serial(is), um por linha`} /></label>
               <small>{serialStatus(item)}</small>
               {repeated.length > 0 && <div className="alert danger compact-alert">Serial digitado repetido: {repeated.join(', ')}</div>}
-            </div>}
+            </div> : material ? <div className="alert info compact-alert">Este material está cadastrado como <strong>sem número de série</strong>. Informe apenas quantidade e valor; serial não será exigido nesta entrada.</div> : null}
             <label>Observação do item<textarea rows="2" value={item.itemNotes || ''} onChange={(e) => updateItem(i, { itemNotes: e.target.value })} /></label>
           </div>;
         })}
       </div>
     </Modal>
-    <DetailsModal open={!!details} title={`Entrada ${details?.receiptNumber || ''}`} onClose={() => setDetails(null)}>{details && <><DetailGrid fields={[["Entrada", details.receiptNumber], ["Estoque/região", details.Warehouse?.name || details.warehouseLocation], ["Origem", details.sourceCompany], ["Documento", details.fiscalDocumentNumber || details.invoiceAccessKey], ["Comprovante", details.proofAttachmentName || 'Sem anexo'], ["Itens", details.totalItems], ["Valor", brl(details.totalValue)], ["Conferência", details.conferenceStatus]]} /><AttachmentPreview name={details.proofAttachmentName} data={details.proofAttachmentData} label="Comprovante da entrada" /><DetailList title="Itens da entrada" items={details.StockBatchItems || []} render={(item) => <><b>{item.Material?.name}</b><span>{item.quantity} • {brl(item.totalCost)} • {item.condition}</span><small>{(item.serialNumbers || []).slice(0, 12).join(', ')}</small></>} /></>}</DetailsModal>
+    <DetailsModal open={!!details} title={`Entrada ${details?.receiptNumber || ''}`} onClose={() => setDetails(null)}>{details && <><DetailGrid fields={[["Entrada", details.receiptNumber], ["Estoque/região", details.Warehouse?.name || details.warehouseLocation], ["Origem", details.sourceCompany], ["Documento", details.fiscalDocumentNumber || details.invoiceAccessKey], ["Comprovante", details.proofAttachmentName || 'Sem anexo'], ["Itens", formatQuantity(details.totalItems)], ["Valor", brl(details.totalValue)], ["Conferência", details.conferenceStatus]]} /><AttachmentPreview name={details.proofAttachmentName} data={details.proofAttachmentData} label="Comprovante da entrada" /><DetailList title="Itens da entrada" items={details.StockBatchItems || []} render={(item) => <><b>{item.Material?.name}</b><span>{formatQuantity(item.quantity)} • {brl(item.totalCost)} • {item.condition}</span><small>{(item.serialNumbers || []).slice(0, 12).join(', ')}</small></>} /></>}</DetailsModal>
   </div>;
 }

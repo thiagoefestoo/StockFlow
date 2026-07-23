@@ -7,8 +7,29 @@ const { stockWhereForUser, assertWarehouseAccess } = require('../utils/warehouse
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { money, qty } = require('../utils/number');
+const { normalizeBoolean, isTrue } = require('../utils/booleans');
 
 const base = crudController(Material, 'Material');
+
+
+const BOOLEAN_FIELDS = [
+  'requiresSerial',
+  'active',
+  'allowTechnicianTransfer',
+  'allowCustomerInstall',
+  'requiresReturnOnRemoval',
+  'autoLowStockAlert',
+];
+
+function normalizeMaterialPayload(payload = {}, current = {}) {
+  const normalized = { ...payload };
+  for (const field of BOOLEAN_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(normalized, field)) {
+      normalized[field] = normalizeBoolean(normalized[field], Boolean(current[field]));
+    }
+  }
+  return normalized;
+}
 
 function normalizeSerials(value) {
   if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
@@ -22,7 +43,7 @@ exports.list = asyncHandler(async (req, res) => {
   for (const material of records) {
     const mainBalance = await StockBalance.sum('quantity', { where: { materialId: material.id, ownerType: 'estoque', technicianId: null, ...warehouseScope } });
     const assets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'estoque', ...warehouseScope } });
-    enriched.push({ ...material.toJSON(), mainStock: material.requiresSerial ? assets : Number(mainBalance || 0) });
+    enriched.push({ ...material.toJSON(), mainStock: isTrue(material.requiresSerial) ? assets : Number(mainBalance || 0) });
   }
   return ok(res, enriched);
 });
@@ -38,7 +59,9 @@ exports.create = asyncHandler(async (req, res) => {
     ...payload
   } = req.body;
 
-  if (!payload.sku || !payload.name) return fail(res, 400, 'SKU e nome do material são obrigatórios.');
+  const normalizedPayload = normalizeMaterialPayload(payload);
+
+  if (!normalizedPayload.sku || !normalizedPayload.name) return fail(res, 400, 'SKU e nome do material são obrigatórios.');
   if (!initialWarehouseId) return fail(res, 400, 'Selecione o estoque regional onde este material será cadastrado.');
 
   try { assertWarehouseAccess(req.user, initialWarehouseId, 'Você não tem acesso ao estoque regional informado.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
@@ -47,16 +70,17 @@ exports.create = asyncHandler(async (req, res) => {
   if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque regional informado não existe ou está inativo.');
 
   const serials = normalizeSerials(initialSerialNumbers.length ? initialSerialNumbers : initialSerialsText);
-  const quantity = payload.requiresSerial ? serials.length : qty(initialQuantity || 0);
+  const requiresSerial = isTrue(normalizedPayload.requiresSerial);
+  const quantity = requiresSerial ? serials.length : qty(initialQuantity || 0);
 
-  if (payload.requiresSerial && quantity > 0 && serials.length !== quantity) return fail(res, 400, 'A quantidade de seriais precisa bater com a quantidade inicial.');
+  if (requiresSerial && quantity > 0 && serials.length !== quantity) return fail(res, 400, 'A quantidade de seriais precisa bater com a quantidade inicial.');
 
   const result = await sequelize.transaction(async (transaction) => {
-    const material = await Material.create(payload, { transaction });
+    const material = await Material.create(normalizedPayload, { transaction });
     const unitCost = money(material.unitCost || 0);
 
     if (quantity > 0) {
-      if (material.requiresSerial) {
+      if (isTrue(material.requiresSerial)) {
         for (const serialNumber of serials) {
           const existing = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
           if (existing) throw new Error(`Serial duplicado: ${serialNumber}.`);
@@ -114,4 +138,23 @@ exports.create = asyncHandler(async (req, res) => {
   return created(res, result, 'Material cadastrado no estoque regional.');
 });
 
-exports.update = base.update;
+exports.update = asyncHandler(async (req, res) => {
+  const material = await Material.findByPk(req.params.id);
+  if (!material) return fail(res, 404, 'Material não encontrado.');
+
+  const before = material.toJSON();
+  const payload = normalizeMaterialPayload(req.body, before);
+
+  await material.update(payload);
+  await writeAudit({
+    req,
+    action: 'update',
+    entity: 'Material',
+    entityId: material.id,
+    message: `Material ${material.name} atualizado.`,
+    beforeData: before,
+    afterData: material.toJSON(),
+  });
+
+  return ok(res, material, 'Material atualizado.');
+});

@@ -7,6 +7,7 @@ const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
 const { writeAudit } = require('../services/auditService');
+const { isTrue } = require('../utils/booleans');
 
 exports.list = asyncHandler(async (req, res) => {
   const where = stockWhereForUser(req.user, req.query.warehouseId);
@@ -82,12 +83,14 @@ exports.create = asyncHandler(async (req, res) => {
     for (const item of items) {
       const material = await Material.findByPk(item.materialId, { transaction });
       if (!material) throw new Error('Material não encontrado.');
-      const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
-      const quantity = qty(item.quantity || serials.length || 0);
+      const materialRequiresSerial = isTrue(material.requiresSerial);
+      const typedSerials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
+      const serials = materialRequiresSerial ? typedSerials : [];
+      const quantity = qty(item.quantity || (materialRequiresSerial ? serials.length : 0) || 0);
       const unitCost = money(item.unitCost ?? 0);
       if (quantity <= 0) throw new Error(`Quantidade inválida para ${material.name}.`);
       if (unitCost <= 0) throw new Error(`Informe o valor unitário da entrada para ${material.name}.`);
-      if (material.requiresSerial) {
+      if (materialRequiresSerial) {
         if (serials.length !== Number(quantity)) throw new Error(`Informe exatamente ${Number(quantity)} serial(is) para ${material.name}. Você informou ${serials.length}.`);
         const localSet = new Set();
         const repeatedTyped = [];
@@ -120,7 +123,7 @@ exports.create = asyncHandler(async (req, res) => {
         warehouseId: targetWarehouseId,
       }, { transaction });
 
-      if (material.requiresSerial) {
+      if (materialRequiresSerial) {
         for (const serialNumber of serials) {
           const asset = await SerializedAsset.create({
             materialId: material.id,

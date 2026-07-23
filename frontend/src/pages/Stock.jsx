@@ -69,6 +69,16 @@ function asNumber(value) {
 }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((item) => item.trim()).filter(Boolean); }
 
+function booleanValue(value) {
+  if (value === true || value === false) return value;
+  if (value === 1 || value === '1') return true;
+  if (value === 0 || value === '0') return false;
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (['true', 'sim', 's', 'yes', 'on'].includes(raw)) return true;
+  if (['false', 'nao', 'não', 'n', 'no', 'off', ''].includes(raw)) return false;
+  return false;
+}
+
 function MaterialField({ label, children, hint, className = '' }) {
   return (
     <label className={className}>
@@ -128,7 +138,16 @@ export default function Stock() {
   }
 
   function openEdit(material) {
-    setForm({ ...empty, ...material });
+    setForm({
+      ...empty,
+      ...material,
+      requiresSerial: booleanValue(material.requiresSerial),
+      active: booleanValue(material.active),
+      allowTechnicianTransfer: booleanValue(material.allowTechnicianTransfer),
+      allowCustomerInstall: booleanValue(material.allowCustomerInstall),
+      requiresReturnOnRemoval: booleanValue(material.requiresReturnOnRemoval),
+      autoLowStockAlert: booleanValue(material.autoLowStockAlert),
+    });
     setError('');
     setModal(true);
   }
@@ -152,6 +171,12 @@ export default function Stock() {
       warrantyDays: Math.max(0, Math.round(asNumber(form.warrantyDays))),
       usefulLifeMonths: Math.max(0, Math.round(asNumber(form.usefulLifeMonths))),
       weightKg: Math.max(0, asNumber(form.weightKg)),
+      requiresSerial: booleanValue(form.requiresSerial),
+      active: booleanValue(form.active),
+      allowTechnicianTransfer: booleanValue(form.allowTechnicianTransfer),
+      allowCustomerInstall: booleanValue(form.allowCustomerInstall),
+      requiresReturnOnRemoval: booleanValue(form.requiresReturnOnRemoval),
+      autoLowStockAlert: booleanValue(form.autoLowStockAlert),
       initialWarehouseId: form.initialWarehouseId || '',
       initialQuantity: Math.max(0, asNumber(form.initialQuantity)),
       initialSerialNumbers: splitSerials(form.initialSerialsText),
@@ -200,7 +225,7 @@ export default function Stock() {
       </div>
 
       <div className="kpi-grid small">
-        <KpiCard label="Itens no estoque" value={totalEstoque} />
+        <KpiCard label="Itens no estoque" value={formatQuantity(totalEstoque)} />
         <KpiCard label="Alertas de mínimo" value={low} tone={low ? 'warning' : 'success'} />
         <KpiCard label="Valor estimado em estoque" value={brl(valorCatalogo)} />
       </div>
@@ -217,9 +242,9 @@ export default function Stock() {
                   <td>{m.sku}</td>
                   <td><b>{m.name}</b><br /><small>{m.storageLocation || m.category || 'Sem dados complementares'}</small></td>
                   <td>{m.category}</td>
-                  <td>{m.requiresSerial ? 'Sim' : 'Não'}</td>
+                  <td>{booleanValue(m.requiresSerial) ? 'Sim' : 'Não'}</td>
                   <td>{formatQuantity(m.mainStock, m.unit)}</td>
-                  <td>{m.minStock}</td>
+                  <td>{formatQuantity(m.minStock)}</td>
                   <td>{brl(m.unitCost)}</td>
                   <td><span className={`badge ${m.movementPolicy || 'livre'}`}>{m.movementPolicy || 'livre'}</span></td>
                   <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>Detalhes</button>{isAdmin && <button className="ghost" onClick={() => openEdit(m)}>Editar</button>}</div></td>
@@ -238,7 +263,7 @@ export default function Stock() {
             <div>
               <small>Cadastro corporativo</small>
               <strong>{form.sku || 'SKU'} · {form.name || 'Nome do material'}</strong>
-              <span>{categories.find(([key]) => key === form.category)?.[1] || 'Categoria'} · {form.requiresSerial ? 'Controlado por serial' : `Controlado por quantidade em ${form.unit}`}</span>
+              <span>{categories.find(([key]) => key === form.category)?.[1] || 'Categoria'} · {booleanValue(form.requiresSerial) ? 'Controlado por serial' : `Controlado por quantidade em ${form.unit}`}</span>
             </div>
             <div>
               <small>Valor de referência</small>
@@ -281,8 +306,8 @@ export default function Stock() {
             <div className="section-header"><span>3</span><div><h4>Cadastro direto no estoque regional</h4><p>Não existe mais entrada em estoque central. Todo material novo deve nascer vinculado a um estoque regional.</p></div></div>
             <div className="form-grid">
               <MaterialField label="Estoque regional obrigatório"><select value={form.initialWarehouseId || ''} onChange={(e) => change('initialWarehouseId', e.target.value)}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}</select></MaterialField>
-              {!form.requiresSerial && <MaterialField label="Quantidade inicial"><input type="number" min="0" step="0.001" value={form.initialQuantity || 0} onChange={(e) => change('initialQuantity', e.target.value)} /></MaterialField>}
-              {form.requiresSerial && <MaterialField label="Seriais iniciais" className="span-2" hint={`${splitSerials(form.initialSerialsText).length} serial(is) informado(s). Cada linha vira um equipamento em estoque.`}><textarea rows="5" value={form.initialSerialsText || ''} onChange={(e) => change('initialSerialsText', e.target.value)} placeholder="Um serial por linha" /></MaterialField>}
+              {!booleanValue(form.requiresSerial) && <MaterialField label="Quantidade inicial"><input type="number" min="0" step="0.001" value={form.initialQuantity || 0} onChange={(e) => change('initialQuantity', e.target.value)} /></MaterialField>}
+              {booleanValue(form.requiresSerial) && <MaterialField label="Seriais iniciais" className="span-2" hint={`${splitSerials(form.initialSerialsText).length} serial(is) informado(s). Cada linha vira um equipamento em estoque.`}><textarea rows="5" value={form.initialSerialsText || ''} onChange={(e) => change('initialSerialsText', e.target.value)} placeholder="Um serial por linha" /></MaterialField>}
             </div>
           </section>}
 
@@ -292,12 +317,12 @@ export default function Stock() {
               <MaterialField label="Política de movimentação"><select value={form.movementPolicy} onChange={(e) => change('movementPolicy', e.target.value)}><option value="livre">Livre</option><option value="aprovacao">Exige aprovação</option><option value="serial_obrigatorio">Serial obrigatório</option><option value="bloqueado">Bloqueado para movimentação</option></select></MaterialField>
               <MaterialField label="Tipo de inspeção"><select value={form.qualityInspection} onChange={(e) => change('qualityInspection', e.target.value)}><option value="visual">Visual</option><option value="serial">Serial/MAC</option><option value="nf">Conferência por NF</option><option value="tecnica">Técnica</option></select></MaterialField>
               <div className="check-grid span-2">
-                <label className="check"><input type="checkbox" checked={!!form.requiresSerial} onChange={(e) => change('requiresSerial', e.target.checked)} /> Exige número de série</label>
-                <label className="check"><input type="checkbox" checked={!!form.allowTechnicianTransfer} onChange={(e) => change('allowTechnicianTransfer', e.target.checked)} /> Pode ir para técnico</label>
-                <label className="check"><input type="checkbox" checked={!!form.allowCustomerInstall} onChange={(e) => change('allowCustomerInstall', e.target.checked)} /> Pode ser baixado para cliente/OS</label>
-                <label className="check"><input type="checkbox" checked={!!form.requiresReturnOnRemoval} onChange={(e) => change('requiresReturnOnRemoval', e.target.checked)} /> Exige retorno em retirada</label>
-                <label className="check"><input type="checkbox" checked={!!form.autoLowStockAlert} onChange={(e) => change('autoLowStockAlert', e.target.checked)} /> Gerar alerta automático de estoque</label>
-                <label className="check"><input type="checkbox" checked={!!form.active} onChange={(e) => change('active', e.target.checked)} /> Material ativo</label>
+                <label className="check"><input type="checkbox" checked={booleanValue(form.requiresSerial)} onChange={(e) => change('requiresSerial', e.target.checked)} /> Exige número de série</label>
+                <label className="check"><input type="checkbox" checked={booleanValue(form.allowTechnicianTransfer)} onChange={(e) => change('allowTechnicianTransfer', e.target.checked)} /> Pode ir para técnico</label>
+                <label className="check"><input type="checkbox" checked={booleanValue(form.allowCustomerInstall)} onChange={(e) => change('allowCustomerInstall', e.target.checked)} /> Pode ser baixado para cliente/OS</label>
+                <label className="check"><input type="checkbox" checked={booleanValue(form.requiresReturnOnRemoval)} onChange={(e) => change('requiresReturnOnRemoval', e.target.checked)} /> Exige retorno em retirada</label>
+                <label className="check"><input type="checkbox" checked={booleanValue(form.autoLowStockAlert)} onChange={(e) => change('autoLowStockAlert', e.target.checked)} /> Gerar alerta automático de estoque</label>
+                <label className="check"><input type="checkbox" checked={booleanValue(form.active)} onChange={(e) => change('active', e.target.checked)} /> Material ativo</label>
               </div>
             </div>
           </section>
@@ -325,7 +350,7 @@ export default function Stock() {
       <DetailsModal open={!!details} title={`Detalhes do material ${details?.sku || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{isAdmin && details && <button onClick={() => { openEdit(details); setDetails(null); }}>Editar material</button>}</>}>
         {details && <>
           <DetailGrid fields={[
-            ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', details.requiresSerial],
+            ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', booleanValue(details.requiresSerial) ? 'Sim' : 'Não'],
             ['Estoque atual', formatQuantity(details.mainStock, details.unit)], ['Estoque mínimo', formatQuantity(details.minStock, details.unit)], ['Estoque máximo', formatQuantity(details.maxStock, details.unit)], ['Ponto de pedido', formatQuantity(details.reorderPoint, details.unit)], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
             ['Criticidade', details.criticality], ['Política', details.movementPolicy], ['Inspeção', details.qualityInspection], ['Pode ir para técnico', details.allowTechnicianTransfer], ['Pode ir para cliente', details.allowCustomerInstall], ['Exige retorno', details.requiresReturnOnRemoval],
             ['NCM', details.ncm], ['Código fiscal', details.fiscalCode], ['Código contábil', details.accountingCode], ['Centro de custo', details.costCenter], ['Prefixo patrimonial', details.patrimonyPrefix], ['Local', details.storageLocation], ['Prateleira', details.shelf],
