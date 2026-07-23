@@ -1791,6 +1791,28 @@ input[readonly], textarea[readonly] {
   margin-top: 8px;
   color: var(--muted, #64748b);
 }
+.serial-quick-filter {
+  margin: 0 0 12px;
+  padding: 14px;
+  border: 1px dashed rgba(37, 99, 235, .35);
+  border-radius: 16px;
+  background: rgba(37, 99, 235, .06);
+}
+.serial-quick-filter label,
+.serial-quick-filter span {
+  display: block;
+  font-weight: 800;
+  color: var(--text, #0f172a);
+}
+.serial-quick-filter textarea {
+  margin-top: 8px;
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+.serial-quick-filter .row-actions {
+  margin-top: 10px;
+}
 .technician-return-page .submit-bar {
   margin-top: 16px;
   display: flex;

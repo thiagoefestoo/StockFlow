@@ -26,7 +26,7 @@ function payloadLabel(key) {
     technicianName: 'Técnico responsável',
     serviceOrderNumber: 'Número da OS',
     customerName: 'Cliente',
-    customerCpf: 'CPF do cliente',
+    customerCpf: 'Número do contrato',
     transferNumber: 'Guia de transferência',
     materialName: 'Material',
     serialNumber: 'Número de série',

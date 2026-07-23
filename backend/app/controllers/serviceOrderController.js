@@ -19,7 +19,7 @@ exports.create = asyncHandler(async (req, res) => {
   let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType, status, completedAt, notes, materials = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
-  if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome e CPF do cliente são obrigatórios.');
+  if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome do cliente e número do contrato são obrigatórios.');
   if (!Array.isArray(materials) || !materials.length) return fail(res, 400, 'Adicione ao menos um material usado na OS.');
 
   let totalSerials = 0;

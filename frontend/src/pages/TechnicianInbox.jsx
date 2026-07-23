@@ -142,7 +142,7 @@ export default function TechnicianInbox() {
   function validateOs() {
     if (!String(osForm.osNumber || '').trim()) return 'Informe o número da OS.';
     if (!String(osForm.customerName || '').trim()) return 'Informe o nome do cliente.';
-    if (!String(osForm.customerCpf || '').trim()) return 'Informe o CPF do cliente.';
+    if (!String(osForm.customerCpf || '').trim()) return 'Informe o número do contrato.';
     if (!osForm.materials.length) return 'Adicione ao menos um material usado na OS.';
 
     let serialCount = 0;
@@ -251,11 +251,11 @@ export default function TechnicianInbox() {
 
       <section className="two-col technician-work-area">
         <article className={`panel os-work-card ${mobileSectionClass('baixa')}`}>
-          <div className="panel-title compact-title"><div><h3>Baixar material por OS</h3><p>Informe nome, CPF e selecione exatamente 1 serial que será transferido para o cliente.</p></div></div>
+          <div className="panel-title compact-title"><div><h3>Baixar material por OS</h3><p>Informe nome, número do contrato e selecione exatamente 1 serial que será transferido para o cliente.</p></div></div>
           <button type="button" className="ghost os-mobile-toggle" onClick={() => setOsFieldsOpen((open) => !open)}>{osFieldsOpen ? 'Ocultar dados da OS' : 'Preencher dados da OS'}</button>
           <div className={`form-grid os-mobile-fields ${osFieldsOpen ? 'open' : ''}`}>
             <label>Nº da OS<input value={osForm.osNumber} onChange={(e) => setOsForm({ ...osForm, osNumber: e.target.value })} required /></label>
-            <label>CPF do cliente *<input value={osForm.customerCpf} onChange={(e) => setOsForm({ ...osForm, customerCpf: e.target.value })} required /></label>
+            <label>Número do contrato *<input value={osForm.customerCpf} onChange={(e) => setOsForm({ ...osForm, customerCpf: e.target.value })} required /></label>
             <label>Nome do cliente *<input value={osForm.customerName} onChange={(e) => setOsForm({ ...osForm, customerName: e.target.value })} required /></label>
             <label>Endereço<input value={osForm.customerAddress} onChange={(e) => setOsForm({ ...osForm, customerAddress: e.target.value })} /></label>
             <label>Cidade<input value={osForm.city} onChange={(e) => setOsForm({ ...osForm, city: e.target.value })} /></label>

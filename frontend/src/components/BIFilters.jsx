@@ -256,7 +256,7 @@ export default function BIFilters({ value, onChange, onApply, onReset, loading, 
           <SelectField label="Conferência" field="conferenceStatus" options={lists.conferenceStatuses} />
           <label><span>Valor mínimo</span><input type="number" step="0.01" placeholder="Ex.: 100" value={filters.minValue || ''} onChange={(event) => setField('minValue', event.target.value)} /></label>
           <label><span>Valor máximo</span><input type="number" step="0.01" placeholder="Ex.: 5000" value={filters.maxValue || ''} onChange={(event) => setField('maxValue', event.target.value)} /></label>
-          <label className="wide-filter"><span>Busca livre</span><input placeholder="Serial, OS, guia, cliente, CPF, NF, material, técnico..." value={filters.search || ''} onChange={(event) => setField('search', event.target.value)} /></label>
+          <label className="wide-filter"><span>Busca livre</span><input placeholder="Serial, OS, guia, cliente, contrato, NF, material, técnico..." value={filters.search || ''} onChange={(event) => setField('search', event.target.value)} /></label>
         </div>
       )}
     </section>

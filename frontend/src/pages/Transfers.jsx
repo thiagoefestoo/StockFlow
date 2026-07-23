@@ -197,6 +197,7 @@ export default function Transfers() {
       quantity: nextQuantity,
       serialNumbers: [],
       assetSearch: '',
+      assetSearchApplied: '',
       bulkSerialSearch: '',
     });
   }
@@ -391,9 +392,10 @@ export default function Transfers() {
             const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
             const allSerialAssets = stockByMaterial[item.materialId] || [];
             const serialAssets = allSerialAssets.filter((asset) => {
-              const q = String(item.assetSearch || '').trim().toLowerCase();
-              if (!q) return true;
-              return assetSearchText(asset).includes(q);
+              const terms = parseSerialTerms(item.assetSearchApplied || '');
+              if (!terms.length) return true;
+              const text = assetSearchText(asset);
+              return terms.some((term) => text.includes(normalizeSerialText(term)));
             });
             return (
               <div className="item-card transfer-item-card" key={i}>
@@ -428,8 +430,23 @@ export default function Transfers() {
                         <span>{serialAssets.length} disponível(is) filtrado(s) • {allSerialAssets.length} no estoque • {item.serialNumbers?.length || 0} selecionado(s)</span>
                       </div>
                       <div className="serial-transfer-quantity"><button type="button" className="ghost" onClick={() => selectQuantityForItem(i, serialAssets)}>Selecionar quantidade informada</button></div>
+                      <div className="serial-quick-filter">
+                        <label>
+                          <span>🔎 Pesquisar ONU/serial (cole a coluna do Excel — uma por linha)</span>
+                          <textarea
+                            rows="4"
+                            value={item.assetSearch || ''}
+                            onChange={(e) => updateItem(i, { assetSearch: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) updateItem(i, { assetSearchApplied: item.assetSearch || '' }); }}
+                            placeholder={'Cole aqui a lista de ONUs, uma em cada linha, exatamente como copia do Excel:\n102003\n102002\n102001'}
+                          />
+                        </label>
+                        <div className="row-actions">
+                          <button type="button" onClick={() => updateItem(i, { assetSearchApplied: item.assetSearch || '' })}>🔍 Filtrar</button>
+                          <button type="button" className="ghost" onClick={() => updateItem(i, { assetSearch: '', assetSearchApplied: '' })}>Limpar pesquisa</button>
+                        </div>
+                      </div>
                       <div className="serial-actions-row">
-                        <input value={item.assetSearch || ''} onChange={(e) => updateItem(i, { assetSearch: e.target.value })} placeholder="Buscar serial, MAC, marca..." />
                         <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, serialAssets.map((asset) => asset.serialNumber))}>Selecionar tudo filtrado</button>
                         <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, [])}>Limpar seleção</button>
                       </div>
