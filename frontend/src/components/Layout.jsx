@@ -8,7 +8,7 @@ import api from '../services/api';
 
 const adminGroups = [
   { title: 'Comando', links: [['/', 'OP', 'Cockpit'], ['/aprovacoes', 'AP', 'Aprovações'], ['/dashboard', 'DB', 'Dashboard legado']] },
-  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada quinzenal'], ['/transferencias', 'TR', 'Transferências'], ['/perdas-tecnico', 'PD', 'Perdas/descontos'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa'], ['/retorno-caixa-estoque', 'RT', 'Retorno técnico']] },
+  { title: 'Operação', links: [['/solicitacoes-material', 'SM', 'Solicitações'], ['/estoques-regionais', 'ER', 'Estoques regionais'], ['/entrada', 'EN', 'Entrada em Estoque'], ['/transferencias', 'TR', 'Transferências'], ['/perdas-tecnico', 'PD', 'Perdas/descontos'], ['/os', 'OS', 'Ordens de serviço'], ['/caixa-tecnico', 'CT', 'Caixa do técnico'], ['/central-caixa-tecnico', 'CC', 'Central da caixa'], ['/retorno-caixa-estoque', 'RT', 'Retorno técnico']] },
   { title: 'Cadastros e estoque', links: [['/estoque', 'MT', 'Materiais/Estoque'], ['/patrimonio', 'PA', 'Patrimônio'], ['/vida-serial', 'VS', 'Vida do serial'], ['/tecnicos', 'TE', 'Técnicos']] },
   { title: 'Administração', adminOnly: true, links: [['/usuarios', 'US', 'Usuários e permissões']] },
   { title: 'Minha conta', links: [['/minha-conta', 'CO', 'Configurações da conta']] },
