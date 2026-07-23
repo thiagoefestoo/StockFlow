@@ -90,7 +90,8 @@ function MaterialField({ label, children, hint, className = '' }) {
 }
 
 export default function Stock() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, canAccessModule } = useAuth();
+  const canManageMaterials = isAdmin || canAccessModule('materialManage');
   const [materials, setMaterials] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [modal, setModal] = useState(false);
@@ -221,7 +222,7 @@ export default function Stock() {
           <h2>Catálogo e estoque</h2>
           <p>Cadastre materiais de telecom com política de movimentação, localização, custos e regras de controle.</p>
         </div>
-        {isAdmin && <button onClick={openCreate}>➕ Novo material</button>}
+        {canManageMaterials && <button onClick={openCreate}>➕ Novo material</button>}
       </div>
 
       <div className="kpi-grid small">
@@ -247,7 +248,7 @@ export default function Stock() {
                   <td>{formatQuantity(m.minStock)}</td>
                   <td>{brl(m.unitCost)}</td>
                   <td><span className={`badge ${m.movementPolicy || 'livre'}`}>{m.movementPolicy || 'livre'}</span></td>
-                  <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>Detalhes</button>{isAdmin && <button className="ghost" onClick={() => openEdit(m)}>Editar</button>}</div></td>
+                  <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>Detalhes</button>{canManageMaterials && <button className="ghost" onClick={() => openEdit(m)}>Editar</button>}</div></td>
                 </tr>
               ))}
             </tbody>
@@ -347,7 +348,7 @@ export default function Stock() {
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes do material ${details?.sku || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{isAdmin && details && <button onClick={() => { openEdit(details); setDetails(null); }}>Editar material</button>}</>}>
+      <DetailsModal open={!!details} title={`Detalhes do material ${details?.sku || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canManageMaterials && details && <button onClick={() => { openEdit(details); setDetails(null); }}>Editar material</button>}</>}>
         {details && <>
           <DetailGrid fields={[
             ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', booleanValue(details.requiresSerial) ? 'Sim' : 'Não'],
