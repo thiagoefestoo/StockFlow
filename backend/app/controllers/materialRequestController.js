@@ -51,11 +51,36 @@ function isStockRecharge(requestType) {
   return String(requestType || '').toLowerCase() === 'recarga_estoque';
 }
 
-function allowedWarehouseWhere(user) {
-  if (['admin', 'supervisor'].includes(user?.role)) return null;
+function stockistRequestWhere(user) {
+  if (user?.role !== 'estoquista') return null;
   const ids = userWarehouseIds(user);
-  if (!ids.length) return { warehouseId: -1 };
-  return { warehouseId: { [Op.in]: ids } };
+
+  // Solicitações de carga técnica pertencem ao fluxo operacional do estoquista.
+  // Quando não existem estoques explicitamente vinculados ao usuário, ele visualiza
+  // todas as cargas técnicas. Recargas de estoque continuam exigindo vínculo explícito.
+  if (!ids.length) {
+    return { requestType: 'reposicao_carga' };
+  }
+
+  return {
+    [Op.or]: [
+      { requestType: 'reposicao_carga', warehouseId: { [Op.in]: ids } },
+      { requestType: 'reposicao_carga', warehouseId: null },
+      { requestType: 'recarga_estoque', warehouseId: { [Op.in]: ids } },
+    ],
+  };
+}
+
+function stockistCanAccessRequest(user, request) {
+  if (user?.role !== 'estoquista') return true;
+  if (request?.requestType === 'recarga_estoque') {
+    if (!request.warehouseId) return false;
+    return userWarehouseIds(user).includes(Number(request.warehouseId));
+  }
+
+  const ids = userWarehouseIds(user);
+  if (!ids.length || !request?.warehouseId) return true;
+  return ids.includes(Number(request.warehouseId));
 }
 
 async function resolveRequestWarehouse({ req, warehouseId, technicianId, requestType }) {
@@ -97,8 +122,8 @@ exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
   if (req.user.role === 'estoquista') {
-    const warehouseFilter = allowedWarehouseWhere(req.user);
-    if (warehouseFilter) Object.assign(where, warehouseFilter);
+    const requestFilter = stockistRequestWhere(req.user);
+    if (requestFilter) Object.assign(where, requestFilter);
   }
   if (req.query.status) where.status = req.query.status;
   if (req.query.requestType) where.requestType = req.query.requestType;
@@ -112,8 +137,8 @@ exports.summary = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.user.role === 'tecnico') filter.technicianId = req.user.technicianId || -1;
   if (req.user.role === 'estoquista') {
-    const warehouseFilter = allowedWarehouseWhere(req.user);
-    if (warehouseFilter) Object.assign(filter, warehouseFilter);
+    const requestFilter = stockistRequestWhere(req.user);
+    if (requestFilter) Object.assign(filter, requestFilter);
   }
   const [pending, approved, delivered, rejected, total] = await Promise.all([
     MaterialRequest.count({ where: { ...filter, status: 'pendente_aprovacao' } }),
@@ -129,7 +154,9 @@ exports.get = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
   if (req.user.role === 'tecnico' && Number(request.technicianId) !== Number(req.user.technicianId)) return fail(res, 403, 'Você só pode consultar suas próprias solicitações.');
-  if (req.user.role === 'estoquista' && request.warehouseId) assertWarehouseAccess(req.user, request.warehouseId, 'Você só pode consultar solicitações dos seus estoques autorizados.');
+  if (req.user.role === 'estoquista' && !stockistCanAccessRequest(req.user, request)) {
+    return fail(res, 403, 'Você só pode consultar solicitações técnicas liberadas para sua operação ou recargas dos seus estoques autorizados.');
+  }
   return ok(res, request);
 });
 
@@ -271,18 +298,18 @@ exports.create = asyncHandler(async (req, res) => {
     }, { transaction });
 
     await Notification.create({
-      role: requiresApproval ? 'admin' : 'estoquista',
+      role: isStockRecharge(requestType) ? 'admin' : 'estoquista',
       type: requiresApproval ? 'tarefa' : 'estoque',
       severity: requiresApproval ? (record.priority === 'critica' ? 'danger' : 'warning') : 'success',
       title: isStockRecharge(requestType)
         ? `Nova recarga ${record.requestNumber}`
-        : (requiresApproval ? `Nova solicitação ${record.requestNumber}` : `Solicitação liberada ${record.requestNumber}`),
+        : (requiresApproval ? `Nova solicitação para aprovar ${record.requestNumber}` : `Carga pronta para entregar ${record.requestNumber}`),
       message: isStockRecharge(requestType)
         ? `${req.user.name} solicitou recarga de ${record.totalQuantity} item(ns) para ${warehouse?.name || 'estoque regional'}.`
         : (requiresApproval
-          ? `${technician.name} solicitou ${record.totalQuantity} item(ns), no valor de ${Number(record.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}, acima do limite individual de ${technicianApprovalLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`
-          : `${record.requestNumber} foi liberada automaticamente para separação. Valor dentro do limite individual de ${technician.name}.`),
-      route: requiresApproval ? '/aprovacoes' : '/solicitacoes-material',
+          ? `${technician.name} solicitou ${record.totalQuantity} item(ns), no valor de ${Number(record.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. O estoquista deve revisar e aprovar o pedido.`
+          : `${record.requestNumber} foi liberada automaticamente e está pronta para separação e entrega ao técnico ${technician.name}.`),
+      route: isStockRecharge(requestType) ? '/aprovacoes' : '/solicitacoes-material',
       metadata: { requestId: record.id, requestNumber: record.requestNumber, warehouseId, technicianId: record.technicianId, technicianApprovalLimit, totalValue: record.totalValue, requiresApproval },
     }, { transaction });
 
@@ -304,7 +331,7 @@ exports.create = asyncHandler(async (req, res) => {
 
   const createdRequest = await MaterialRequest.findByPk(request.id, { include: includeFull() });
   const message = isStockRecharge(requestType)
-    ? 'Solicitação de recarga enviada para aprovação do admin.'
+    ? 'Solicitação de recarga enviada para aprovação.'
     : (createdRequest.status === 'aprovado'
       ? 'Solicitação liberada automaticamente dentro do limite individual do técnico.'
       : 'Solicitação enviada para aprovação por exceder o limite individual do técnico.');

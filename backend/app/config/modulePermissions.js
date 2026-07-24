@@ -41,6 +41,7 @@ const DEFAULT_MODULES_BY_ROLE = {
     'operationsCockpit',
     'approvals',
     'materialRequests',
+    'materialRequestDelivery',
     'warehouses',
     'receiving',
     'transfers',

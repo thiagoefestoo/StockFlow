@@ -137,6 +137,16 @@ async function approveMaterialRequest({ requestId, req, notes }) {
       transaction,
     });
 
+    const notificationMetadata = {
+      requestId: request.id,
+      requestNumber: request.requestNumber,
+      warehouseId: request.warehouseId,
+      technicianId: request.technicianId,
+      approvedAmount: amount,
+      technicianApprovalLimit: technicianLimit,
+      approverApprovalLimit: Number.isFinite(approverLimit) ? approverLimit : null,
+    };
+
     await Notification.create({
       userId: request.requestedById || null,
       role: 'todos',
@@ -147,16 +157,21 @@ async function approveMaterialRequest({ requestId, req, notes }) {
         ? `A recarga de ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi aprovada e está pronta para recebimento no estoque.`
         : `A solicitação de ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi aprovada e está pronta para separação e entrega ao técnico.`,
       route: '/solicitacoes-material',
-      metadata: {
-        requestId: request.id,
-        requestNumber: request.requestNumber,
-        warehouseId: request.warehouseId,
-        technicianId: request.technicianId,
-        approvedAmount: amount,
-        technicianApprovalLimit: technicianLimit,
-        approverApprovalLimit: Number.isFinite(approverLimit) ? approverLimit : null,
-      },
+      metadata: notificationMetadata,
     }, { transaction });
+
+    if (request.requestType !== 'recarga_estoque') {
+      await Notification.create({
+        userId: null,
+        role: 'estoquista',
+        type: 'estoque',
+        severity: 'success',
+        title: `Entregar carga ${request.requestNumber}`,
+        message: `A solicitação foi aprovada por ${req.user.name} e está pronta para o estoquista separar e entregar ao técnico.`,
+        route: '/solicitacoes-material',
+        metadata: notificationMetadata,
+      }, { transaction });
+    }
 
     await writeAudit({
       req,

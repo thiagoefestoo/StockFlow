@@ -1,6 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -18,14 +17,6 @@ function statusLabel(value) {
 }
 function requestTypeLabel(value) {
   return value === 'recarga_estoque' ? 'Recarga de estoque' : 'Carga para técnico';
-}
-function priorityLabel(value) {
-  return ({ baixa: 'Baixa', media: 'Média', alta: 'Alta', critica: 'Crítica' }[value] || value || '-');
-}
-function dateOnlyLabel(value) {
-  if (!value) return 'Não informado';
-  const [year, month, day] = String(value).split('-');
-  return year && month && day ? `${day}/${month}/${year}` : value;
 }
 function splitSerials(value) {
   return String(value || '').split(/\n|,|;/).map((item) => item.trim()).filter(Boolean);
@@ -74,38 +65,6 @@ export default function MaterialRequests() {
   useEffect(() => { load(); }, [statusFilter]);
 
   const totalValue = useMemo(() => requests.reduce((sum, r) => sum + Number(r.totalValue || 0), 0), [requests]);
-  const requestReview = useMemo(() => {
-    const reviewItems = form.items.map((item) => {
-      const material = selectedMaterial(item.materialId);
-      const quantity = Number(item.quantity || 0);
-      const unitCost = Number(material?.unitCost || 0);
-      const serials = splitSerials(item.serialNumbersText);
-      return {
-        key: `${item.materialId}-${material?.name || 'material'}-${quantity}`,
-        name: material?.name || 'Material não identificado',
-        category: material?.category || '-',
-        unit: material?.unit || 'un',
-        quantity,
-        unitCost,
-        totalCost: quantity * unitCost,
-        serialCount: serials.length,
-        requiresSerial: !!material?.requiresSerial,
-      };
-    });
-    const destination = form.requestType === 'recarga_estoque'
-      ? warehouses.find((warehouse) => String(warehouse.id) === String(form.warehouseId))
-      : isTechnician
-        ? { name: user?.name || 'Minha caixa técnica' }
-        : technicians.find((technician) => String(technician.id) === String(form.technicianId));
-    return {
-      items: reviewItems,
-      destination: form.requestType === 'recarga_estoque'
-        ? [destination?.name, destination?.city, destination?.state].filter(Boolean).join(' • ') || '-'
-        : destination?.name || '-',
-      totalQuantity: reviewItems.reduce((sum, item) => sum + item.quantity, 0),
-      totalValue: reviewItems.reduce((sum, item) => sum + item.totalCost, 0),
-    };
-  }, [form, materials, warehouses, technicians, isTechnician, user?.name]);
 
   function openCreate() {
     const firstWarehouseId = warehouses[0]?.id || '';
@@ -276,7 +235,7 @@ export default function MaterialRequests() {
       </section>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <Link className="ghost" to={`/transferencias?requestId=${r.id}`}>Entregar carga</Link>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openDecision('deliver', r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
       </section>
 
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>
@@ -299,59 +258,27 @@ export default function MaterialRequests() {
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <Link className="ghost" to={`/transferencias?requestId=${details.id}`}>Entregar carga</Link>)}</>}>
+      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Entregar carga</button>)}</>}>
         {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
       </DetailsModal>
 
       <Modal
         open={confirmRequestOpen}
-        title="Revise e confirme a solicitação"
+        title="Confirmar solicitação"
         onClose={() => { if (!submittingRequest) { setConfirmRequestOpen(false); setModal(true); } }}
         footer={<>
-          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setConfirmRequestOpen(false); setModal(true); }}>Cancelar</button>
-          <button type="button" disabled={submittingRequest} onClick={confirmRequestSubmission}>{submittingRequest ? 'Enviando...' : 'Confirmar solicitação'}</button>
+          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setConfirmRequestOpen(false); setModal(true); }}>Não</button>
+          <button type="button" disabled={submittingRequest} onClick={confirmRequestSubmission}>{submittingRequest ? 'Enviando...' : 'Sim, solicitar'}</button>
         </>}
       >
         <div className="form-stack">
-          <div>
-            <h4>Deseja realmente solicitar este pedido?</h4>
-            <p>Confira abaixo todos os dados antes de confirmar.</p>
-          </div>
-
+          <p><strong>Deseja realmente solicitar esse pedido?</strong></p>
           <div className="detail-grid compact">
-            <div className="detail-card"><span>Tipo de solicitação</span><strong>{requestTypeLabel(form.requestType)}</strong></div>
-            <div className="detail-card"><span>Destino</span><strong>{requestReview.destination}</strong></div>
-            <div className="detail-card"><span>Prioridade</span><strong>{priorityLabel(form.priority)}</strong></div>
-            <div className="detail-card"><span>Necessário até</span><strong>{dateOnlyLabel(form.neededBy)}</strong></div>
-            <div className="detail-card"><span>Quantidade total</span><strong>{formatQuantity(requestReview.totalQuantity)}</strong></div>
-            <div className="detail-card"><span>Valor estimado</span><strong>{brl(requestReview.totalValue)}</strong></div>
+            <div className="detail-card"><span>Tipo</span><strong>{requestTypeLabel(form.requestType)}</strong></div>
+            <div className="detail-card"><span>Itens</span><strong>{formatQuantity(form.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0))}</strong></div>
+            <div className="detail-card"><span>Destino</span><strong>{form.requestType === 'recarga_estoque' ? warehouses.find((w) => String(w.id) === String(form.warehouseId))?.name || '-' : isTechnician ? user?.name || '-' : technicians.find((t) => String(t.id) === String(form.technicianId))?.name || '-'}</strong></div>
           </div>
-
-          <div className="item-card">
-            <small>Justificativa</small>
-            <strong>{form.requesterNotes || '-'}</strong>
-          </div>
-
-          <div>
-            <div className="subtoolbar"><h4>Materiais solicitados</h4><span>{requestReview.items.length} item(ns)</span></div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Material</th><th>Categoria</th><th>Quantidade</th><th>Valor unitário</th><th>Subtotal</th><th>Seriais informados</th></tr></thead>
-                <tbody>
-                  {requestReview.items.map((item, index) => <tr key={`${item.key}-${index}`}>
-                    <td><strong>{item.name}</strong><small className="block">Unidade: {item.unit}</small></td>
-                    <td>{item.category}</td>
-                    <td>{formatQuantity(item.quantity)}</td>
-                    <td>{brl(item.unitCost)}</td>
-                    <td><strong>{brl(item.totalCost)}</strong></td>
-                    <td>{item.requiresSerial ? formatQuantity(item.serialCount) : 'Não se aplica'}</td>
-                  </tr>)}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="viz-callout">Ao confirmar, a solicitação será registrada e seguirá as regras de aprovação, limite financeiro e entrega configuradas no sistema.</div>
+          <div className="viz-callout">Após confirmar, o pedido será registrado e seguirá as regras de aprovação e entrega configuradas no sistema.</div>
         </div>
       </Modal>
 
@@ -360,7 +287,7 @@ export default function MaterialRequests() {
         {['approve', 'reject'].includes(decision.type) && <div className="detail-grid compact"><div className="detail-card"><span>Valor solicitado</span><strong>{brl(decision.item?.totalValue)}</strong></div><div className="detail-card"><span>Limite do técnico sem aprovação</span><strong>{brl(decision.item?.metadata?.technicianApprovalLimit)}</strong></div><div className="detail-card"><span>Seu limite de aprovação</span><strong>{isAdmin ? 'Sem limite' : brl(user?.approvalLimit)}</strong></div></div>}
         <label>Observação interna<textarea rows="4" value={decision.notes} onChange={(e) => setDecision({ ...decision, notes: e.target.value })} /></label>
         {decision.type === 'deliver' && decision.item?.requestType === 'recarga_estoque' && <div className="form-stack"><div className="viz-callout">A recarga aprovada será adicionada ao estoque regional selecionado. Para equipamentos serializados, informe os seriais antes de receber.</div>{decision.items.map((item, index) => <div className="item-card" key={item.requestItemId}><div className="form-grid"><div><small>Material</small><strong>{item.materialName}</strong></div><label>Quantidade recebida<input type="number" step="1" min="0" value={item.approvedQuantity} onChange={(e) => updateDecisionItem(index, { approvedQuantity: e.target.value })} /></label></div>{item.requiresSerial && <label>Seriais recebidos<textarea rows="4" value={item.serialNumbersText || ''} onChange={(e) => updateDecisionItem(index, { serialNumbersText: e.target.value })} placeholder="Um serial por linha" /></label>}</div>)}</div>}
-        {decision.type === 'deliver' && decision.item?.requestType !== 'recarga_estoque' && <div className="viz-callout">O sistema irá movimentar os materiais do estoque regional para a caixa do técnico, criar histórico patrimonial e gerar a guia para assinatura.</div>}
+        {decision.type === 'deliver' && decision.item?.requestType !== 'recarga_estoque' && <div className="form-stack"><div className="viz-callout">O sistema irá movimentar os materiais do estoque regional para a caixa do técnico, registrar o estoquista responsável, atualizar o histórico patrimonial e gerar a guia para assinatura.</div>{decision.items.map((item, index) => <div className="item-card" key={item.requestItemId}><div className="form-grid"><div><small>Material</small><strong>{item.materialName}</strong></div><label>Quantidade para entregar<input type="number" step="1" min="0" value={item.approvedQuantity} onChange={(e) => updateDecisionItem(index, { approvedQuantity: e.target.value })} /></label></div>{item.requiresSerial && <label>Seriais específicos (opcional)<textarea rows="4" value={item.serialNumbersText || ''} onChange={(e) => updateDecisionItem(index, { serialNumbersText: e.target.value })} placeholder="Deixe vazio para o sistema selecionar os seriais disponíveis" /></label>}</div>)}</div>}
       </Modal>
     </div>
   );
