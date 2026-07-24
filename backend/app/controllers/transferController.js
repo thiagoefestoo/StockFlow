@@ -1,6 +1,6 @@
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
-const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification } = require('../models');
+const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockBalance, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
@@ -29,6 +29,31 @@ async function estimateTransferValue(items = [], sourceWarehouseId) {
   return money(totalValue);
 }
 
+async function availableQuantityForRequestItem(requestItem, sourceWarehouseId, transaction = null) {
+  const material = requestItem?.Material || await Material.findByPk(requestItem?.materialId, { transaction });
+  if (!material) return 0;
+  if (material.requiresSerial) {
+    return SerializedAsset.count({
+      where: {
+        materialId: material.id,
+        warehouseId: sourceWarehouseId,
+        ownerType: 'estoque',
+        status: 'em_estoque',
+      },
+      transaction,
+    });
+  }
+  const balance = await StockBalance.sum('quantity', {
+    where: {
+      materialId: material.id,
+      warehouseId: sourceWarehouseId,
+      ownerType: 'estoque',
+    },
+    transaction,
+  });
+  return qty(balance || 0);
+}
+
 function nextNumber() {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
@@ -48,8 +73,10 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { technicianId, deliveredAt, notes, warehouseId, materialRequestId, items = [] } = req.body;
-  if (!technicianId || !items.length) return fail(res, 400, 'Técnico e itens são obrigatórios.');
+  const { technicianId, deliveredAt, notes, warehouseId, materialRequestId } = req.body;
+  let items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!technicianId) return fail(res, 400, 'Selecione o técnico de destino.');
+  if (!items.length && !materialRequestId) return fail(res, 400, 'Adicione pelo menos um item à transferência.');
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   const sourceWarehouseId = warehouseId || technician.defaultWarehouseId || null;
@@ -95,10 +122,31 @@ exports.create = asyncHandler(async (req, res) => {
       submittedRequestItems.add(requestItemKey);
       const approvedMaximum = qty(requestItem.approvedQuantity || requestItem.quantity);
       const deliveryQuantity = qty(item.quantity);
-      if (deliveryQuantity <= 0) return fail(res, 400, `Informe a quantidade que será entregue de ${requestItem.Material?.name || 'material'}.`);
+      if (deliveryQuantity < 0) return fail(res, 400, `A quantidade de ${requestItem.Material?.name || 'material'} não pode ser negativa.`);
       if (deliveryQuantity > approvedMaximum) {
         return fail(res, 400, `A quantidade de ${requestItem.Material?.name || 'material'} não pode ultrapassar o solicitado/aprovado (${approvedMaximum}).`);
       }
+      if (deliveryQuantity === 0) {
+        const available = await availableQuantityForRequestItem(requestItem, sourceWarehouseId);
+        if (available > 0) {
+          return fail(res, 400, `Existe saldo disponível de ${requestItem.Material?.name || 'material'} (${available}). Informe a quantidade que será transferida.`);
+        }
+      }
+    }
+
+    for (const requestItem of linkedRequest.MaterialRequestItems || []) {
+      const requestItemKey = Number(requestItem.id);
+      if (submittedRequestItems.has(requestItemKey)) continue;
+      const available = await availableQuantityForRequestItem(requestItem, sourceWarehouseId);
+      if (available > 0) {
+        return fail(res, 400, `O item ${requestItem.Material?.name || 'material'} possui saldo disponível (${available}) e precisa ter a quantidade de entrega informada.`);
+      }
+      items.push({
+        materialId: requestItem.materialId,
+        requestItemId: requestItem.id,
+        quantity: 0,
+        serialNumbers: [],
+      });
     }
   }
 
@@ -126,7 +174,18 @@ exports.create = asyncHandler(async (req, res) => {
       const requestedQuantity = qty(item.quantity);
       const quantity = qty(material.requiresSerial ? serials.length : item.quantity);
       const unitCost = money(item.unitCost ?? material.unitCost);
-      if (quantity <= 0) throw new Error(`Quantidade inválida para ${material.name}.`);
+      if (quantity <= 0) {
+        if (!linkedRequest || requestedQuantity < 0) throw new Error(`Quantidade inválida para ${material.name}.`);
+        deliveredRequestItems.push({
+          requestItemId: item.requestItemId || null,
+          materialId: material.id,
+          quantity: 0,
+          serialNumbers: [],
+          unitCost,
+          totalCost: 0,
+        });
+        continue;
+      }
       if (material.requiresSerial) {
         if (requestedQuantity <= 0) throw new Error(`Informe a quantidade para ${material.name}.`);
         if (serials.length !== requestedQuantity) throw new Error(`Para ${material.name}, a quantidade informada precisa ser igual aos seriais selecionados. Quantidade: ${qty(requestedQuantity)}. Seriais: ${serials.length}.`);
@@ -186,12 +245,16 @@ exports.create = asyncHandler(async (req, res) => {
     record.totalValue = money(totalValue);
     await record.save({ transaction });
 
+    const hasTransferredItems = qty(totalQuantity) > 0;
+
     await Notification.create({
       role: 'tecnico',
       type: 'estoque',
-      severity: 'success',
-      title: `Nova carga enviada ${record.transferNumber}`,
-      message: `${qty(totalQuantity)} item(ns) foram transferidos para a caixa do técnico ${technician.name}.`,
+      severity: hasTransferredItems ? 'success' : 'warning',
+      title: hasTransferredItems ? `Nova carga enviada ${record.transferNumber}` : `Solicitação liberada sem saldo ${record.transferNumber}`,
+      message: hasTransferredItems
+        ? `${qty(totalQuantity)} item(ns) foram transferidos para a caixa do técnico ${technician.name}.`
+        : `A solicitação foi liberada sem transferência física porque os itens estavam sem saldo no estoque ${sourceWarehouse.name}.`,
       route: '/caixa-tecnico',
       metadata: { transferId: record.id, technicianId: Number(technicianId), warehouseId: sourceWarehouseId, totalQuantity: qty(totalQuantity) },
     }, { transaction });
@@ -209,13 +272,15 @@ exports.create = asyncHandler(async (req, res) => {
       await Notification.create({
         role: 'tecnico',
         type: 'estoque',
-        severity: 'success',
-        title: `Carga recebida ${linkedRequest.requestNumber}`,
-        message: `Sua solicitação foi entregue. Confira sua caixa e assine a guia ${record.transferNumber}.`,
+        severity: hasTransferredItems ? 'success' : 'warning',
+        title: hasTransferredItems ? `Carga recebida ${linkedRequest.requestNumber}` : `Solicitação liberada sem saldo ${linkedRequest.requestNumber}`,
+        message: hasTransferredItems
+          ? `Sua solicitação foi entregue. Confira sua caixa e assine a guia ${record.transferNumber}.`
+          : `Sua solicitação foi processada, porém nenhum material foi transferido porque o estoque estava zerado. Consulte a guia ${record.transferNumber}.`,
         route: '/caixa-tecnico',
         metadata: { requestId: linkedRequest.id, transferId: record.id },
       }, { transaction });
-      await writeAudit({ req, action: 'deliver_from_request', entity: 'MaterialRequest', entityId: linkedRequest.id, message: `Solicitação ${linkedRequest.requestNumber} entregue pela guia ${record.transferNumber}.`, beforeData: beforeRequest, afterData: linkedRequest.toJSON(), transaction });
+      await writeAudit({ req, action: 'deliver_from_request', entity: 'MaterialRequest', entityId: linkedRequest.id, message: hasTransferredItems ? `Solicitação ${linkedRequest.requestNumber} entregue pela guia ${record.transferNumber}.` : `Solicitação ${linkedRequest.requestNumber} liberada sem transferência física por saldo zerado, registrada na guia ${record.transferNumber}.`, beforeData: beforeRequest, afterData: linkedRequest.toJSON(), transaction });
     }
 
     await writeAudit({
@@ -223,14 +288,14 @@ exports.create = asyncHandler(async (req, res) => {
       action: 'create',
       entity: 'Transfer',
       entityId: record.id,
-      message: `Guia ${record.transferNumber} transferiu material do estoque ${sourceWarehouse.name} para ${technician.name}.`,
+      message: hasTransferredItems ? `Guia ${record.transferNumber} transferiu material do estoque ${sourceWarehouse.name} para ${technician.name}.` : `Guia ${record.transferNumber} registrou liberação sem transferência física por saldo zerado no estoque ${sourceWarehouse.name}.`,
       afterData: { ...record.toJSON(), sourceWarehouse: sourceWarehouse.toJSON(), technicianApprovalLimit, estimatedTotalValue, linkedMaterialRequestId: linkedRequest?.id || null, items },
       transaction,
     });
     return record;
   });
 
-  return created(res, transfer, 'Transferência registrada e guia gerada.');
+  return created(res, transfer, qty(transfer.totalQuantity) > 0 ? 'Transferência registrada e guia gerada.' : 'Solicitação liberada sem transferência física porque o estoque estava zerado.');
 });
 
 exports.update = asyncHandler(async (req, res) => {

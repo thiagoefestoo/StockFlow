@@ -135,8 +135,32 @@ export default function Transfers() {
         api.get('/stock/overview', { params: { warehouseId } }),
         api.get('/stock/assets', { params: { ownerType: 'estoque', status: 'em_estoque', warehouseId, limit: 2000 } }),
       ]);
-      setWarehouseMaterials((overview.data.data || []).filter((material) => Number(material.mainStock || 0) > 0));
-      setAvailableAssets(assets.data.data || []);
+      const stockMaterials = overview.data.data || [];
+      const stockAssets = assets.data.data || [];
+      setWarehouseMaterials(stockMaterials.filter((material) => Number(material.mainStock || 0) > 0));
+      setAvailableAssets(stockAssets);
+      setForm((current) => {
+        if (!current.materialRequestId || String(current.warehouseId) !== String(warehouseId)) return current;
+        return {
+          ...current,
+          items: current.items.map((item) => {
+            const material = stockMaterials.find((row) => Number(row.id) === Number(item.materialId)) || item.requestMaterial;
+            const available = material?.requiresSerial
+              ? stockAssets.filter((asset) => Number(asset.materialId) === Number(item.materialId)).length
+              : toQuantityNumber(material?.mainStock || 0);
+            const requestedMaximum = toQuantityNumber(item.requestedQuantity);
+            const currentQuantity = toQuantityNumber(item.quantity);
+            const desired = currentQuantity > 0 ? currentQuantity : requestedMaximum;
+            const nextQuantity = Math.max(0, Math.trunc(Math.min(desired, requestedMaximum || desired, available)));
+            return {
+              ...item,
+              quantity: formatQuantityInput(nextQuantity),
+              serialNumbers: nextQuantity === 0 ? [] : item.serialNumbers,
+              requestMaterial: material ? { ...item.requestMaterial, ...material } : item.requestMaterial,
+            };
+          }),
+        };
+      });
     } catch (error) {
       setWarehouseMaterials([]);
       setAvailableAssets([]);
@@ -324,27 +348,31 @@ export default function Transfers() {
   function validateBeforeSave() {
     if (!form.warehouseId) return 'Selecione o estoque de origem.';
     if (!form.technicianId) return 'Selecione o técnico de destino.';
-    if (!form.items.length) return 'Adicione pelo menos um item à transferência.';
+    if (!form.items.length && !requestLinked) return 'Adicione pelo menos um item à transferência.';
 
     for (const item of form.items) {
       const material = materialForItem(item);
       if (!material) return 'Existe item selecionado que não está disponível no estoque de origem.';
       const requestedMaximum = requestLinked ? toQuantityNumber(item.requestedQuantity) : 0;
       const deliveryQuantity = toQuantityNumber(item.quantity);
+      const available = availableQuantityForMaterial(material, stockByMaterial[item.materialId] || []);
+      if (deliveryQuantity < 0) return `A quantidade de ${material.name} não pode ser negativa.`;
       if (requestLinked && requestedMaximum > 0 && deliveryQuantity > requestedMaximum) {
         return `A quantidade a transferir de ${material.name} não pode ultrapassar o solicitado (${qtyLabel(requestedMaximum, material.unit)}).`;
+      }
+      if (deliveryQuantity === 0) {
+        if (requestLinked && available === 0) continue;
+        return requestLinked
+          ? `Existe saldo disponível de ${material.name} (${qtyLabel(available, material.unit)}). Informe a quantidade que será transferida.`
+          : `Informe uma quantidade válida para ${material.name}.`;
       }
       if (material.requiresSerial) {
         const quantity = Math.trunc(deliveryQuantity);
         const serialCount = Array.isArray(item.serialNumbers) ? item.serialNumbers.length : 0;
-        const available = availableQuantityForMaterial(material, stockByMaterial[item.materialId] || []);
-        if (quantity <= 0) return `Informe a quantidade que deseja transferir de ${material.name}.`;
         if (quantity > available) return `Quantidade acima do que consta em estoque para ${material.name}. Disponível neste estoque: ${qtyLabel(available, material.unit)}.`;
         if (serialCount !== quantity) return `Para ${material.name}, selecione exatamente ${formatQuantity(quantity)} serial(is). Selecionado(s): ${formatQuantity(serialCount)}.`;
       } else {
         const quantity = toQuantityNumber(item.quantity);
-        const available = availableQuantityForMaterial(material, []);
-        if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
         if (quantity > available) return `Quantidade acima do que consta em estoque para ${material.name}. Disponível neste estoque: ${qtyLabel(available, material.unit)}.`;
       }
     }
@@ -480,6 +508,7 @@ export default function Transfers() {
     if (material.requiresSerial) return sum + (item.serialNumbers || []).reduce((s, serial) => s + Number(availableAssets.find((a) => a.serialNumber === serial)?.acquisitionCost || material.unitCost || 0), 0);
     return sum + toQuantityNumber(item.quantity) * Number(material.unitCost || 0);
   }, 0);
+  const zeroStockRelease = requestLinked && form.items.length > 0 && form.items.every((item) => toQuantityNumber(item.quantity) === 0);
 
   return (
     <div className="page-grid transfer-page">
@@ -515,7 +544,7 @@ export default function Transfers() {
 
       <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
 
-      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={save}>{saving ? 'Transferindo...' : form.materialRequestId ? 'Transferir material' : 'Gerar guia e enviar para caixa'}</button></>}>
+      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={save}>{saving ? 'Processando...' : zeroStockRelease ? 'Liberar solicitação sem material' : form.materialRequestId ? 'Transferir material' : 'Gerar guia e enviar para caixa'}</button></>}>
         <div className="transfer-wizard">
           <section className="transfer-summary-card">
             <div><small>Estoque de origem</small><strong>{selectedWarehouse?.name || 'Selecione um estoque'}</strong><span>{selectedWarehouse ? `${selectedWarehouse.city || '-'} • ${selectedWarehouse.code || 'sem código'}` : 'Materiais serão filtrados pelo estoque'}</span></div>
@@ -548,7 +577,7 @@ export default function Transfers() {
                 <div className="item-head"><strong>📦 Item {i + 1}</strong>{!requestLinked && <button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button>}</div>
                 <div className="form-grid">
                   <label>Material<select disabled={requestLinked} value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{material && !materialOptions.some((option) => Number(option.id) === Number(material.id)) && <option value={material.id}>{material.name}</option>}{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
-                  <label>Quantidade a transferir<input type="number" min="1" max={material ? Math.min(availableQuantityForMaterial(material, allSerialAssets) || 0, requestLinked ? toQuantityNumber(item.requestedQuantity) || Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY) || undefined : undefined} step="1" value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value, serialNumbers: material?.requiresSerial ? [] : item.serialNumbers })} placeholder={material ? 'Informe o que será realmente entregue' : 'Selecione o material primeiro'} />
+                  <label>Quantidade a transferir<input type="number" min={requestLinked ? 0 : 1} max={material ? Math.min(availableQuantityForMaterial(material, allSerialAssets), requestLinked ? toQuantityNumber(item.requestedQuantity) || Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY) : undefined} step="1" value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value, serialNumbers: material?.requiresSerial ? [] : item.serialNumbers })} placeholder={material ? 'Informe o que será realmente entregue' : 'Selecione o material primeiro'} />
                     {(() => {
                       if (!material) return <small>Escolha o material e informe a quantidade que será transferida.</small>;
                       const available = availableQuantityForMaterial(material, allSerialAssets);
@@ -558,6 +587,9 @@ export default function Transfers() {
                         <>
                           {requestLinked && <small className="requested-quantity-label">Quantidade solicitada pelo técnico: <strong>{qtyLabel(item.requestedQuantity, material?.unit)}</strong></small>}
                           <small className={exceeds ? 'field-warning stock-balance-label' : 'stock-balance-label'}>Saldo disponível neste estoque: <strong>{qtyLabel(available, material?.unit)}</strong></small>
+                          {requestLinked && available === 0 && (
+                            <small className="zero-stock-release-label">✅ Estoque zerado. Este item pode seguir com quantidade 0 e a solicitação será liberada sem transferência física.</small>
+                          )}
                           {exceeds && (
                             <small className="field-warning">⚠️ Quantidade acima do que consta em estoque. Máximo disponível: {qtyLabel(available, material?.unit)}.</small>
                           )}

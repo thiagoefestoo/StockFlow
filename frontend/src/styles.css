@@ -2180,6 +2180,16 @@ input[readonly], textarea[readonly] {
   color: #9a3412;
   border-color: #fdba74;
 }
+.zero-stock-release-label {
+  display: block;
+  margin-top: 7px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  font-weight: 750;
+}
 
 /* Quantidades separadas por estoque autorizado */
 .warehouse-stock-list {
