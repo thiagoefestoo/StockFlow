@@ -2158,3 +2158,25 @@ input[readonly], textarea[readonly] {
   color: #64748b;
   font-weight: 500;
 }
+
+
+/* Saldo exibido abaixo da quantidade na entrega de solicitações aprovadas */
+.stock-balance-label {
+  display: block;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border: 1px solid #bfdbfe;
+  font-weight: 750;
+}
+.stock-balance-label strong {
+  font-size: 1rem;
+  color: inherit;
+}
+.stock-balance-label.field-warning {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fdba74;
+}

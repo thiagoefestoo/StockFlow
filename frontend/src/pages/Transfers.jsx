@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
@@ -7,6 +7,7 @@ import AttachmentPreview from '../components/AttachmentPreview';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityWithUnit } from '../utils/formatQuantity';
 import { TRANSFER_REASON_OPTIONS } from '../constants/operationOptions';
+import FloatingAlert from '../components/FloatingAlert';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -77,6 +78,7 @@ function uniqueSerials(values = []) {
 
 export default function Transfers() {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   const [transfers, setTransfers] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -92,16 +94,26 @@ export default function Transfers() {
   const [transferSearch, setTransferSearch] = useState('');
   const [transferStatusFilter, setTransferStatusFilter] = useState('');
   const [transferTypeFilter, setTransferTypeFilter] = useState('');
+  const [notice, setNotice] = useState({ text: '', type: 'danger' });
+  const [saving, setSaving] = useState(false);
+
+  function showNotice(text, type = 'danger') {
+    setNotice({ text, type });
+  }
 
   async function load() {
-    const [t, tec, wh] = await Promise.all([
-      api.get('/transfers'),
-      api.get('/technicians'),
-      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
-    ]);
-    setTransfers(t.data.data || []);
-    setTechnicians(tec.data.data || []);
-    setWarehouses(wh.data.data || []);
+    try {
+      const [t, tec, wh] = await Promise.all([
+        api.get('/transfers'),
+        api.get('/technicians'),
+        api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+      ]);
+      setTransfers(t.data.data || []);
+      setTechnicians(tec.data.data || []);
+      setWarehouses(wh.data.data || []);
+    } catch (error) {
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível carregar as transferências.');
+    }
   }
 
   async function loadWarehouseStock(warehouseId) {
@@ -118,6 +130,10 @@ export default function Transfers() {
       ]);
       setWarehouseMaterials((overview.data.data || []).filter((material) => Number(material.mainStock || 0) > 0));
       setAvailableAssets(assets.data.data || []);
+    } catch (error) {
+      setWarehouseMaterials([]);
+      setAvailableAssets([]);
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível carregar o saldo do estoque selecionado.');
     } finally {
       setLoadingStock(false);
     }
@@ -132,7 +148,12 @@ export default function Transfers() {
       try {
         const { data } = await api.get(`/material-requests/${requestId}`);
         const request = data.data;
-        if (!request || request.status !== 'aprovado' || request.requestType === 'recarga_estoque') return;
+        if (!request || request.status !== 'aprovado' || request.requestType === 'recarga_estoque') {
+          showNotice('A solicitação não está aprovada para entrega ou não corresponde a uma carga de técnico.');
+          setRequestPrefilled(true);
+          navigate('/transferencias', { replace: true });
+          return;
+        }
         const warehouseId = request.warehouseId || request.Technician?.defaultWarehouseId || warehouses[0]?.id || '';
         setForm({
           warehouseId: warehouseId ? String(warehouseId) : '',
@@ -141,20 +162,31 @@ export default function Transfers() {
           notes: `Entrega pela solicitação ${request.requestNumber}.`,
           items: (request.MaterialRequestItems || []).map((item) => ({
             materialId: item.materialId ? String(item.materialId) : '',
-            quantity: item.approvedQuantity || item.quantity || 1,
+            quantity: item.approvedQuantity ?? item.quantity ?? 1,
             serialNumbers: [],
+            requestItemId: item.id,
+            requestMaterial: item.Material ? {
+              id: item.Material.id,
+              name: item.Material.name,
+              unit: item.Material.unit,
+              requiresSerial: !!item.Material.requiresSerial,
+              unitCost: item.unitCost ?? item.Material.unitCost,
+              mainStock: 0,
+            } : null,
           })),
         });
         setAssetSearch('');
         setModal(true);
         setRequestPrefilled(true);
+        navigate('/transferencias', { replace: true });
       } catch (error) {
-        window.alert(error.response?.data?.message || 'Não foi possível carregar a solicitação aprovada.');
+        showNotice(error.response?.data?.message || error.message || 'Não foi possível carregar a solicitação aprovada.');
         setRequestPrefilled(true);
+        navigate('/transferencias', { replace: true });
       }
     }
     prefillFromRequest();
-  }, [warehouses, technicians, requestPrefilled]);
+  }, [warehouses, technicians, requestPrefilled, navigate]);
 
   useEffect(() => {
     if (!modal) return;
@@ -179,6 +211,12 @@ export default function Transfers() {
   const materialOptions = useMemo(() => {
     return warehouseMaterials.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }, [warehouseMaterials]);
+
+  function materialForItem(item) {
+    return materialOptions.find((material) => Number(material.id) === Number(item?.materialId)) || item?.requestMaterial || null;
+  }
+
+  const requestLinked = Boolean(form.materialRequestId);
 
   const selectedTechnician = technicians.find((t) => String(t.id) === String(form.technicianId));
   const selectedWarehouse = warehouses.find((w) => String(w.id) === String(form.warehouseId));
@@ -207,11 +245,11 @@ export default function Transfers() {
 
   function addItem() {
     if (!form.warehouseId) {
-      window.alert('Selecione primeiro o estoque de origem.');
+      showNotice('Selecione primeiro o estoque de origem.');
       return;
     }
     if (!materialOptions.length) {
-      window.alert('Este estoque não possui materiais disponíveis para transferência.');
+      showNotice('Este estoque não possui materiais disponíveis para transferência.');
       return;
     }
     setForm({ ...form, items: [...form.items, { materialId: '', quantity: '', serialNumbers: [] }] });
@@ -230,27 +268,40 @@ export default function Transfers() {
   function toggleSerial(i, serialNumber) {
     const item = form.items[i];
     const selected = new Set(item.serialNumbers || []);
-    if (selected.has(serialNumber)) selected.delete(serialNumber);
-    else selected.add(serialNumber);
+    if (selected.has(serialNumber)) {
+      selected.delete(serialNumber);
+    } else {
+      const desired = Math.trunc(toQuantityNumber(item.quantity));
+      if (requestLinked && desired > 0 && selected.size >= desired) {
+        showNotice(`Selecione exatamente ${formatQuantity(desired)} serial(is), conforme a quantidade solicitada.`);
+        return;
+      }
+      selected.add(serialNumber);
+    }
     updateItem(i, { serialNumbers: Array.from(selected) });
   }
 
 
 
   function replaceSerialsForItem(i, serials) {
+    const item = form.items[i];
     const selected = uniqueSerials(serials);
-    updateItem(i, { serialNumbers: selected, quantity: selected.length || 1 });
+    const desired = Math.trunc(toQuantityNumber(item?.quantity));
+    const limited = requestLinked && desired > 0 ? selected.slice(0, desired) : selected;
+    updateItem(i, requestLinked
+      ? { serialNumbers: limited }
+      : { serialNumbers: limited, quantity: limited.length || 1 });
   }
 
   function selectQuantityForItem(i, assets) {
     const item = form.items[i];
     const desired = Math.trunc(toQuantityNumber(item.quantity));
     if (desired <= 0) {
-      window.alert('Informe uma quantidade válida para selecionar os seriais.');
+      showNotice('Informe uma quantidade válida para selecionar os seriais.');
       return;
     }
     if (desired > assets.length) {
-      window.alert(`Quantidade maior que os seriais disponíveis. Disponível: ${assets.length}.`);
+      showNotice(`Quantidade maior que os seriais disponíveis. Disponível: ${assets.length}.`);
       return;
     }
     replaceSerialsForItem(i, assets.slice(0, desired).map((asset) => asset.serialNumber));
@@ -262,7 +313,7 @@ export default function Transfers() {
     if (!form.items.length) return 'Adicione pelo menos um item à transferência.';
 
     for (const item of form.items) {
-      const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
+      const material = materialForItem(item);
       if (!material) return 'Existe item selecionado que não está disponível no estoque de origem.';
       if (material.requiresSerial) {
         const quantity = Math.trunc(toQuantityNumber(item.quantity));
@@ -282,70 +333,86 @@ export default function Transfers() {
   }
 
   async function save() {
-    const error = validateBeforeSave();
-    if (error) {
-      window.alert(error);
+    if (saving) return;
+    const validationError = validateBeforeSave();
+    if (validationError) {
+      showNotice(validationError);
       return;
     }
-    const payload = {
-      ...form,
-      warehouseId: form.warehouseId,
-      items: form.items.map((it) => ({
-        ...it,
-        quantity: toQuantityNumber(it.quantity),
-        serialNumbers: Array.isArray(it.serialNumbers) ? it.serialNumbers : [],
-      })),
-    };
-    const technicianLimit = Number(selectedTechnician?.transferApprovalLimit ?? 500);
-    if (!form.materialRequestId && totalPreview > technicianLimit) {
-      const requestPayload = {
-        technicianId: form.technicianId,
+
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
         warehouseId: form.warehouseId,
-        requestType: 'reposicao_carga',
-        priority: 'media',
-        requesterNotes: form.notes || `Transferência acima do limite individual de ${selectedTechnician?.name || 'técnico'}.`,
-        items: payload.items.map((item) => ({
+        items: form.items.map((item) => ({
           materialId: item.materialId,
-          quantity: item.quantity,
-          serialNumbers: item.serialNumbers,
+          quantity: toQuantityNumber(item.quantity),
+          serialNumbers: Array.isArray(item.serialNumbers) ? item.serialNumbers : [],
         })),
       };
-      const response = await api.post('/material-requests', requestPayload);
-      window.alert(response.data?.message || 'Carga enviada para aprovação por exceder o limite individual do técnico.');
+      const technicianLimit = Number(selectedTechnician?.transferApprovalLimit ?? 500);
+      if (!form.materialRequestId && totalPreview > technicianLimit) {
+        const requestPayload = {
+          technicianId: form.technicianId,
+          warehouseId: form.warehouseId,
+          requestType: 'reposicao_carga',
+          priority: 'media',
+          requesterNotes: form.notes || `Transferência acima do limite individual de ${selectedTechnician?.name || 'técnico'}.`,
+          items: payload.items,
+        };
+        const response = await api.post('/material-requests', requestPayload);
+        showNotice(response.data?.message || 'Carga enviada para aprovação por exceder o limite individual do técnico.', 'warning');
+        setModal(false);
+        setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
+        setAssetSearch('');
+        setWarehouseMaterials([]);
+        setAvailableAssets([]);
+        return;
+      }
+
+      const response = await api.post('/transfers', payload);
+      try {
+        localStorage.setItem('superinfra:technician-box-refresh', String(Date.now()));
+        window.dispatchEvent(new Event('superinfra:technician-box-refresh'));
+      } catch (_) {}
+      if (form.warehouseId) await loadWarehouseStock(form.warehouseId);
       setModal(false);
       setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
       setAssetSearch('');
       setWarehouseMaterials([]);
       setAvailableAssets([]);
-      return;
+      showNotice(response.data?.message || 'Material transferido e guia gerada com sucesso.', 'success');
+      await load();
+    } catch (error) {
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível transferir o material.');
+    } finally {
+      setSaving(false);
     }
-
-    await api.post('/transfers', payload);
-    try {
-      localStorage.setItem('superinfra:technician-box-refresh', String(Date.now()));
-      window.dispatchEvent(new Event('superinfra:technician-box-refresh'));
-    } catch (_) {}
-    if (form.warehouseId) await loadWarehouseStock(form.warehouseId);
-    setModal(false);
-    setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
-    setAssetSearch('');
-    setWarehouseMaterials([]);
-    setAvailableAssets([]);
-    load();
   }
 
   async function saveEdit() {
-    await api.put(`/transfers/${edit.item.id}`, edit.form);
-    setEdit({ open: false, item: null, form: {} });
-    load();
+    try {
+      const response = await api.put(`/transfers/${edit.item.id}`, edit.form);
+      setEdit({ open: false, item: null, form: {} });
+      showNotice(response.data?.message || 'Guia atualizada com sucesso.', 'success');
+      await load();
+    } catch (error) {
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível atualizar a guia.');
+    }
   }
 
   async function sign(id, file) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async () => {
-      await api.post(`/transfers/${id}/sign`, { attachmentName: file.name, attachmentData: reader.result, signatureResponsible: 'Anexo recebido' });
-      load();
+      try {
+        const response = await api.post(`/transfers/${id}/sign`, { attachmentName: file.name, attachmentData: reader.result, signatureResponsible: 'Anexo recebido' });
+        showNotice(response.data?.message || 'Assinatura registrada com sucesso.', 'success');
+        await load();
+      } catch (error) {
+        showNotice(error.response?.data?.message || error.message || 'Não foi possível registrar a assinatura.');
+      }
     };
     reader.readAsDataURL(file);
   }
@@ -371,7 +438,7 @@ export default function Transfers() {
   }, [transfers, transferSearch, transferStatusFilter, transferTypeFilter]);
 
   const totalPreview = form.items.reduce((sum, item) => {
-    const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
+    const material = materialForItem(item);
     if (!material) return sum;
     if (material.requiresSerial) return sum + (item.serialNumbers || []).reduce((s, serial) => s + Number(availableAssets.find((a) => a.serialNumber === serial)?.acquisitionCost || material.unitCost || 0), 0);
     return sum + toQuantityNumber(item.quantity) * Number(material.unitCost || 0);
@@ -379,6 +446,7 @@ export default function Transfers() {
 
   return (
     <div className="page-grid transfer-page">
+      <FloatingAlert message={notice.text} type={notice.type} onClose={() => setNotice({ text: '', type: 'danger' })} />
       <div className="toolbar">
         <div><h2>🔁 Transferir material para técnico</h2><p>Selecione o estoque de origem, os materiais disponíveis nele e gere a guia para assinatura.</p></div>
         <button onClick={openNewTransfer}>➕ Nova transferência</button>
@@ -395,7 +463,7 @@ export default function Transfers() {
 
       <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
 
-      <Modal open={modal} title={form.materialRequestId ? '📦 Entregar carga solicitada ao técnico' : '📦 Nova transferência para técnico'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Gerar guia e enviar para caixa</button></>}>
+      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={save}>{saving ? 'Transferindo...' : form.materialRequestId ? 'Transferir material' : 'Gerar guia e enviar para caixa'}</button></>}>
         <div className="transfer-wizard">
           <section className="transfer-summary-card">
             <div><small>Estoque de origem</small><strong>{selectedWarehouse?.name || 'Selecione um estoque'}</strong><span>{selectedWarehouse ? `${selectedWarehouse.city || '-'} • ${selectedWarehouse.code || 'sem código'}` : 'Materiais serão filtrados pelo estoque'}</span></div>
@@ -405,17 +473,17 @@ export default function Transfers() {
             <div><small>Limite sem aprovação</small><strong>{selectedTechnician ? brl(selectedTechnician.transferApprovalLimit ?? 500) : '-'}</strong><span>{selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500) ? 'Exige aprovação do administrador' : 'Liberação direta permitida'}</span></div>
           </section>
           <div className="form-grid">
-            <label>🏬 Estoque de origem<select value={form.warehouseId} onChange={(e) => { setForm({ ...form, warehouseId: e.target.value, items: [] }); setAssetSearch(''); }}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code}</option>)}</select></label>
-            <label>👷 Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
-            <label className="span-2">📝 Motivo/observação<input list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
+            <label>🏬 Estoque de origem<select disabled={requestLinked} value={form.warehouseId} onChange={(e) => { setForm({ ...form, warehouseId: e.target.value, items: [] }); setAssetSearch(''); }}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code}</option>)}</select></label>
+            <label>👷 Técnico<select disabled={requestLinked} value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
+            <label className="span-2">📝 Motivo/observação<input disabled={requestLinked} list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           </div>
-          {form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
+          {requestLinked ? <div className="viz-callout"><strong>Solicitação aprovada vinculada.</strong> Técnico, materiais e quantidades estão bloqueados conforme o pedido. Confira o saldo e selecione somente os seriais dos equipamentos antes de transferir.</div> : form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
           {loadingStock && <div className="empty-state">Carregando materiais do estoque selecionado...</div>}
-          <div className="subtoolbar"><h4>Itens da guia</h4><button className="ghost" onClick={addItem}>➕ Adicionar item</button></div>
-          {!loadingStock && form.warehouseId && materialOptions.length === 0 && <div className="empty-state">Este estoque não possui saldo disponível para transferência.</div>}
-          {form.items.length === 0 && <div className="empty-state">Clique em “Adicionar item” para montar a carga do técnico.</div>}
+          <div className="subtoolbar"><h4>Itens da guia</h4>{!requestLinked && <button className="ghost" onClick={addItem}>➕ Adicionar item</button>}</div>
+          {!requestLinked && !loadingStock && form.warehouseId && materialOptions.length === 0 && <div className="empty-state">Este estoque não possui saldo disponível para transferência.</div>}
+          {form.items.length === 0 && <div className="empty-state">{requestLinked ? 'A solicitação aprovada não possui itens disponíveis para transferência.' : 'Clique em “Adicionar item” para montar a carga do técnico.'}</div>}
           {form.items.map((item, i) => {
-            const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
+            const material = materialForItem(item);
             const allSerialAssets = stockByMaterial[item.materialId] || [];
             const serialAssets = allSerialAssets.filter((asset) => {
               const terms = parseSerialTerms(item.assetSearchApplied || '');
@@ -425,10 +493,10 @@ export default function Transfers() {
             });
             return (
               <div className="item-card transfer-item-card" key={i}>
-                <div className="item-head"><strong>📦 Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
+                <div className="item-head"><strong>📦 Item {i + 1}</strong>{!requestLinked && <button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button>}</div>
                 <div className="form-grid">
-                  <label>Material<select value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
-                  <label>Quantidade a transferir<input type="number" min="1" max={material ? availableQuantityForMaterial(material, allSerialAssets) || undefined : undefined} step={material?.requiresSerial ? '1' : '1'} value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder={material ? 'Ex.: 30, 40, 50' : 'Selecione o material primeiro'} />
+                  <label>Material<select disabled={requestLinked} value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{material && !materialOptions.some((option) => Number(option.id) === Number(material.id)) && <option value={material.id}>{material.name}</option>}{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
+                  <label>{requestLinked ? 'Quantidade solicitada' : 'Quantidade a transferir'}<input type="number" min="1" max={material ? availableQuantityForMaterial(material, allSerialAssets) || undefined : undefined} step="1" value={item.quantity ?? ''} disabled={!material || requestLinked} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder={material ? 'Ex.: 30, 40, 50' : 'Selecione o material primeiro'} />
                     {(() => {
                       if (!material) return <small>Escolha o material e informe a quantidade que será transferida.</small>;
                       const available = availableQuantityForMaterial(material, allSerialAssets);
@@ -436,7 +504,7 @@ export default function Transfers() {
                       const exceeds = requested > available;
                       return (
                         <>
-                          <small className={exceeds ? 'field-warning' : ''}>Disponível neste estoque: {qtyLabel(available, material?.unit)}</small>
+                          <small className={exceeds ? 'field-warning stock-balance-label' : 'stock-balance-label'}>Saldo disponível neste estoque: <strong>{qtyLabel(available, material?.unit)}</strong></small>
                           {exceeds && (
                             <small className="field-warning">⚠️ Quantidade acima do que consta em estoque. Máximo disponível: {qtyLabel(available, material?.unit)}.</small>
                           )}

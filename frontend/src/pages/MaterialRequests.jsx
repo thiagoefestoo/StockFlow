@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -7,6 +8,7 @@ import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal
 import KpiCard from '../components/KpiCard';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 import { MATERIAL_REQUEST_JUSTIFICATION_OPTIONS } from '../constants/operationOptions';
+import FloatingAlert from '../components/FloatingAlert';
 
 const baseForm = { requestType: 'reposicao_carga', technicianId: '', warehouseId: '', priority: 'media', neededBy: '', requesterNotes: '', items: [] };
 
@@ -28,6 +30,7 @@ function justificationOptions(requestType) {
 
 export default function MaterialRequests() {
   const { isSupervisor, isAdmin, isTechnician, user, canAccessModule } = useAuth();
+  const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [technicians, setTechnicians] = useState([]);
@@ -37,14 +40,14 @@ export default function MaterialRequests() {
   const [form, setForm] = useState(baseForm);
   const [decision, setDecision] = useState({ open: false, type: '', item: null, notes: '', items: [] });
   const [details, setDetails] = useState(null);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState({ text: '', type: 'danger' });
   const [statusFilter, setStatusFilter] = useState('');
   const [confirmRequestOpen, setConfirmRequestOpen] = useState(false);
   const [submittingRequest, setSubmittingRequest] = useState(false);
 
   async function load() {
     try {
-      setMessage('');
+      setMessage({ text: '', type: 'danger' });
       const reqUrl = statusFilter ? `/material-requests?status=${statusFilter}` : '/material-requests';
       const [reqRes, matRes, sumRes, whRes] = await Promise.all([
         api.get(reqUrl),
@@ -58,7 +61,7 @@ export default function MaterialRequests() {
       setWarehouses(whRes.data.data || []);
       if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []);
     } catch (error) {
-      setMessage(error.response?.data?.message || error.message || 'Erro ao carregar solicitações.');
+      setMessage({ text: error.response?.data?.message || error.message || 'Erro ao carregar solicitações.', type: 'danger' });
     }
   }
 
@@ -116,19 +119,19 @@ export default function MaterialRequests() {
     e.preventDefault();
     const invalidItem = form.items.find((item) => !item.materialId || Number(item.quantity || 0) <= 0);
     if (!form.items.length || invalidItem) {
-      setMessage('Adicione materiais, selecione o item na lista e informe uma quantidade válida.');
+      setMessage({ text: 'Adicione materiais, selecione o item na lista e informe uma quantidade válida.', type: 'danger' });
       return;
     }
     if (!isTechnician && form.requestType === 'reposicao_carga' && !form.technicianId) {
-      setMessage('Selecione o técnico antes de enviar a solicitação.');
+      setMessage({ text: 'Selecione o técnico antes de enviar a solicitação.', type: 'danger' });
       return;
     }
     if (form.requestType === 'recarga_estoque' && !form.warehouseId) {
-      setMessage('Selecione o estoque que receberá a recarga.');
+      setMessage({ text: 'Selecione o estoque que receberá a recarga.', type: 'danger' });
       return;
     }
     if (!form.requesterNotes) {
-      setMessage('Selecione uma justificativa para a solicitação.');
+      setMessage({ text: 'Selecione uma justificativa para a solicitação.', type: 'danger' });
       return;
     }
     setModal(false);
@@ -140,13 +143,13 @@ export default function MaterialRequests() {
     setSubmittingRequest(true);
     try {
       const response = await api.post('/material-requests', requestPayload());
-      setMessage(response.data?.message || (form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação.' : 'Solicitação registrada.'));
+      setMessage({ text: response.data?.message || (form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação.' : 'Solicitação registrada.'), type: 'success' });
       setConfirmRequestOpen(false);
       setModal(false);
       setForm(baseForm);
       await load();
     } catch (error) {
-      setMessage(error.response?.data?.message || error.message || 'Erro ao salvar solicitação.');
+      setMessage({ text: error.response?.data?.message || error.message || 'Erro ao salvar solicitação.', type: 'danger' });
       setConfirmRequestOpen(false);
       setModal(true);
     } finally {
@@ -187,12 +190,18 @@ export default function MaterialRequests() {
           })),
         });
       }
-      setMessage('Operação concluída com sucesso.');
+      setMessage({ text: 'Operação concluída com sucesso.', type: 'success' });
       setDecision({ open: false, type: '', item: null, notes: '', items: [] });
       load();
     } catch (error) {
-      setMessage(error.response?.data?.message || error.message || 'Erro ao processar decisão.');
+      setMessage({ text: error.response?.data?.message || error.message || 'Erro ao processar decisão.', type: 'danger' });
     }
+  }
+
+  function openTransferForRequest(request) {
+    if (!request?.id) return;
+    setDetails(null);
+    navigate(`/transferencias?requestId=${request.id}`);
   }
 
   function canApproveRequest(request) {
@@ -203,7 +212,7 @@ export default function MaterialRequests() {
   }
   const canApprove = isAdmin || canAccessModule('approvals');
   const canReceiveRecharge = ['admin', 'supervisor', 'estoquista'].includes(user?.role);
-  const canDeliverTechnicianLoad = isAdmin || canAccessModule('materialRequestDelivery');
+  const canDeliverTechnicianLoad = isAdmin || (canAccessModule('materialRequestDelivery') && canAccessModule('transfers'));
 
   return (
     <div className="page-grid erp-page">
@@ -216,7 +225,7 @@ export default function MaterialRequests() {
         <button onClick={openCreate}>{isTechnician ? 'Solicitar material' : 'Nova solicitação'}</button>
       </section>
 
-      {message && <div className="alert danger">{message}</div>}
+      <FloatingAlert message={message.text} type={message.type} onClose={() => setMessage({ text: '', type: 'danger' })} />
 
       <div className="kpi-grid">
         <KpiCard label="Pendentes" value={summary.pending || 0} tone={summary.pending ? 'warning' : 'success'} />
@@ -235,7 +244,7 @@ export default function MaterialRequests() {
       </section>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openDecision('deliver', r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
       </section>
 
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>
@@ -258,7 +267,7 @@ export default function MaterialRequests() {
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Entregar carga</button>)}</>}>
+      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(details)}>Entregar carga</button>)}</>}>
         {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
       </DetailsModal>
 
@@ -287,7 +296,6 @@ export default function MaterialRequests() {
         {['approve', 'reject'].includes(decision.type) && <div className="detail-grid compact"><div className="detail-card"><span>Valor solicitado</span><strong>{brl(decision.item?.totalValue)}</strong></div><div className="detail-card"><span>Limite do técnico sem aprovação</span><strong>{brl(decision.item?.metadata?.technicianApprovalLimit)}</strong></div><div className="detail-card"><span>Seu limite de aprovação</span><strong>{isAdmin ? 'Sem limite' : brl(user?.approvalLimit)}</strong></div></div>}
         <label>Observação interna<textarea rows="4" value={decision.notes} onChange={(e) => setDecision({ ...decision, notes: e.target.value })} /></label>
         {decision.type === 'deliver' && decision.item?.requestType === 'recarga_estoque' && <div className="form-stack"><div className="viz-callout">A recarga aprovada será adicionada ao estoque regional selecionado. Para equipamentos serializados, informe os seriais antes de receber.</div>{decision.items.map((item, index) => <div className="item-card" key={item.requestItemId}><div className="form-grid"><div><small>Material</small><strong>{item.materialName}</strong></div><label>Quantidade recebida<input type="number" step="1" min="0" value={item.approvedQuantity} onChange={(e) => updateDecisionItem(index, { approvedQuantity: e.target.value })} /></label></div>{item.requiresSerial && <label>Seriais recebidos<textarea rows="4" value={item.serialNumbersText || ''} onChange={(e) => updateDecisionItem(index, { serialNumbersText: e.target.value })} placeholder="Um serial por linha" /></label>}</div>)}</div>}
-        {decision.type === 'deliver' && decision.item?.requestType !== 'recarga_estoque' && <div className="form-stack"><div className="viz-callout">O sistema irá movimentar os materiais do estoque regional para a caixa do técnico, registrar o estoquista responsável, atualizar o histórico patrimonial e gerar a guia para assinatura.</div>{decision.items.map((item, index) => <div className="item-card" key={item.requestItemId}><div className="form-grid"><div><small>Material</small><strong>{item.materialName}</strong></div><label>Quantidade para entregar<input type="number" step="1" min="0" value={item.approvedQuantity} onChange={(e) => updateDecisionItem(index, { approvedQuantity: e.target.value })} /></label></div>{item.requiresSerial && <label>Seriais específicos (opcional)<textarea rows="4" value={item.serialNumbersText || ''} onChange={(e) => updateDecisionItem(index, { serialNumbersText: e.target.value })} placeholder="Deixe vazio para o sistema selecionar os seriais disponíveis" /></label>}</div>)}</div>}
       </Modal>
     </div>
   );

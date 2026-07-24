@@ -456,6 +456,14 @@ exports.deliver = asyncHandler(async (req, res) => {
     return fail(res, 403, 'Você não tem permissão para entregar cargas aprovadas. Solicite a liberação ao administrador.');
   }
   if (request.status !== 'aprovado') return fail(res, 400, 'A solicitação precisa estar aprovada para ser entregue/recebida.');
+  if (request.requestType !== 'recarga_estoque') {
+    return fail(
+      res,
+      409,
+      'A carga aprovada deve ser entregue exclusivamente pela página Transferências, onde o saldo é conferido e os seriais são selecionados antes de gerar a guia.',
+      { code: 'USE_TRANSFER_FLOW', route: `/transferencias?requestId=${request.id}`, requestId: request.id },
+    );
+  }
 
   const deliveryOverrides = Array.isArray(req.body.items) ? req.body.items : [];
 
