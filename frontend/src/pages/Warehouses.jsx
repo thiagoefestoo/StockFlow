@@ -23,6 +23,134 @@ function brl(v) { return Number(v || 0).toLocaleString('pt-BR', { style: 'curren
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
 
+
+function xmlEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function excelCell(value, { type = 'String', style = '' } = {}) {
+  const normalized = value === null || value === undefined || value === '' ? '-' : value;
+  const styleAttribute = style ? ` ss:StyleID="${style}"` : '';
+  if (type === 'Number') {
+    const number = Number(normalized);
+    return `<Cell${styleAttribute}><Data ss:Type="Number">${Number.isFinite(number) ? number : 0}</Data></Cell>`;
+  }
+  return `<Cell${styleAttribute}><Data ss:Type="String">${xmlEscape(normalized)}</Data></Cell>`;
+}
+
+function excelWorksheet(name, columns, rows) {
+  const columnDefinitions = columns.map((column) => `<Column ss:AutoFitWidth="0" ss:Width="${column.width || 120}"/>`).join('');
+  const header = columns.map((column) => excelCell(column.label, { style: 'Header' })).join('');
+  const body = rows.map((row) => `<Row>${columns.map((column) => {
+    const value = typeof column.value === 'function' ? column.value(row) : row?.[column.value];
+    return excelCell(value, { type: column.type || 'String', style: column.style || '' });
+  }).join('')}</Row>`).join('');
+
+  return `<Worksheet ss:Name="${xmlEscape(name.slice(0, 31))}"><Table>${columnDefinitions}<Row>${header}</Row>${body}</Table><WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><FreezePanes/><FrozenNoSplit/><SplitHorizontal>1</SplitHorizontal><TopRowBottomPane>1</TopRowBottomPane><ActivePane>2</ActivePane><ProtectObjects>False</ProtectObjects><ProtectScenarios>False</ProtectScenarios></WorksheetOptions></Worksheet>`;
+}
+
+function downloadWarehouseExcel(details) {
+  if (!details?.warehouse) return;
+
+  const warehouse = details.warehouse;
+  const bi = details.bi || {};
+  const summaryRows = [
+    ['Número/código', warehouse.code],
+    ['Nome', warehouse.name],
+    ['Cidade', warehouse.city || '-'],
+    ['UF', warehouse.state || '-'],
+    ['Região', warehouse.region || '-'],
+    ['Endereço', warehouse.address || '-'],
+    ['Responsável', warehouse.responsibleName || '-'],
+    ['Status', warehouse.status === 'ativo' ? 'Ativo' : warehouse.status || '-'],
+    ['Limite local de aprovação', Number(warehouse.approvalLimit || 0)],
+    ['Valor total', Number(bi.totalValue || 0)],
+    ['Valor em materiais consumíveis', Number(bi.consumableValue || 0)],
+    ['Valor em equipamentos', Number(bi.assetValue || 0)],
+    ['Equipamentos serializados', Number(bi.assetCount || 0)],
+    ['Linhas consumíveis', Number(bi.consumableLines || 0)],
+    ['Usuários vinculados', Number(bi.linkedUsers || 0)],
+    ['Técnicos vinculados', Number(bi.linkedTechnicians || 0)],
+    ['Movimentações de entrada', Number(bi.incomingMovements || 0)],
+    ['Movimentações de saída', Number(bi.outgoingMovements || 0)],
+    ['Transferências para técnicos', Number(bi.technicianTransfers || 0)],
+    ['Retornos de técnicos', Number(bi.returns || 0)],
+    ['Última movimentação', dt(bi.lastMovementAt)],
+    ['Observações', warehouse.notes || '-'],
+  ].map(([indicator, value]) => ({ indicator, value }));
+
+  const sheets = [
+    excelWorksheet('Resumo', [
+      { label: 'INDICADOR', value: 'indicator', width: 220 },
+      { label: 'VALOR', value: (row) => row.value, width: 220 },
+    ], summaryRows),
+    excelWorksheet('Usuários vinculados', [
+      { label: 'NOME', value: (row) => row.name || '-', width: 190 },
+      { label: 'E-MAIL', value: (row) => row.email || '-', width: 220 },
+      { label: 'PERFIL', value: (row) => row.role || '-', width: 110 },
+      { label: 'STATUS', value: (row) => row.status || '-', width: 100 },
+      { label: 'LIMITE DE APROVAÇÃO', value: (row) => Number(row.approvalLimit || 0), type: 'Number', style: 'Money', width: 145 },
+    ], details.users || []),
+    excelWorksheet('Técnicos vinculados', [
+      { label: 'NOME', value: (row) => row.name || '-', width: 190 },
+      { label: 'E-MAIL', value: (row) => row.email || '-', width: 220 },
+      { label: 'TELEFONE', value: (row) => row.phone || '-', width: 120 },
+      { label: 'STATUS', value: (row) => row.status || '-', width: 100 },
+      { label: 'CIDADES DE ATENDIMENTO', value: (row) => (row.serviceCities || []).join(', ') || '-', width: 260 },
+    ], details.technicians || []),
+    excelWorksheet('Equipamentos', [
+      { label: 'MATERIAL', value: (row) => row.Material?.name || '-', width: 230 },
+      { label: 'SKU', value: (row) => row.Material?.sku || '-', width: 110 },
+      { label: 'CATEGORIA', value: (row) => row.Material?.category || '-', width: 100 },
+      { label: 'SERIAL', value: (row) => row.serialNumber || '-', width: 170 },
+      { label: 'MAC', value: (row) => row.mac || '-', width: 150 },
+      { label: 'MARCA', value: (row) => row.brand || '-', width: 120 },
+      { label: 'MODELO', value: (row) => row.model || '-', width: 150 },
+      { label: 'STATUS', value: (row) => row.status || '-', width: 110 },
+      { label: 'VALOR', value: (row) => Number(row.acquisitionCost || row.Material?.unitCost || 0), type: 'Number', style: 'Money', width: 100 },
+    ], details.assets || []),
+    excelWorksheet('Materiais consumíveis', [
+      { label: 'MATERIAL', value: (row) => row.Material?.name || '-', width: 240 },
+      { label: 'SKU', value: (row) => row.Material?.sku || '-', width: 110 },
+      { label: 'CATEGORIA', value: (row) => row.Material?.category || '-', width: 100 },
+      { label: 'UNIDADE', value: (row) => row.Material?.unit || '-', width: 90 },
+      { label: 'QUANTIDADE', value: (row) => Number(row.quantity || 0), type: 'Number', style: 'Integer', width: 100 },
+      { label: 'CUSTO UNITÁRIO', value: (row) => Number(row.Material?.unitCost || 0), type: 'Number', style: 'Money', width: 110 },
+      { label: 'VALOR TOTAL', value: (row) => Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), type: 'Number', style: 'Money', width: 120 },
+    ], details.balances || []),
+    excelWorksheet('Movimentações', [
+      { label: 'DATA/HORA', value: (row) => dt(row.movementAt), width: 145 },
+      { label: 'REFERÊNCIA', value: (row) => row.reference || '-', width: 150 },
+      { label: 'TIPO', value: (row) => row.type || '-', width: 135 },
+      { label: 'MATERIAL', value: (row) => row.Material?.name || '-', width: 230 },
+      { label: 'QUANTIDADE', value: (row) => Number(row.quantity || 0), type: 'Number', style: 'Integer', width: 100 },
+      { label: 'SERIAL', value: (row) => row.serialNumber || '-', width: 160 },
+      { label: 'ORIGEM', value: (row) => row.fromWarehouse?.name || row.fromTechnician?.name || row.fromOwnerType || '-', width: 190 },
+      { label: 'DESTINO', value: (row) => row.toWarehouse?.name || row.toTechnician?.name || row.toOwnerType || '-', width: 190 },
+      { label: 'OPERADOR', value: (row) => row.createdBy?.name || 'Sistema', width: 150 },
+      { label: 'OBSERVAÇÕES', value: (row) => row.notes || '-', width: 260 },
+    ], details.movements || []),
+  ];
+
+  const workbook = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40"><DocumentProperties xmlns="urn:schemas-microsoft-com:office:office"><Author>Super Infra Business Suite</Author><Title>Estoque ${xmlEscape(warehouse.name)}</Title><Created>${new Date().toISOString()}</Created></DocumentProperties><ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel"><WindowHeight>12000</WindowHeight><WindowWidth>22000</WindowWidth><ProtectStructure>False</ProtectStructure><ProtectWindows>False</ProtectWindows></ExcelWorkbook><Styles><Style ss:ID="Default" ss:Name="Normal"><Alignment ss:Vertical="Center"/><Borders/><Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11"/><Interior/><NumberFormat/><Protection/></Style><Style ss:ID="Header"><Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/><Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#165DFF" ss:Pattern="Solid"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#0B3B9E"/></Borders></Style><Style ss:ID="Money"><NumberFormat ss:Format="R$ #,##0.00"/></Style><Style ss:ID="Integer"><NumberFormat ss:Format="0"/></Style></Styles>${sheets.join('')}</Workbook>`;
+
+  const blob = new Blob(['\ufeff', workbook], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const safeName = String(warehouse.code || warehouse.name || 'estoque').replace(/[^a-zA-Z0-9-_]+/g, '_');
+  link.href = url;
+  link.download = `estoque_${safeName}_${new Date().toISOString().slice(0, 10)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function emptyTransfer(toWarehouseId = '') {
   return { fromWarehouseId: '', toWarehouseId, reference: '', notes: '', items: [] };
 }
@@ -258,7 +386,7 @@ export default function Warehouses() {
       </div>
     </Modal>
 
-    <DetailsModal open={!!details} title={`Estoque ${details?.warehouse?.name || ''}`} onClose={() => setDetails(null)}>
+    <DetailsModal open={!!details} title={`Estoque ${details?.warehouse?.name || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <button onClick={() => downloadWarehouseExcel(details)}>Baixar Excel</button>}</>}>
       <DetailGrid fields={details ? [
         ['Número/código', details.warehouse.code], ['Nome', details.warehouse.name], ['Cidade', `${details.warehouse.city || '-'} ${details.warehouse.state || ''}`], ['Região', details.warehouse.region], ['Responsável', details.warehouse.responsibleName], ['Estoque ativo?', details.warehouse.status === 'ativo' ? 'Sim' : details.warehouse.status], ['Valor total', brl(details.bi?.totalValue)], ['Última movimentação', dt(details.bi?.lastMovementAt)],
       ] : []} />
