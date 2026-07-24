@@ -62,7 +62,7 @@ export default function TechnicianToolsPrint() {
           <div><span></span><p>Assinatura do Técnico</p></div>
           <div><span></span><p>Responsável pelo Estoque/Administração</p></div>
         </div>
-        <p className="paper-note">Este termo reflete apenas as ferramentas ativas na ficha do técnico na data de emissão. Itens baixados por perda, desgaste, substituição ou devolução não constam nesta lista, mas permanecem no histórico da ficha para fins de auditoria.</p>
+        <p className="paper-note no-print">Este termo reflete apenas as ferramentas ativas na ficha do técnico na data de emissão. Itens baixados por perda, desgaste, substituição ou devolução não constam nesta lista, mas permanecem no histórico da ficha para fins de auditoria.</p>
       </section>
     </div>
   );

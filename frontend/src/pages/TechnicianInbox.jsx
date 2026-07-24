@@ -158,6 +158,13 @@ export default function TechnicianInbox() {
     setOsForm({ ...osForm, materials });
   }
 
+  function openRequestModal() {
+    setRequestForm({ ...reqEmpty, items: [{ materialId: '', quantity: 1 }] });
+    setRequestConfirmOpen(false);
+    setMessage('');
+    setRequestModal(true);
+  }
+
   function addRequestItem() {
     setRequestForm({ ...requestForm, items: [...requestForm.items, { materialId: '', quantity: 1 }] });
   }
@@ -353,7 +360,7 @@ export default function TechnicianInbox() {
       </section>
 
       <section className={`panel technician-requests-section ${mobileSectionClass('solicitacoes')}`}>
-        <div className="panel-title compact-title"><div><h3>Minhas solicitações recentes</h3><p>Fila de aprovação e expedição do material pedido.</p></div><button type="button" onClick={() => setRequestModal(true)}>Nova solicitação</button></div>
+        <div className="panel-title compact-title"><div><h3>Minhas solicitações recentes</h3><p>Fila de aprovação e expedição do material pedido.</p></div><button type="button" onClick={openRequestModal}>Nova solicitação</button></div>
         <div className="mobile-request-list">
           {recentRequests.map((r) => <button key={r.id} type="button" className="mobile-request-card" onClick={() => setDetails({ type: 'request', item: r })}>
             <span><b>{r.requestNumber}</b><small>{dt(r.updatedAt)}</small></span>
@@ -377,7 +384,7 @@ export default function TechnicianInbox() {
           <label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
           <label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label>
           <div className="subtoolbar"><h4>Itens</h4><button className="ghost" onClick={addRequestItem}>Adicionar</button></div>
-          {requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeRequestItem(i)}>Remover</button></div><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecione o material</option>{materialsCatalog.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" min="1" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}
+          {requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeRequestItem(i)}>Remover</button></div><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecionar item</option>{materialsCatalog.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" min="1" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}
           {!requestForm.items.length && <div className="empty-state small">Adicione ao menos um item para solicitar material.</div>}
         </div>
       </Modal>

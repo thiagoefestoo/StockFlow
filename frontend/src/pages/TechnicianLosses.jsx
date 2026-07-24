@@ -10,18 +10,37 @@ import { LOSS_REASON_OPTIONS } from '../constants/operationOptions';
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function qtyLabel(value, unit = '') { return formatQuantityWithUnit(value, unit); }
+function lossNature(loss) {
+  return (loss?.TransferItems || []).some((item) => item.itemType === 'ferramenta' || item.TechnicianTool)
+    ? 'Ferramenta'
+    : 'Material';
+}
+function lossItemName(item) {
+  return item?.itemDescription || item?.TechnicianTool?.name || item?.Material?.name || 'Item';
+}
 
-const emptyForm = { technicianId: '', reason: '', notes: '', attachmentName: '', attachmentData: '', items: [] };
+const emptyForm = {
+  lossType: 'material',
+  technicianId: '',
+  reason: '',
+  notes: '',
+  attachmentName: '',
+  attachmentData: '',
+  items: [],
+  toolIds: [],
+};
 
 export default function TechnicianLosses() {
   const [technicians, setTechnicians] = useState([]);
   const [losses, setLosses] = useState([]);
   const [stock, setStock] = useState(null);
+  const [toolsData, setToolsData] = useState(null);
   const [modal, setModal] = useState(false);
   const [details, setDetails] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [serialSearch, setSerialSearch] = useState('');
+  const [toolSearch, setToolSearch] = useState('');
 
   async function load() {
     const [techRes, lossRes] = await Promise.all([
@@ -32,13 +51,18 @@ export default function TechnicianLosses() {
     setLosses(lossRes.data.data || []);
   }
 
-  async function loadTechStock(technicianId) {
+  async function loadTechResources(technicianId) {
     if (!technicianId) {
       setStock(null);
+      setToolsData(null);
       return;
     }
-    const res = await api.get(`/stock/technician-box/${technicianId}`);
-    setStock(res.data.data);
+    const [stockRes, toolsRes] = await Promise.all([
+      api.get(`/stock/technician-box/${technicianId}`),
+      api.get(`/technicians/${technicianId}/tools`),
+    ]);
+    setStock(stockRes.data.data);
+    setToolsData(toolsRes.data.data);
   }
 
   useEffect(() => { load(); }, []);
@@ -54,11 +78,19 @@ export default function TechnicianLosses() {
     return Array.from(map.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }, [stock]);
 
+  const availableTools = useMemo(() => {
+    const query = toolSearch.trim().toLowerCase();
+    return (toolsData?.tools || [])
+      .filter((tool) => tool.status === 'com_tecnico')
+      .filter((tool) => !query || [tool.name, tool.brand, tool.serialNumber].filter(Boolean).join(' ').toLowerCase().includes(query))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [toolsData, toolSearch]);
+
   function assetsByMaterial(materialId) {
-    const q = serialSearch.trim().toLowerCase();
+    const query = serialSearch.trim().toLowerCase();
     return (stock?.assets || [])
       .filter((asset) => Number(asset.materialId) === Number(materialId))
-      .filter((asset) => !q || [asset.serialNumber, asset.mac, asset.Material?.name].filter(Boolean).join(' ').toLowerCase().includes(q));
+      .filter((asset) => !query || [asset.serialNumber, asset.mac, asset.Material?.name].filter(Boolean).join(' ').toLowerCase().includes(query));
   }
 
   function selectedTechnician() {
@@ -68,9 +100,18 @@ export default function TechnicianLosses() {
   function openNew() {
     setForm(emptyForm);
     setStock(null);
+    setToolsData(null);
     setSerialSearch('');
+    setToolSearch('');
     setMessage('');
     setModal(true);
+  }
+
+  function changeLossType(lossType) {
+    setForm({ ...form, lossType, items: [], toolIds: [] });
+    setSerialSearch('');
+    setToolSearch('');
+    setMessage('');
   }
 
   function addItem() {
@@ -99,6 +140,13 @@ export default function TechnicianLosses() {
     updateItem(index, { serialNumbers: Array.from(current), quantity: current.size || 1 });
   }
 
+  function toggleTool(toolId) {
+    const current = new Set((form.toolIds || []).map(Number));
+    if (current.has(Number(toolId))) current.delete(Number(toolId));
+    else current.add(Number(toolId));
+    setForm({ ...form, toolIds: Array.from(current) });
+  }
+
   function readFile(file) {
     return new Promise((resolve, reject) => {
       if (!file) return resolve(null);
@@ -112,7 +160,15 @@ export default function TechnicianLosses() {
   function validate() {
     if (!form.technicianId) return 'Selecione o técnico.';
     if (!form.reason.trim()) return 'Informe o motivo da perda/desconto.';
-    if (!form.items.length) return 'Adicione ao menos um item perdido.';
+
+    if (form.lossType === 'ferramenta') {
+      if (!form.toolIds.length) return 'Selecione ao menos uma ferramenta da ficha do técnico.';
+      const activeIds = new Set((toolsData?.tools || []).filter((tool) => tool.status === 'com_tecnico').map((tool) => Number(tool.id)));
+      if (form.toolIds.some((id) => !activeIds.has(Number(id)))) return 'Uma ferramenta selecionada não está mais disponível na ficha do técnico.';
+      return null;
+    }
+
+    if (!form.items.length) return 'Adicione ao menos um material perdido.';
     for (const item of form.items) {
       const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
       if (!material) return 'Selecione o material em todos os itens adicionados.';
@@ -129,24 +185,28 @@ export default function TechnicianLosses() {
   }
 
   async function save() {
-    const error = validate();
-    if (error) {
-      setMessage(error);
+    const validationError = validate();
+    if (validationError) {
+      setMessage(validationError);
       return;
     }
     try {
       await api.post('/stock/technician-box/loss', {
         ...form,
-        items: form.items.map((item) => ({
+        items: form.lossType === 'material' ? form.items.map((item) => ({
           materialId: item.materialId,
           quantity: Number(item.quantity || 0),
           serialNumbers: Array.isArray(item.serialNumbers) ? item.serialNumbers : [],
-        })),
+        })) : [],
+        toolIds: form.lossType === 'ferramenta' ? form.toolIds.map(Number) : [],
       });
-      setMessage('Perda registrada. O material saiu da caixa do técnico e entrou no histórico/BI.');
+      setMessage(form.lossType === 'ferramenta'
+        ? 'Perda registrada. A ferramenta saiu da ficha do técnico e a guia entrou na fila de assinatura.'
+        : 'Perda registrada. O material saiu da caixa do técnico e a guia entrou na fila de assinatura.');
       setModal(false);
       setForm(emptyForm);
       setStock(null);
+      setToolsData(null);
       await load();
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao registrar perda.');
@@ -165,29 +225,38 @@ export default function TechnicianLosses() {
   }
 
   async function onSelectTechnician(value) {
-    setForm({ ...form, technicianId: value, items: [] });
+    setForm({ ...form, technicianId: value, items: [], toolIds: [] });
     setMessage('');
-    await loadTechStock(value);
+    await loadTechResources(value);
   }
 
-  const totalPreview = form.items.reduce((sum, item) => {
-    const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
-    if (!material) return sum;
-    if (material.requiresSerial) {
-      return sum + (item.serialNumbers || []).reduce((acc, serial) => {
-        const asset = (stock?.assets || []).find((a) => a.serialNumber === serial);
-        return acc + Number(asset?.acquisitionCost || material.unitCost || 0);
-      }, 0);
-    }
-    return sum + Number(item.quantity || 0) * Number(material.unitCost || 0);
-  }, 0);
+  const selectedTools = useMemo(() => {
+    const ids = new Set((form.toolIds || []).map(Number));
+    return (toolsData?.tools || []).filter((tool) => ids.has(Number(tool.id)));
+  }, [form.toolIds, toolsData]);
+
+  const totalPreview = form.lossType === 'ferramenta'
+    ? selectedTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0)
+    : form.items.reduce((sum, item) => {
+      const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
+      if (!material) return sum;
+      if (material.requiresSerial) {
+        return sum + (item.serialNumbers || []).reduce((acc, serial) => {
+          const asset = (stock?.assets || []).find((a) => a.serialNumber === serial);
+          return acc + Number(asset?.acquisitionCost || material.unitCost || 0);
+        }, 0);
+      }
+      return sum + Number(item.quantity || 0) * Number(material.unitCost || 0);
+    }, 0);
+
+  const itemCount = form.lossType === 'ferramenta' ? form.toolIds.length : form.items.length;
 
   return (
     <div className="page-grid technician-loss-page">
       <div className="toolbar">
         <div>
           <h2>Perdas e descontos do técnico</h2>
-          <p>Registre material perdido, gere guia de reconhecimento e baixe automaticamente da caixa do técnico.</p>
+          <p>Registre materiais ou ferramentas perdidas, gere a guia e mantenha a fila de assinatura centralizada.</p>
         </div>
         <button onClick={openNew}>Registrar perda</button>
       </div>
@@ -203,10 +272,11 @@ export default function TechnicianLosses() {
       <section className="panel">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Guia</th><th>Técnico</th><th>Data</th><th>Itens</th><th>Valor</th><th>Status</th><th>Documento</th><th className="action-cell">Opções</th></tr></thead>
+            <thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Data</th><th>Itens</th><th>Valor</th><th>Status</th><th>Documento</th><th className="action-cell">Opções</th></tr></thead>
             <tbody>
               {losses.map((loss) => <tr key={loss.id}>
                 <td><strong>{loss.transferNumber}</strong></td>
+                <td><span className={`badge ${lossNature(loss) === 'Ferramenta' ? 'warning' : 'info'}`}>{lossNature(loss)}</span></td>
                 <td>{loss.Technician?.name || '-'}</td>
                 <td>{dt(loss.deliveredAt || loss.createdAt)}</td>
                 <td>{formatQuantity(loss.totalQuantity)}</td>
@@ -215,47 +285,66 @@ export default function TechnicianLosses() {
                 <td>{loss.attachmentName ? <AttachmentPreview compact name={loss.attachmentName} data={loss.attachmentData} /> : <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
                 <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(loss)}>Detalhes</button><Link className="ghost" to={`/perdas-tecnico/${loss.id}`}>Guia</Link></div></td>
               </tr>)}
-              {!losses.length && <tr><td colSpan="8"><div className="empty-state">Nenhuma perda registrada.</div></td></tr>}
+              {!losses.length && <tr><td colSpan="9"><div className="empty-state">Nenhuma perda registrada.</div></td></tr>}
             </tbody>
           </table>
         </div>
       </section>
 
-      <Modal open={modal} title="Registrar perda/desconto de material" onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Registrar perda e gerar guia</button></>}>
+      <Modal open={modal} title="Registrar perda/desconto" onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Registrar perda e gerar guia</button></>}>
         <div className="loss-summary-card">
           <article><small>Técnico</small><strong>{selectedTechnician()?.name || 'Selecione'}</strong></article>
-          <article><small>Itens</small><strong>{form.items.length}</strong></article>
+          <article><small>Itens selecionados</small><strong>{itemCount}</strong></article>
           <article><small>Valor para desconto</small><strong>{brl(totalPreview)}</strong></article>
         </div>
 
         <div className="form-grid">
+          <label>Tipo de baixa<select value={form.lossType} onChange={(e) => changeLossType(e.target.value)}><option value="material">Material da caixa do técnico</option><option value="ferramenta">Ferramenta da ficha do técnico</option></select></label>
           <label>Técnico responsável<select value={form.technicianId} onChange={(e) => onSelectTechnician(e.target.value)}><option value="">Selecione</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
           <label>Motivo da perda/desconto<input list="loss-reason-options" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="loss-reason-options">{LOSS_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           <label className="span-2">Observações<textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Descreva detalhes da ocorrência, protocolo interno ou autorização." /></label>
-          <label className="span-2">Documento assinado/reconhecimento<input type="file" accept="image/*,.pdf" onChange={async (e) => { const file = await readFile(e.target.files?.[0]); if (file) setForm({ ...form, attachmentName: file.name, attachmentData: file.data }); }} /><small>Opcional na abertura: também será possível anexar depois na lista.</small></label>{form.attachmentName && <AttachmentPreview compact name={form.attachmentName} data={form.attachmentData} label="Documento selecionado" />}
+          <label className="span-2">Documento assinado/reconhecimento<input type="file" accept="image/*,.pdf" onChange={async (e) => { const file = await readFile(e.target.files?.[0]); if (file) setForm({ ...form, attachmentName: file.name, attachmentData: file.data }); }} /><small>Opcional na abertura: também será possível anexar depois na fila.</small></label>{form.attachmentName && <AttachmentPreview compact name={form.attachmentName} data={form.attachmentData} label="Documento selecionado" />}
         </div>
 
-        <div className="subtoolbar"><h4>Material perdido</h4><button className="ghost" onClick={addItem}>Adicionar item</button></div>
-        {!form.technicianId && <div className="empty-state small">Selecione um técnico para carregar a caixa dele.</div>}
-        {form.technicianId && !materialOptions.length && <div className="empty-state small">Este técnico não possui material em caixa.</div>}
+        {!form.technicianId && <div className="empty-state small">Selecione um técnico para carregar os itens sob responsabilidade dele.</div>}
 
-        {form.items.map((item, i) => {
-          const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
-          const serialAssets = assetsByMaterial(item.materialId);
-          return <div className="item-card loss-item-card" key={i}>
-            <div className="item-head"><strong>Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
-            <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.availableQty, m.unit)}</option>)}</select></label>
-              {!material?.requiresSerial && <label>Quantidade perdida<input type="number" min="0" max={Number(material?.availableQty || 0)} step="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível: {qtyLabel(material?.availableQty, material?.unit)}</small></label>}
-            </div>
-            {material?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><div><strong>Selecione o(s) serial(is) perdido(s)</strong><span>{serialAssets.length} disponível(is) na caixa do técnico</span></div><input value={serialSearch} onChange={(e) => setSerialSearch(e.target.value)} placeholder="Buscar serial..." /></div><div className="serial-list">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id} onClick={() => toggleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {brl(asset.acquisitionCost || material.unitCost)}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serialAssets.length && <div className="empty-state small">Nenhum serial disponível para este material na caixa do técnico.</div>}</div>}
-          </div>;
-        })}
-        <div className="viz-callout">Ao registrar, o material sai da caixa do técnico, entra no histórico como perda, alimenta os BIs e gera uma guia para assinatura/reconhecimento.</div>
+        {form.lossType === 'material' && <>
+          <div className="subtoolbar"><h4>Material perdido</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
+          {form.technicianId && !materialOptions.length && <div className="empty-state small">Este técnico não possui material em caixa.</div>}
+          {form.items.map((item, i) => {
+            const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
+            const serialAssets = assetsByMaterial(item.materialId);
+            return <div className="item-card loss-item-card" key={i}>
+              <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
+              <div className="form-grid">
+                <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.availableQty, m.unit)}</option>)}</select></label>
+                {!material?.requiresSerial && <label>Quantidade perdida<input type="number" min="1" max={Number(material?.availableQty || 0)} step="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível: {qtyLabel(material?.availableQty, material?.unit)}</small></label>}
+              </div>
+              {material?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><div><strong>Selecione o(s) serial(is) perdido(s)</strong><span>{serialAssets.length} disponível(is) na caixa do técnico</span></div><input value={serialSearch} onChange={(e) => setSerialSearch(e.target.value)} placeholder="Buscar serial..." /></div><div className="serial-list">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id} onClick={() => toggleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {brl(asset.acquisitionCost || material.unitCost)}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serialAssets.length && <div className="empty-state small">Nenhum serial disponível para este material na caixa do técnico.</div>}</div>}
+            </div>;
+          })}
+        </>}
+
+        {form.lossType === 'ferramenta' && <>
+          <div className="subtoolbar"><div><h4>Ferramentas disponíveis na ficha</h4><small>Somente ferramentas que ainda estão com o técnico.</small></div><input className="loss-tool-search" value={toolSearch} onChange={(e) => setToolSearch(e.target.value)} placeholder="Buscar ferramenta ou patrimônio..." /></div>
+          {form.technicianId && !availableTools.length && <div className="empty-state small">Este técnico não possui ferramentas ativas na ficha.</div>}
+          <div className="loss-tool-list">
+            {availableTools.map((tool) => {
+              const selected = form.toolIds.map(Number).includes(Number(tool.id));
+              return <button type="button" key={tool.id} className={`loss-tool-card ${selected ? 'selected' : ''}`} onClick={() => toggleTool(tool.id)}>
+                <span><b>{tool.name}</b><small>{tool.brand || 'Sem marca'} • Patrimônio/série: {tool.serialNumber}</small><small>Em custódia desde {dt(tool.deliveredAt)}</small></span>
+                <strong>{brl(tool.referenceValue)}</strong>
+                <em>{selected ? 'Selecionada' : 'Selecionar'}</em>
+              </button>;
+            })}
+          </div>
+        </>}
+
+        <div className="viz-callout">Ao registrar, o item sai da responsabilidade do técnico, entra no histórico de perda/desconto e a guia fica na fila para anexar o documento assinado.</div>
       </Modal>
 
       <DetailsModal open={!!details} title={`Detalhes da perda ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/perdas-tecnico/${details.id}`}>Abrir guia</Link>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Documento de reconhecimento" />}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", lossNature(details)], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Documento de reconhecimento" />}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{lossItemName(item)}</b><span>{item.itemType === 'ferramenta' ? 'Ferramenta' : 'Material'} • Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

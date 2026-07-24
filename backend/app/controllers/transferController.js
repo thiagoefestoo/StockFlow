@@ -1,6 +1,6 @@
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
-const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification } = require('../models');
+const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification, TechnicianTool } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
@@ -37,12 +37,12 @@ function nextNumber() {
 
 exports.list = asyncHandler(async (req, res) => {
   const where = { ...stockWhereForUser(req.user, req.query.warehouseId), transferNumber: { [Op.notILike]: 'PERDA-%' } };
-  const transfers = await Transfer.findAll({ where, include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }], order: [['deliveredAt', 'DESC']], limit: 300 });
+  const transfers = await Transfer.findAll({ where, include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] }], order: [['deliveredAt', 'DESC']], limit: 300 });
   return ok(res, transfers);
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }] });
+  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] }] });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
   return ok(res, transfer);
 });
@@ -266,7 +266,7 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset] }] });
+  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] }] });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
   const before = transfer.toJSON();
   const { notes, status, deliveredAt, signatureResponsible } = req.body;

@@ -2565,3 +2565,102 @@ input[readonly], textarea[readonly] {
   .warehouse-bi-total { min-width: 0; }
   .warehouse-bi-metrics { grid-template-columns: 1fr; }
 }
+
+/* Perdas/descontos — seleção de ferramentas da ficha do técnico */
+.loss-tool-search {
+  min-width: min(320px, 100%);
+}
+.loss-tool-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.loss-tool-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 14px;
+  align-items: center;
+  text-align: left;
+  padding: 15px;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: none;
+}
+.loss-tool-card span {
+  display: grid;
+  gap: 3px;
+}
+.loss-tool-card small {
+  color: #64748b;
+  font-weight: 650;
+}
+.loss-tool-card strong {
+  color: #0f3f8f;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+.loss-tool-card em {
+  grid-column: 1 / -1;
+  color: #475569;
+  font-style: normal;
+  font-size: .82rem;
+  font-weight: 800;
+}
+.loss-tool-card.selected {
+  border-color: #22c55e;
+  background: #ecfdf5;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, .12);
+}
+.loss-tool-card.selected em,
+.loss-tool-card.selected strong {
+  color: #047857;
+}
+.guide-total-row td {
+  border-top: 2px solid #0f3f8f !important;
+  background: #eff6ff;
+  color: #0f3f8f;
+}
+
+/* Impressão limpa: somente o documento/termo destinado à assinatura. */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .print-page,
+  .print-page .paper,
+  .print-page .paper * {
+    visibility: visible !important;
+  }
+  .print-page {
+    display: block !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .print-page .paper {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 12mm !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+  .print-page .no-print,
+  .print-page .alert,
+  .print-page .floating-alert,
+  .print-page .paper-note.no-print {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .loss-tool-list { grid-template-columns: 1fr; }
+  .loss-tool-search { min-width: 0; width: 100%; }
+}

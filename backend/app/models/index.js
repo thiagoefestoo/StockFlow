@@ -69,6 +69,8 @@ Transfer.hasMany(TransferItem, { foreignKey: 'transferId' });
 TransferItem.belongsTo(Transfer, { foreignKey: 'transferId' });
 TransferItem.belongsTo(Material, { foreignKey: 'materialId' });
 TransferItem.belongsTo(SerializedAsset, { foreignKey: 'assetId' });
+TechnicianTool.hasMany(TransferItem, { foreignKey: 'technicianToolId' });
+TransferItem.belongsTo(TechnicianTool, { foreignKey: 'technicianToolId' });
 
 ServiceOrder.belongsTo(Technician, { foreignKey: 'technicianId' });
 ServiceOrder.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });

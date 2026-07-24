@@ -14,6 +14,7 @@ const {
   Transfer,
   TransferItem,
   Notification,
+  TechnicianTool,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -415,7 +416,7 @@ exports.losses = asyncHandler(async (req, res) => {
     include: [
       Technician,
       Warehouse,
-      { model: TransferItem, include: [Material, SerializedAsset] },
+      { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
     ],
     order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC']],
@@ -434,17 +435,25 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
     attachmentData,
     signatureResponsible,
     items = [],
+    toolIds = [],
   } = req.body;
+  const lossType = req.body.lossType === 'ferramenta' ? 'ferramenta' : 'material';
 
   if (!technicianId) return fail(res, 400, 'Selecione o técnico responsável pela perda.');
   if (!String(reason || '').trim()) return fail(res, 400, 'Informe o motivo da perda/desconto.');
-  if (!Array.isArray(items) || !items.length) return fail(res, 400, 'Adicione ao menos um material perdido.');
+  if (lossType === 'material' && (!Array.isArray(items) || !items.length)) {
+    return fail(res, 400, 'Adicione ao menos um material perdido.');
+  }
+  if (lossType === 'ferramenta' && (!Array.isArray(toolIds) || !toolIds.length)) {
+    return fail(res, 400, 'Selecione ao menos uma ferramenta da ficha do técnico.');
+  }
 
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
 
   const result = await sequelize.transaction(async (transaction) => {
     const reference = nextLossNumber();
+    const typeLabel = lossType === 'ferramenta' ? 'FERRAMENTA' : 'MATERIAL';
     const record = await Transfer.create({
       transferNumber: reference,
       technicianId,
@@ -454,8 +463,8 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
       attachmentName: attachmentName || null,
       attachmentData: attachmentData || null,
       signatureResponsible: signatureResponsible || technician.name,
-      notes: `GUIA DE PERDA/DESCONTO. Motivo: ${reason}. ${notes || ''}`.trim(),
-      stampText: 'Reconheço a perda do(s) material(is) listado(s), autorizo a conferência/desconto conforme política interna e declaro ciência da baixa em minha caixa técnica.',
+      notes: `GUIA DE PERDA/DESCONTO DE ${typeLabel}. Motivo: ${reason}. ${notes || ''}`.trim(),
+      stampText: 'Reconheço a perda do(s) item(ns) listado(s), autorizo a conferência/desconto conforme política interna e declaro ciência da baixa em minha ficha de responsabilidade.',
       createdById: req.user.id,
     }, { transaction });
 
@@ -463,49 +472,136 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
     let totalValue = 0;
     const affected = [];
 
-    for (const item of items) {
-      const material = await Material.findByPk(item.materialId, { transaction });
-      if (!material) throw new Error('Material não encontrado.');
-      const unitCost = money(item.unitCost ?? material.unitCost);
+    if (lossType === 'ferramenta') {
+      const normalizedToolIds = [...new Set(toolIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+      if (!normalizedToolIds.length) throw new Error('Selecione ao menos uma ferramenta válida.');
 
-      if (material.requiresSerial) {
-        const serials = parseSerials(item.serialNumbers);
-        if (!serials.length) throw new Error(`Selecione o serial perdido de ${material.name}.`);
-        const repeated = serials.filter((serial, index) => serials.findIndex((s) => String(s).toUpperCase() === String(serial).toUpperCase()) !== index);
-        if (repeated.length) throw new Error(`Serial repetido na perda: ${[...new Set(repeated)].join(', ')}.`);
+      const tools = await TechnicianTool.findAll({
+        where: {
+          id: { [Op.in]: normalizedToolIds },
+          technicianId,
+          status: 'com_tecnico',
+        },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
-        for (const serialNumber of serials) {
-          const asset = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
-          if (!asset || asset.ownerType !== 'tecnico' || Number(asset.technicianId) !== Number(technicianId)) {
-            throw new Error(`Serial não está sob responsabilidade do técnico: ${serialNumber}.`);
+      if (tools.length !== normalizedToolIds.length) {
+        throw new Error('Uma ou mais ferramentas não estão disponíveis na ficha deste técnico. Atualize a página e tente novamente.');
+      }
+
+      for (const tool of tools) {
+        const beforeTool = tool.toJSON();
+        const cost = money(tool.referenceValue || 0);
+
+        await TransferItem.create({
+          transferId: record.id,
+          itemType: 'ferramenta',
+          itemDescription: tool.name,
+          technicianToolId: tool.id,
+          quantity: 1,
+          unitCost: cost,
+          totalCost: cost,
+          serialNumber: tool.serialNumber,
+        }, { transaction });
+
+        tool.status = 'perdida';
+        tool.removedAt = new Date();
+        tool.removalReason = `Perda/desconto ${reference}. Motivo: ${reason}. ${notes || ''}`.trim();
+        tool.removedById = req.user.id;
+        tool.notes = [tool.notes, `Baixada por perda/desconto ${reference}.`].filter(Boolean).join(' | ');
+        await tool.save({ transaction });
+
+        totalQuantity += 1;
+        totalValue += Number(cost);
+        affected.push({
+          itemType: 'ferramenta',
+          technicianToolId: tool.id,
+          itemName: tool.name,
+          serialNumber: tool.serialNumber,
+          value: cost,
+          before: beforeTool,
+          after: tool.toJSON(),
+        });
+      }
+    } else {
+      for (const item of items) {
+        const material = await Material.findByPk(item.materialId, { transaction });
+        if (!material) throw new Error('Material não encontrado.');
+        const unitCost = money(item.unitCost ?? material.unitCost);
+
+        if (material.requiresSerial) {
+          const serials = parseSerials(item.serialNumbers);
+          if (!serials.length) throw new Error(`Selecione o serial perdido de ${material.name}.`);
+          const repeated = serials.filter((serial, index) => serials.findIndex((s) => String(s).toUpperCase() === String(serial).toUpperCase()) !== index);
+          if (repeated.length) throw new Error(`Serial repetido na perda: ${[...new Set(repeated)].join(', ')}.`);
+
+          for (const serialNumber of serials) {
+            const asset = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
+            if (!asset || asset.ownerType !== 'tecnico' || Number(asset.technicianId) !== Number(technicianId)) {
+              throw new Error(`Serial não está sob responsabilidade do técnico: ${serialNumber}.`);
+            }
+            const beforeAsset = asset.toJSON();
+            const cost = money(asset.acquisitionCost || unitCost);
+
+            await TransferItem.create({
+              transferId: record.id,
+              itemType: 'material',
+              itemDescription: material.name,
+              materialId: material.id,
+              assetId: asset.id,
+              quantity: 1,
+              unitCost: cost,
+              totalCost: cost,
+              serialNumber,
+            }, { transaction });
+
+            asset.ownerType = 'fornecedor';
+            asset.status = 'perdido';
+            asset.technicianId = null;
+            asset.warehouseId = null;
+            asset.lastMovementAt = new Date();
+            asset.notes = [asset.notes, `Perda/desconto ${reference}: ${reason}`, notes].filter(Boolean).join(' | ');
+            await asset.save({ transaction });
+
+            await StockMovement.create({
+              type: 'perda',
+              materialId: material.id,
+              assetId: asset.id,
+              quantity: 1,
+              serialNumber,
+              fromOwnerType: 'tecnico',
+              toOwnerType: 'perda',
+              fromTechnicianId: technicianId,
+              reference,
+              notes: `Perda lançada para desconto do técnico ${technician.name}. Motivo: ${reason}. ${notes || ''}`.trim(),
+              createdById: req.user.id,
+            }, { transaction });
+
+            totalQuantity += 1;
+            totalValue += Number(cost);
+            affected.push({ itemType: 'material', materialId: material.id, materialName: material.name, serialNumber, value: cost, before: beforeAsset, after: asset.toJSON() });
           }
-          const beforeAsset = asset.toJSON();
-          const cost = money(asset.acquisitionCost || unitCost);
+        } else {
+          const quantity = qty(item.quantity);
+          if (quantity <= 0) throw new Error(`Informe uma quantidade válida para ${material.name}.`);
+          await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
+          const totalCost = money(quantity * unitCost);
 
           await TransferItem.create({
             transferId: record.id,
+            itemType: 'material',
+            itemDescription: material.name,
             materialId: material.id,
-            assetId: asset.id,
-            quantity: 1,
-            unitCost: cost,
-            totalCost: cost,
-            serialNumber,
+            quantity,
+            unitCost,
+            totalCost,
           }, { transaction });
-
-          asset.ownerType = 'fornecedor';
-          asset.status = 'perdido';
-          asset.technicianId = null;
-          asset.warehouseId = null;
-          asset.lastMovementAt = new Date();
-          asset.notes = [asset.notes, `Perda/desconto ${reference}: ${reason}`, notes].filter(Boolean).join(' | ');
-          await asset.save({ transaction });
 
           await StockMovement.create({
             type: 'perda',
             materialId: material.id,
-            assetId: asset.id,
-            quantity: 1,
-            serialNumber,
+            quantity,
             fromOwnerType: 'tecnico',
             toOwnerType: 'perda',
             fromTechnicianId: technicianId,
@@ -514,39 +610,10 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
             createdById: req.user.id,
           }, { transaction });
 
-          totalQuantity += 1;
-          totalValue += Number(cost);
-          affected.push({ materialId: material.id, materialName: material.name, serialNumber, value: cost, before: beforeAsset, after: asset.toJSON() });
+          totalQuantity += quantity;
+          totalValue += totalCost;
+          affected.push({ itemType: 'material', materialId: material.id, materialName: material.name, quantity, value: totalCost });
         }
-      } else {
-        const quantity = qty(item.quantity);
-        if (quantity <= 0) throw new Error(`Informe uma quantidade válida para ${material.name}.`);
-        await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
-        const totalCost = money(quantity * unitCost);
-
-        await TransferItem.create({
-          transferId: record.id,
-          materialId: material.id,
-          quantity,
-          unitCost,
-          totalCost,
-        }, { transaction });
-
-        await StockMovement.create({
-          type: 'perda',
-          materialId: material.id,
-          quantity,
-          fromOwnerType: 'tecnico',
-          toOwnerType: 'perda',
-          fromTechnicianId: technicianId,
-          reference,
-          notes: `Perda lançada para desconto do técnico ${technician.name}. Motivo: ${reason}. ${notes || ''}`.trim(),
-          createdById: req.user.id,
-        }, { transaction });
-
-        totalQuantity += quantity;
-        totalValue += totalCost;
-        affected.push({ materialId: material.id, materialName: material.name, quantity, value: totalCost });
       }
     }
 
@@ -559,25 +626,25 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
       type: 'patrimonio',
       severity: 'danger',
       title: `Perda registrada ${reference}`,
-      message: `${technician.name} teve ${qty(totalQuantity)} item(ns) baixados por perda/desconto no valor de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(money(totalValue))}.`,
+      message: `${technician.name} teve ${qty(totalQuantity)} item(ns) de ${lossType === 'ferramenta' ? 'ferramenta' : 'material'} baixado(s) por perda/desconto no valor de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(money(totalValue))}.`,
       route: '/perdas-tecnico',
-      metadata: { transferId: record.id, reference, technicianId },
+      metadata: { transferId: record.id, reference, technicianId, lossType },
     }, { transaction });
 
     await writeAudit({
       req,
-      action: 'technician_loss',
+      action: lossType === 'ferramenta' ? 'technician_tool_loss' : 'technician_loss',
       entity: 'TechnicianLoss',
       entityId: record.id,
-      message: `Perda/desconto ${reference} baixou ${qty(totalQuantity)} item(ns) da caixa de ${technician.name}.`,
-      afterData: { transfer: record.toJSON(), technician: technician.toJSON(), reason, notes, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
+      message: `Perda/desconto ${reference} baixou ${qty(totalQuantity)} item(ns) de ${lossType === 'ferramenta' ? 'ferramenta' : 'material'} da responsabilidade de ${technician.name}.`,
+      afterData: { transfer: record.toJSON(), technician: technician.toJSON(), lossType, reason, notes, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
       transaction,
     });
 
     return record;
   });
 
-  return created(res, result, 'Perda registrada, material baixado da caixa do técnico e guia gerada.');
+  return created(res, result, `Perda registrada, ${lossType === 'ferramenta' ? 'ferramenta baixada da ficha' : 'material baixado da caixa'} do técnico e guia gerada.`);
 });
 
 

@@ -108,6 +108,30 @@ async function ensureTechnicianToolsSchema(queryInterface) {
   }
 }
 
+async function ensureTransferItemLossSchema(queryInterface) {
+  const transferItems = await queryInterface.describeTable('transfer_items').catch(() => null);
+  if (!transferItems) return;
+
+  const missingColumns = [
+    ['itemType', { type: DataTypes.STRING(30), allowNull: false, defaultValue: 'material' }],
+    ['itemDescription', { type: DataTypes.STRING(200), allowNull: true }],
+    ['technicianToolId', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'technician_tools', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    }],
+  ];
+
+  for (const [column, definition] of missingColumns) {
+    if (!transferItems[column]) {
+      await queryInterface.addColumn('transfer_items', column, definition);
+      console.log(`✅ Coluna transfer_items.${column} criada para perdas de ferramentas.`);
+    }
+  }
+}
+
 async function ensureRuntimeSchema() {
   const queryInterface = sequelize.getQueryInterface();
   const users = await queryInterface.describeTable('users').catch(() => null);
@@ -154,6 +178,7 @@ async function ensureRuntimeSchema() {
 
   await ensureNotificationSchema(queryInterface);
   await ensureTechnicianToolsSchema(queryInterface);
+  await ensureTransferItemLossSchema(queryInterface);
 }
 
 module.exports = { ensureRuntimeSchema };

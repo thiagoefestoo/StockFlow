@@ -115,6 +115,7 @@ export default function MaterialRequests() {
       requestType: 'reposicao_carga',
       technicianId: !isTechnician ? technicians[0]?.id || '' : '',
       warehouseId: '',
+      items: [{ materialId: '', quantity: 1, serialNumbersText: '' }],
     });
     setModal(true);
   }
@@ -293,7 +294,7 @@ export default function MaterialRequests() {
           <label>Justificativa<select value={form.requesterNotes} onChange={(e) => setForm({ ...form, requesterNotes: e.target.value })} required><option value="">Selecione uma justificativa</option>{justificationOptions(form.requestType).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
           <div className="subtoolbar"><h4>Itens solicitados</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
           {form.items.map((item, i) => {
-            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecione o material</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
+            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecionar item</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
           })}
           {form.items.length === 0 && <div className="empty-state">Adicione materiais para enviar a solicitação.</div>}
         </form>
