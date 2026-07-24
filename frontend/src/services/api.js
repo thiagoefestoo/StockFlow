@@ -29,14 +29,14 @@ function isQuantityField(key) {
 
 function normalizeQuantityValue(value) {
   if (value === null || value === undefined || value === '') return value;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : value;
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value) : value;
   if (typeof value !== 'string') return value;
 
   const raw = value.trim();
   if (!/^[-+]?\d+(\.\d+)?$/.test(raw)) return value;
 
   const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : value;
+  return Number.isFinite(parsed) ? Math.round(parsed) : value;
 }
 
 function normalizeQuantityPayload(payload) {

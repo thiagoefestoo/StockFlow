@@ -1,8 +1,10 @@
+const sequelize = require('../../config/db');
 const { ApprovalRequest, User, MaterialRequest, MaterialRequestItem, Material, SerializedAsset, Technician, Warehouse, StockBalance, StockMovement, StockBatch, StockBatchItem, Transfer, ServiceOrder } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, fail } = require('../utils/response');
 const { executeWarehouseTransferPlan } = require('../services/warehouseTransferService');
 const { writeAudit } = require('../services/auditService');
+const { approveMaterialRequest, validateApprover } = require('../services/materialRequestApprovalService');
 
 const { Op } = require('sequelize');
 
@@ -190,6 +192,24 @@ exports.approve = asyncHandler(async (req, res) => {
   if (!approval) return fail(res, 404, 'Aprovação não encontrada.');
   if (approval.status !== 'pendente') return fail(res, 409, 'Esta aprovação já foi decidida.');
 
+  if (approval.entityType === 'material_request') {
+    try {
+      const request = await approveMaterialRequest({
+        requestId: approval.entityId,
+        req,
+        notes: req.body?.notes || req.body?.approvalNotes,
+      });
+      const refreshed = await ApprovalRequest.findByPk(approval.id);
+      return ok(res, { approval: await enrichApproval(refreshed), request }, 'Solicitação aprovada com sucesso.');
+    } catch (error) {
+      return fail(res, error.statusCode || 500, error.message || 'Não foi possível aprovar a solicitação.');
+    }
+  }
+
+  if (req.user.role !== 'admin') {
+    return fail(res, 403, 'Somente administrador pode executar este tipo de aprovação.');
+  }
+
   if (approval.entityType === 'warehouse_transfer') {
     try {
       await executeWarehouseTransferPlan(approval.payload, { req, approvalId: approval.id });
@@ -203,7 +223,7 @@ exports.approve = asyncHandler(async (req, res) => {
       return fail(res, 409, `Não foi possível excluir o estoque: ${error.message}`);
     }
   } else {
-    return fail(res, 400, 'Este tipo de aprovação deve ser decidido pelo fluxo original.');
+    return fail(res, 400, 'Tipo de aprovação não suportado.');
   }
 
   approval.status = 'aprovado';
@@ -225,24 +245,81 @@ exports.approve = asyncHandler(async (req, res) => {
 });
 
 exports.reject = asyncHandler(async (req, res) => {
-  const approval = await ApprovalRequest.findByPk(req.params.id);
-  if (!approval) return fail(res, 404, 'Aprovação não encontrada.');
-  if (approval.status !== 'pendente') return fail(res, 409, 'Esta aprovação já foi decidida.');
+  const result = await sequelize.transaction(async (transaction) => {
+    const approval = await ApprovalRequest.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!approval) {
+      const error = new Error('Aprovação não encontrada.');
+      error.statusCode = 404;
+      throw error;
+    }
+    if (approval.status !== 'pendente') {
+      const error = new Error('Esta aprovação já foi decidida.');
+      error.statusCode = 409;
+      throw error;
+    }
 
-  approval.status = 'reprovado';
-  approval.decidedAt = new Date();
-  approval.decidedById = req.user.id;
-  approval.decisionNotes = req.body?.notes || req.body?.approvalNotes || 'Reprovado pelo administrador.';
-  await approval.save();
+    let request = null;
+    if (approval.entityType === 'material_request') {
+      request = await MaterialRequest.findByPk(approval.entityId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!request) {
+        const error = new Error('Solicitação vinculada não encontrada.');
+        error.statusCode = 404;
+        throw error;
+      }
+      if (request.technicianId) {
+        request.Technician = await Technician.findByPk(request.technicianId, { transaction });
+      }
+      validateApprover({ user: req.user, request });
+    } else if (req.user.role !== 'admin') {
+      const error = new Error('Somente administrador pode rejeitar este tipo de aprovação.');
+      error.statusCode = 403;
+      throw error;
+    }
 
-  await writeAudit({
-    req,
-    action: 'approval_rejected',
-    entity: 'ApprovalRequest',
-    entityId: approval.id,
-    message: `Aprovação ${approval.workflowCode} reprovada.`,
-    afterData: approval.toJSON(),
+    const notes = req.body?.notes || req.body?.approvalNotes || 'Reprovado.';
+    const decidedAt = new Date();
+    approval.status = 'reprovado';
+    approval.decidedAt = decidedAt;
+    approval.decidedById = req.user.id;
+    approval.decisionNotes = notes;
+    await approval.save({ transaction });
+
+    if (request) {
+      request.status = 'reprovado';
+      request.approvedAt = decidedAt;
+      request.approvedById = req.user.id;
+      request.approvalNotes = notes;
+      await request.save({ transaction });
+      await writeAudit({
+        req,
+        action: 'reject',
+        entity: 'MaterialRequest',
+        entityId: request.id,
+        message: `Solicitação ${request.requestNumber} reprovada por ${req.user.name}.`,
+        afterData: request.toJSON(),
+        transaction,
+      });
+    }
+
+    await writeAudit({
+      req,
+      action: 'approval_rejected',
+      entity: 'ApprovalRequest',
+      entityId: approval.id,
+      message: `Aprovação ${approval.workflowCode} reprovada.`,
+      afterData: approval.toJSON(),
+      transaction,
+    });
+
+    return approval.id;
   });
 
+  const approval = await ApprovalRequest.findByPk(result);
   return ok(res, await enrichApproval(approval), 'Aprovação reprovada.');
 });

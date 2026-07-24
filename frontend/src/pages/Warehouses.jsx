@@ -246,7 +246,7 @@ export default function Warehouses() {
             <div className="item-head"><strong>Item {index + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeTransferItem(index)}>Remover</button></div>
             <div className="form-grid">
               <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {formatQuantity(m.mainStock, m.unit)}</option>)}</select></label>
-              {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => updateTransferItem(index, { quantity: e.target.value })} /></label>}
+              {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateTransferItem(index, { quantity: e.target.value })} /></label>}
             </div>
             {material?.requiresSerial && <div className="serial-picker">
               <div className="serial-picker-head"><strong>Seriais disponíveis no estoque de origem</strong><small>{serialAssets.length} disponível(is) • {(item.serialNumbers || []).length} selecionado(s)</small></div>

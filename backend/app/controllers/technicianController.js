@@ -12,6 +12,7 @@ const {
   StockMovement,
   User,
   Warehouse,
+  TechnicianTool,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -173,6 +174,13 @@ exports.list = asyncHandler(async (req, res) => {
     const assetValue = await SerializedAsset.sum('acquisitionCost', { where: { technicianId: technician.id, ownerType: 'tecnico' } });
     const balances = await StockBalance.findAll({ where: { technicianId: technician.id, ownerType: 'tecnico' }, include: [Material] });
     const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
+    const activeTools = hasModuleAccess(req.user, 'technicianTools')
+      ? await TechnicianTool.findAll({
+        where: { technicianId: technician.id, status: 'com_tecnico' },
+        attributes: ['id', 'referenceValue'],
+      }).catch(() => [])
+      : [];
+    const toolValue = activeTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0);
     const portalUser = await findPortalUserForTechnician(technician);
     data.push({
       ...technician.toJSON(),
@@ -180,7 +188,9 @@ exports.list = asyncHandler(async (req, res) => {
       assetCount,
       assetValue: money(assetValue),
       consumableValue: money(consumableValue),
-      totalCustodyValue: money(Number(assetValue || 0) + consumableValue),
+      toolCount: activeTools.length,
+      toolValue: money(toolValue),
+      totalCustodyValue: money(Number(assetValue || 0) + consumableValue + toolValue),
     });
   }
   return ok(res, data);
@@ -320,6 +330,15 @@ exports.stock = asyncHandler(async (req, res) => {
     limit: 40,
   });
 
+  const tools = hasModuleAccess(req.user, 'technicianTools')
+    ? await TechnicianTool.findAll({
+      where: { technicianId: technician.id },
+      order: [['status', 'ASC'], ['deliveredAt', 'ASC']],
+    }).catch(() => [])
+    : [];
+  const activeTools = tools.filter((tool) => tool.status === 'com_tecnico');
+  const toolValue = activeTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0);
+
   const assetsValue = assets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || 0), 0);
   const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
   const grouped = {};
@@ -344,6 +363,7 @@ exports.stock = asyncHandler(async (req, res) => {
     movements,
     transfers,
     orders,
+    tools: tools.map((tool) => ({ ...tool.toJSON(), custodyDays: daysBetween(tool.deliveredAt) })),
     summary: {
       assetsCount: assets.length,
       consumableLines: balances.length,
@@ -353,7 +373,9 @@ exports.stock = asyncHandler(async (req, res) => {
       oldCustody: assets.filter((asset) => daysBetween(asset.custodyStartedAt) >= 60).length,
       assetsValue: money(assetsValue),
       consumableValue: money(consumableValue),
-      totalValue: money(assetsValue + consumableValue),
+      toolsCount: activeTools.length,
+      toolsValue: money(toolValue),
+      totalValue: money(assetsValue + consumableValue + toolValue),
     },
     groupedMaterials: Object.values(grouped).map((row) => ({ ...row, value: money(row.value) })),
   });

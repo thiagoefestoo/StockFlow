@@ -1,6 +1,113 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../../config/db');
 
+async function ensureNotificationSchema(queryInterface) {
+  const notifications = await queryInterface.describeTable('notifications').catch(() => null);
+  if (!notifications) return;
+
+  if (!notifications.userId) {
+    await queryInterface.addColumn('notifications', 'userId', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    });
+    console.log('✅ Coluna notifications.userId criada para notificações individuais.');
+  }
+
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT type_name.typname AS enum_name
+      FROM pg_type type_name
+      JOIN pg_enum enum_value ON type_name.oid = enum_value.enumtypid
+      JOIN pg_attribute column_info ON column_info.atttypid = type_name.oid
+      JOIN pg_class table_info ON table_info.oid = column_info.attrelid
+      WHERE table_info.relname = 'notifications'
+        AND column_info.attname = 'role'
+      LIMIT 1
+    `);
+    const enumName = rows?.[0]?.enum_name;
+    if (enumName) {
+      const escapedEnumName = String(enumName).replace(/"/g, '""');
+      await sequelize.query(`ALTER TYPE "${escapedEnumName}" ADD VALUE IF NOT EXISTS 'estoquista'`);
+      console.log('✅ Perfil estoquista habilitado nas notificações.');
+    }
+  } catch (error) {
+    console.warn('⚠️ Não foi possível atualizar o enum de notificações:', error.message);
+  }
+}
+
+async function ensureTechnicianToolsSchema(queryInterface) {
+  let tools = await queryInterface.describeTable('technician_tools').catch(() => null);
+
+  if (!tools) {
+    await queryInterface.createTable('technician_tools', {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+      technicianId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'technicians', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      name: { type: DataTypes.STRING(160), allowNull: false },
+      serialNumber: { type: DataTypes.STRING(140), allowNull: false },
+      brand: { type: DataTypes.STRING(100), allowNull: true },
+      referenceValue: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+      status: {
+        type: DataTypes.ENUM('com_tecnico', 'substituida', 'perdida', 'desgaste', 'devolvida'),
+        allowNull: false,
+        defaultValue: 'com_tecnico',
+      },
+      deliveredAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      removedAt: { type: DataTypes.DATE, allowNull: true },
+      removalReason: { type: DataTypes.TEXT, allowNull: true },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+      createdById: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+      },
+      removedById: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+      },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    });
+    await queryInterface.addIndex('technician_tools', ['technicianId']);
+    await queryInterface.addIndex('technician_tools', ['serialNumber']);
+    console.log('✅ Tabela technician_tools criada para ficha e custódia de ferramentas.');
+    tools = await queryInterface.describeTable('technician_tools').catch(() => null);
+  }
+
+  if (!tools) return;
+
+  const missingColumns = [
+    ['brand', { type: DataTypes.STRING(100), allowNull: true }],
+    ['referenceValue', { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 }],
+    ['deliveredAt', { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }],
+    ['removedAt', { type: DataTypes.DATE, allowNull: true }],
+    ['removalReason', { type: DataTypes.TEXT, allowNull: true }],
+    ['notes', { type: DataTypes.TEXT, allowNull: true }],
+    ['createdById', { type: DataTypes.INTEGER, allowNull: true }],
+    ['removedById', { type: DataTypes.INTEGER, allowNull: true }],
+  ];
+
+  for (const [column, definition] of missingColumns) {
+    if (!tools[column]) {
+      await queryInterface.addColumn('technician_tools', column, definition);
+      console.log(`✅ Coluna technician_tools.${column} criada.`);
+    }
+  }
+}
+
 async function ensureRuntimeSchema() {
   const queryInterface = sequelize.getQueryInterface();
   const users = await queryInterface.describeTable('users').catch(() => null);
@@ -12,7 +119,6 @@ async function ensureRuntimeSchema() {
     });
     console.log('✅ Coluna users.modulePermissions criada para controle de módulos.');
   }
-
 
   if (users) {
     await sequelize.query(`
@@ -36,7 +142,6 @@ async function ensureRuntimeSchema() {
     `);
   }
 
-
   const technicians = await queryInterface.describeTable('technicians').catch(() => null);
   if (technicians && !technicians.transferApprovalLimit) {
     await queryInterface.addColumn('technicians', 'transferApprovalLimit', {
@@ -46,6 +151,9 @@ async function ensureRuntimeSchema() {
     });
     console.log('✅ Coluna technicians.transferApprovalLimit criada para limite individual de transferências.');
   }
+
+  await ensureNotificationSchema(queryInterface);
+  await ensureTechnicianToolsSchema(queryInterface);
 }
 
 module.exports = { ensureRuntimeSchema };

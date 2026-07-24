@@ -1,8 +1,9 @@
+const { Op } = require('sequelize');
 const { Technician, TechnicianTool, User } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
-const { money } = require('../utils/number');
+const { money, daysBetween } = require('../utils/number');
 
 const toolInclude = [
   { model: User, as: 'createdBy', attributes: ['id', 'name', 'email'] },
@@ -10,6 +11,13 @@ const toolInclude = [
 ];
 
 const REMOVAL_STATUSES = ['substituida', 'perdida', 'desgaste', 'devolvida'];
+
+
+async function activeSerialExists(serialNumber, excludeId = null) {
+  const where = { serialNumber, status: 'com_tecnico' };
+  if (excludeId) where.id = { [Op.ne]: excludeId };
+  return TechnicianTool.findOne({ where });
+}
 
 async function loadTechnicianOrFail(res, technicianId) {
   const technician = await Technician.findByPk(technicianId);
@@ -36,7 +44,7 @@ exports.list = asyncHandler(async (req, res) => {
   const active = tools.filter((tool) => tool.status === 'com_tecnico');
   return ok(res, {
     technician,
-    tools,
+    tools: tools.map((tool) => ({ ...tool.toJSON(), custodyDays: daysBetween(tool.deliveredAt) })),
     summary: {
       activeCount: active.length,
       activeValue: money(active.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0)),
@@ -53,6 +61,7 @@ exports.create = asyncHandler(async (req, res) => {
   const serialNumber = String(req.body.serialNumber || '').trim();
   if (!name) return fail(res, 400, 'Informe o nome/descrição da ferramenta.');
   if (!serialNumber) return fail(res, 400, 'Informe o número de patrimônio/série da ferramenta.');
+  if (await activeSerialExists(serialNumber)) return fail(res, 409, 'Já existe uma ferramenta ativa com este número de patrimônio/série.');
 
   const tool = await TechnicianTool.create({
     technicianId: technician.id,
@@ -88,6 +97,7 @@ exports.update = asyncHandler(async (req, res) => {
   const serialNumber = req.body.serialNumber !== undefined ? String(req.body.serialNumber).trim() : tool.serialNumber;
   if (!name) return fail(res, 400, 'Informe o nome/descrição da ferramenta.');
   if (!serialNumber) return fail(res, 400, 'Informe o número de patrimônio/série da ferramenta.');
+  if (await activeSerialExists(serialNumber, tool.id)) return fail(res, 409, 'Já existe outra ferramenta ativa com este número de patrimônio/série.');
 
   await tool.update({
     name,

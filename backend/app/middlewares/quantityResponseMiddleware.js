@@ -22,7 +22,7 @@ function normalizeQuantityValue(value) {
   if (value === null || value === undefined || value === '') return value;
 
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : value;
+    return Number.isFinite(value) ? Math.round(value) : value;
   }
 
   if (typeof value !== 'string') return value;
@@ -36,7 +36,7 @@ function normalizeQuantityValue(value) {
 
   if (!Number.isFinite(parsed)) return value;
 
-  return parsed;
+  return Math.round(parsed);
 }
 
 function normalizePayload(payload) {

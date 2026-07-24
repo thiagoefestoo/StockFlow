@@ -429,7 +429,7 @@ function MovementItem({ item, index, materials, assetsByMaterial, balanceFor, up
             <option value="">Selecione o material</option>{materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
           </select>
         </label>
-        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity) + ' ' + (material?.unit || 'un')}<input type="number" min="0" step="0.001" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
+        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity) + ' ' + (material?.unit || 'un')}<input type="number" min="0" step="1" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
       </div>
       {material?.requiresSerial && (
         <div className="serial-picker compact-serial-picker">

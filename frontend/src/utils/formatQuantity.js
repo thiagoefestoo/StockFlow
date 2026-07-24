@@ -2,7 +2,7 @@ export function normalizeQuantity(value) {
   if (value === null || value === undefined || value === '') return 0;
 
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : 0;
+    return Number.isFinite(value) ? Math.round(value) : 0;
   }
 
   const raw = String(value).trim();
@@ -14,30 +14,16 @@ export function normalizeQuantity(value) {
   const parsed = Number(normalized);
 
   if (!Number.isFinite(parsed)) return 0;
-  return parsed;
+  return Math.round(parsed);
 }
 
 export function formatQuantity(value) {
-  const number = normalizeQuantity(value);
-
-  if (Number.isInteger(number)) {
-    return String(number);
-  }
-
-  return number
-    .toLocaleString('pt-BR', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-      useGrouping: false,
-    })
-    .replace(/,?0+$/, '');
+  return String(Math.round(normalizeQuantity(value)));
 }
 
 export function formatQuantityInput(value) {
   if (value === null || value === undefined || value === '') return '';
-  const number = normalizeQuantity(value);
-  if (Number.isInteger(number)) return String(number);
-  return String(number).replace(',', '.');
+  return String(Math.round(normalizeQuantity(value)));
 }
 
 export function formatQuantityLabel(value, singular = 'unidade', plural = 'unidades') {

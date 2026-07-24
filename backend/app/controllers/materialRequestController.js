@@ -19,6 +19,7 @@ const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { userWarehouseIds, assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { approveMaterialRequest, validateApprover } = require('../services/materialRequestApprovalService');
 const { Op } = require('sequelize');
 
 function nextRequestNumber(prefix = 'REQ') {
@@ -310,48 +311,27 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.approve = asyncHandler(async (req, res) => {
-  const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
-  if (!request) return fail(res, 404, 'Solicitação não encontrada.');
-  if (request.status !== 'pendente_aprovacao') return fail(res, 400, 'A solicitação não está pendente de aprovação.');
-
-  if (request.requestType === 'recarga_estoque' && req.user.role !== 'admin') {
-    return fail(res, 403, 'Recarga de estoque precisa ser aprovada por administrador.');
+  try {
+    const request = await approveMaterialRequest({
+      requestId: req.params.id,
+      req,
+      notes: req.body?.approvalNotes || req.body?.notes,
+    });
+    return ok(res, request, 'Solicitação aprovada.');
+  } catch (error) {
+    return fail(res, error.statusCode || 500, error.message || 'Não foi possível aprovar a solicitação.');
   }
-
-  const amount = Number(request.totalValue || 0);
-  const technicianLimit = Number(request.metadata?.technicianApprovalLimit || request.Technician?.transferApprovalLimit || 500);
-  const requiresAdminApproval = request.requestType === 'recarga_estoque' || request.metadata?.requiresApproval === true || amount > technicianLimit;
-  if (requiresAdminApproval && req.user.role !== 'admin') {
-    return fail(res, 403, `Esta solicitação soma ${amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} e excede o limite individual do técnico de ${technicianLimit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. A aprovação deve ser realizada por administrador.`);
-  }
-
-  const before = request.toJSON();
-  await sequelize.transaction(async (transaction) => {
-    request.status = 'aprovado';
-    request.approvedAt = new Date();
-    request.approvedById = req.user.id;
-    request.approvalNotes = req.body.approvalNotes || req.body.notes || null;
-    await request.save({ transaction });
-    await ApprovalRequest.update({ status: 'aprovado', decidedAt: new Date(), decidedById: req.user.id, decisionNotes: request.approvalNotes }, { where: { entityType: 'material_request', entityId: String(request.id) }, transaction });
-    await Notification.create({
-      role: request.requestType === 'recarga_estoque' ? 'estoquista' : 'admin',
-      type: 'estoque',
-      severity: 'success',
-      title: `Solicitação aprovada ${request.requestNumber}`,
-      message: request.requestType === 'recarga_estoque' ? 'A recarga foi aprovada e está pronta para recebimento no estoque.' : 'A solicitação foi aprovada e está pronta para separação/entrega ao técnico.',
-      route: '/solicitacoes-material',
-      metadata: { requestId: request.id, warehouseId: request.warehouseId },
-    }, { transaction });
-    await writeAudit({ req, action: 'approve', entity: 'MaterialRequest', entityId: request.id, message: `Solicitação ${request.requestNumber} aprovada.`, beforeData: before, afterData: request.toJSON(), transaction });
-  });
-
-  return ok(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), 'Solicitação aprovada.');
 });
 
 exports.reject = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
   if (!['pendente_aprovacao', 'aprovado'].includes(request.status)) return fail(res, 400, 'Esta solicitação não pode ser reprovada.');
+  try {
+    validateApprover({ user: req.user, request });
+  } catch (error) {
+    return fail(res, error.statusCode || 403, error.message);
+  }
 
   const before = request.toJSON();
   await sequelize.transaction(async (transaction) => {

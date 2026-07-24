@@ -15,6 +15,7 @@ function publicUser(user) {
     name: user.name,
     email: user.email,
     role: user.role,
+    approvalLimit: user.approvalLimit,
     modulePermissions: normalizeModulePermissions(user.modulePermissions, user.role),
     technicianId: user.technicianId,
     technician: technician ? {

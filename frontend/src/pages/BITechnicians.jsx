@@ -39,10 +39,10 @@ export default function BITechnicians() {
     const rows = data.technicians || [];
     const top = rows.slice(0, 10);
     const custodyBuckets = bucket(rows, (r) => Number(r.oldAssets || 0) > 0 ? 'Com item +60 dias' : 'Sem item crítico');
-    const valueBuckets = bucket(rows, (r) => Number(r.assetValue || 0) >= 1000 ? 'Acima de R$ 1 mil' : Number(r.assetValue || 0) > 0 ? 'Até R$ 1 mil' : 'Sem patrimônio');
+    const valueBuckets = bucket(rows, (r) => Number(r.custodyValue || r.assetValue || 0) >= 1000 ? 'Acima de R$ 1 mil' : Number(r.custodyValue || r.assetValue || 0) > 0 ? 'Até R$ 1 mil' : 'Sem patrimônio');
     return {
       score: { labels: top.map((r) => r.name), datasets: [{ label: 'Score', data: top.map((r) => Number(r.score || 0)) }] },
-      value: { labels: top.map((r) => r.name), datasets: [{ label: 'Valor em carga', data: top.map((r) => Number(r.assetValue || 0)) }] },
+      value: { labels: top.map((r) => r.name), datasets: [{ label: 'Valor em carga', data: top.map((r) => Number(r.custodyValue || r.assetValue || 0)) }] },
       os: { labels: top.map((r) => r.name), datasets: [{ label: 'OS no mês', data: top.map((r) => Number(r.osMonth || 0)) }, { label: 'OS total', data: top.map((r) => Number(r.osTotal || 0)) }] },
       oldAssets: { labels: top.map((r) => r.name), datasets: [{ label: 'Equip. +60 dias', data: top.map((r) => Number(r.oldAssets || 0)) }] },
       typeDistribution: objChart(data.typeDistribution),
@@ -59,7 +59,7 @@ export default function BITechnicians() {
     <div className="page-grid bi-page">
       <div className="toolbar"><div><h2>BI por Técnico</h2><p>Produtividade, patrimônio, carga individual, equipamentos parados e ranking operacional.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
-      <div className="kpi-grid"><KpiCard label="Técnicos analisados" value={rows.length} /><KpiCard label="Média patrimonial" value={brl(data.averageValue)} /><KpiCard label="OS no mês" value={rows.reduce((s, r) => s + r.osMonth, 0)} /><KpiCard label="Equip. +60 dias" value={rows.reduce((s, r) => s + r.oldAssets, 0)} tone="danger" /></div>
+      <div className="kpi-grid"><KpiCard label="Técnicos analisados" value={rows.length} /><KpiCard label="Média patrimonial" value={brl(data.averageValue)} /><KpiCard label="OS no mês" value={rows.reduce((s, r) => s + r.osMonth, 0)} /><KpiCard label="Ferramentas em custódia" value={rows.reduce((sum, row) => sum + Number(row.toolCount || 0), 0)} /><KpiCard label="Equip. +60 dias" value={rows.reduce((s, r) => s + r.oldAssets, 0)} tone="danger" /></div>
       <section className="bi-charts-grid">
         <ChartPanel title="Score operacional" subtitle="Ranking ponderado por OS, patrimônio e riscos." data={charts.score} />
         <ChartPanel title="Valor em carga" subtitle="Patrimônio em responsabilidade individual." data={charts.value} />
@@ -70,7 +70,7 @@ export default function BITechnicians() {
         <ChartPanel title="Risco de custódia" subtitle="Técnicos com ou sem equipamento crítico." type="doughnut" data={charts.custodyBuckets} />
         <ChartPanel title="Faixa patrimonial" subtitle="Distribuição por valor em carga." type="pie" data={charts.valueBuckets} />
       </section>
-      <section className="panel"><h3>Ranking vivo</h3>{rows.map((r, index) => <div className="rank-row" key={r.id}><span className="rank-index">#{index + 1}</span><div><b>{r.name}</b><small>{r.company} • {r.assetCount} equipamentos • {r.osMonth} OS no mês • {r.oldAssets} antigos</small><SimpleBar label="Score" value={r.score} max={maxScore} /></div><strong>{brl(r.assetValue)}</strong></div>)}</section>
+      <section className="panel"><h3>Ranking vivo</h3>{rows.map((r, index) => <div className="rank-row" key={r.id}><span className="rank-index">#{index + 1}</span><div><b>{r.name}</b><small>{r.company} • {r.assetCount} materiais/equipamentos • {r.toolCount || 0} ferramenta(s) • {r.osMonth} OS no mês • {r.oldAssets} antigos</small><SimpleBar label="Score" value={r.score} max={maxScore} /></div><strong>{brl(r.custodyValue || r.assetValue)}</strong></div>)}</section>
     </div>
   );
 }

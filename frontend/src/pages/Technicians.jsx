@@ -67,6 +67,7 @@ export default function Technicians() {
   const [toolForm, setToolForm] = useState(emptyTool);
   const [toolSaving, setToolSaving] = useState(false);
   const [toolError, setToolError] = useState('');
+  const [toolsLoading, setToolsLoading] = useState(false);
   const [removeModal, setRemoveModal] = useState({ open: false, tool: null });
   const [removeForm, setRemoveForm] = useState(emptyRemoval);
   const [removeSaving, setRemoveSaving] = useState(false);
@@ -155,15 +156,29 @@ export default function Technicians() {
   }
 
   async function loadTools(technicianId) {
-    if (!canViewTools) return;
-    const res = await api.get(`/technicians/${technicianId}/tools`);
-    setTools(res.data.data?.tools || []);
+    if (!canViewTools) {
+      setTools([]);
+      return;
+    }
+    setToolsLoading(true);
+    setToolError('');
+    try {
+      const res = await api.get(`/technicians/${technicianId}/tools`);
+      setTools(res.data.data?.tools || []);
+    } catch (err) {
+      setToolError(err.response?.data?.message || 'Não foi possível carregar a ficha de ferramentas do técnico.');
+    } finally {
+      setToolsLoading(false);
+    }
   }
 
   async function openDetails(technician) {
+    setToolError('');
+    setTools([]);
     const stock = (await api.get(`/technicians/${technician.id}/stock`)).data.data;
     setDetails({ open: true, technician, stock });
-    loadTools(technician.id);
+    if (Array.isArray(stock?.tools)) setTools(stock.tools);
+    await loadTools(technician.id);
   }
 
   async function refreshDetails() {
@@ -233,7 +248,8 @@ export default function Technicians() {
     }
   }
 
-  const totalValue = useMemo(() => technicians.reduce((s, t) => s + Number(t.totalCustodyValue ?? t.assetValue ?? 0), 0), [technicians]);
+  const totalValue = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.totalCustodyValue ?? technician.assetValue ?? 0), 0), [technicians]);
+  const totalTools = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolCount || 0), 0), [technicians]);
   const cityOptions = useMemo(() => Array.from(new Set(warehouses.map((w) => String(w.city || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
   function selectedServiceCities() { return textToCities(form.serviceCitiesText); }
   function toggleServiceCity(city) {
@@ -263,6 +279,7 @@ export default function Technicians() {
         <KpiCard label="Técnicos" value={technicians.length} />
         <KpiCard label="Ativos" value={technicians.filter((t) => t.status === 'ativo').length} />
         <KpiCard label="Com acesso" value={technicians.filter((t) => t.portalUser).length} />
+        <KpiCard label="Ferramentas em custódia" value={totalTools} />
         <KpiCard label="Patrimônio em campo" value={brl(totalValue)} />
       </div>
 
@@ -270,7 +287,7 @@ export default function Technicians() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Técnico</th><th>E-mail</th><th>Empresa</th><th>Cidades</th><th>Estoque padrão</th><th>Acesso</th><th>Status</th><th className="action-cell">Opções</th></tr>
+              <tr><th>Técnico</th><th>E-mail</th><th>Empresa</th><th>Cidades</th><th>Estoque padrão</th><th>Ferramentas</th><th>Acesso</th><th>Status</th><th className="action-cell">Opções</th></tr>
             </thead>
             <tbody>
               {technicians.map((t) => (
@@ -280,6 +297,7 @@ export default function Technicians() {
                   <td>{t.ContractorCompany?.name || '-'}</td>
                   <td>{citiesToText(t.serviceCities) || '-'}</td>
                   <td>{t.defaultWarehouse?.name || '-'}</td>
+                  <td><strong>{formatQuantity(t.toolCount || 0)}</strong><br /><small>{brl(t.toolValue || 0)}</small></td>
                   <td>{t.portalUser ? <span className="badge ativo">Liberado</span> : <span className="badge pendente">Sem login</span>}</td>
                   <td>{t.status}</td>
                   <td>
@@ -341,7 +359,7 @@ export default function Technicians() {
       </Modal>
 
       <DetailsModal open={details.open} title={`Central do técnico: ${details.technician?.name || ''}`} onClose={() => setDetails({ open: false, technician: null, stock: null })} footer={<><button className="ghost" onClick={() => setDetails({ open: false, technician: null, stock: null })}>Fechar</button><button className="ghost" onClick={refreshDetails}>Atualizar</button>{canManageTransferLimit && details.technician && <button className="ghost" onClick={() => { openLimitEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar limite</button>}{canEditTechnician && details.technician && <button onClick={() => { openEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar técnico</button>}</>}>
-        {details.technician && <div className="technician-command-center"><DetailGrid fields={[["Nome", details.technician.name], ["Documento", details.technician.document], ["Telefone", details.technician.phone], ["E-mail", details.technician.email], ["Empresa", details.technician.ContractorCompany?.name], ["Tipo", details.technician.type], ["Status", details.technician.status], ["Cidades atendidas", citiesToText(details.technician.serviceCities)], ["Estoque padrão", details.technician.defaultWarehouse?.name], ["Limite sem aprovação", brl(details.technician.transferApprovalLimit ?? 500)], ["Acesso de login", details.technician.portalUser ? 'Liberado' : 'Sem login'], ["Equipamentos", details.stock?.summary?.assetsCount ?? details.technician.assetCount], ["Valor equipamentos", brl(details.stock?.summary?.assetsValue ?? details.technician.assetValue)], ["Valor consumíveis", brl(details.stock?.summary?.consumableValue)], ["Valor total em nome", brl(details.stock?.summary?.totalValue ?? details.technician.totalCustodyValue)], ["OS abertas", details.stock?.summary?.openOrders], ["Custódia +60 dias", details.stock?.summary?.oldCustody], ["Criado em", dt(details.technician.createdAt)]]} />
+        {details.technician && <div className="technician-command-center"><DetailGrid fields={[["Nome", details.technician.name], ["Documento", details.technician.document], ["Telefone", details.technician.phone], ["E-mail", details.technician.email], ["Empresa", details.technician.ContractorCompany?.name], ["Tipo", details.technician.type], ["Status", details.technician.status], ["Cidades atendidas", citiesToText(details.technician.serviceCities)], ["Estoque padrão", details.technician.defaultWarehouse?.name], ["Limite sem aprovação", brl(details.technician.transferApprovalLimit ?? 500)], ["Acesso de login", details.technician.portalUser ? 'Liberado' : 'Sem login'], ["Equipamentos", details.stock?.summary?.assetsCount ?? details.technician.assetCount], ["Valor equipamentos", brl(details.stock?.summary?.assetsValue ?? details.technician.assetValue)], ["Valor consumíveis", brl(details.stock?.summary?.consumableValue)], ["Ferramentas em custódia", details.stock?.summary?.toolsCount ?? details.technician.toolCount ?? 0], ["Valor das ferramentas", brl(details.stock?.summary?.toolsValue ?? details.technician.toolValue)], ["Valor total em nome", brl(details.stock?.summary?.totalValue ?? details.technician.totalCustodyValue)], ["OS abertas", details.stock?.summary?.openOrders], ["Custódia +60 dias", details.stock?.summary?.oldCustody], ["Criado em", dt(details.technician.createdAt)]]} />
           <section className="panel-soft"><h4>Resumo por material</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Seriais</th></tr></thead><tbody>{(details.stock?.groupedMaterials || []).map((row) => <tr key={row.material}><td>{row.material}</td><td>{formatQuantity(row.quantity)}</td><td>{brl(row.value)}</td><td>{(row.serials || []).slice(0, 6).join(', ')}{(row.serials || []).length > 6 ? '...' : ''}</td></tr>)}</tbody></table></div></section>
           <DetailList title="Equipamentos serializados na caixa" items={details.stock?.assets || []} render={(asset) => <><b>{asset.serialNumber}</b><span>{asset.Material?.name} • {asset.status} • {brl(asset.acquisitionCost)} • {asset.custodyDays ?? 0} dia(s) em custódia</span><small>{asset.brand || '-'} {asset.model || ''} • {asset.mac || 'sem MAC'}</small></>} />
           <DetailList title="Materiais consumíveis na caixa" items={details.stock?.balances || []} render={(balance) => <><b>{balance.Material?.name}</b><span>Quantidade: {formatQuantity(balance.quantity, balance.Material?.unit)} • valor previsto {brl(Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0))}</span></>} />
@@ -354,12 +372,14 @@ export default function Technicians() {
                   {canEditTools && <button onClick={openAddTool}>Adicionar ferramenta</button>}
                 </div>
               </div>
-              <p><small>Ferramentas registradas aqui ficam apenas na ficha do técnico, para controle de custódia em caso de perda ou desligamento. Não aparecem na caixa técnica nem entram na movimentação de material/consumível.</small></p>
-              {tools.length === 0 && <div className="empty-state">Nenhuma ferramenta registrada na ficha deste técnico.</div>}
+              <p><small>Ferramentas registradas aqui ficam na ficha patrimonial do técnico, com valor, data de entrega, tempo de custódia e histórico de baixa. Elas não alteram o saldo de materiais da caixa técnica.</small></p>
+              {toolError && <div className="alert danger">{toolError}</div>}
+              {toolsLoading && <div className="empty-state">Carregando ferramentas em custódia...</div>}
+              {!toolsLoading && tools.length === 0 && <div className="empty-state">Nenhuma ferramenta registrada na ficha deste técnico.</div>}
               {tools.map((tool) => (
                 <div className="detail-row" key={tool.id}>
                   <b>{tool.name}</b>
-                  <span>Série/patrimônio: {tool.serialNumber} • {tool.brand || 'sem marca/modelo'} • {brl(tool.referenceValue)} • entregue em {dt(tool.deliveredAt)}</span>
+                  <span>Série/patrimônio: {tool.serialNumber} • {tool.brand || 'sem marca/modelo'} • {brl(tool.referenceValue)} • entregue em {dt(tool.deliveredAt)} • {tool.custodyDays ?? 0} dia(s) em custódia</span>
                   <small>
                     Status: {TOOL_STATUS_LABELS[tool.status] || tool.status}
                     {tool.status !== 'com_tecnico' && ` • baixada em ${dt(tool.removedAt)} • motivo: ${tool.removalReason || '-'}`}
