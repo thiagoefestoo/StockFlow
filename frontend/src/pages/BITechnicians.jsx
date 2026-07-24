@@ -4,6 +4,7 @@ import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import ChartPanel from '../components/ChartPanel';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
+import WarehouseValueOverview from '../components/WarehouseValueOverview';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function objChart(obj) { return { labels: Object.keys(obj || {}), datasets: [{ label: 'Total', data: Object.values(obj || {}) }] }; }
@@ -60,6 +61,7 @@ export default function BITechnicians() {
       <div className="toolbar"><div><h2>BI por Técnico</h2><p>Produtividade, patrimônio, carga individual, equipamentos parados e ranking operacional.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
       <div className="kpi-grid"><KpiCard label="Técnicos analisados" value={rows.length} /><KpiCard label="Média patrimonial" value={brl(data.averageValue)} /><KpiCard label="OS no mês" value={rows.reduce((s, r) => s + r.osMonth, 0)} /><KpiCard label="Ferramentas em custódia" value={rows.reduce((sum, row) => sum + Number(row.toolCount || 0), 0)} /><KpiCard label="Equip. +60 dias" value={rows.reduce((s, r) => s + r.oldAssets, 0)} tone="danger" /></div>
+      <WarehouseValueOverview />
       <section className="bi-charts-grid">
         <ChartPanel title="Score operacional" subtitle="Ranking ponderado por OS, patrimônio e riscos." data={charts.score} />
         <ChartPanel title="Valor em carga" subtitle="Patrimônio em responsabilidade individual." data={charts.value} />

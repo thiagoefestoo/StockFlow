@@ -2395,3 +2395,173 @@ input[readonly], textarea[readonly] {
   .stock-calculation-grid { grid-template-columns: 1fr; }
   .technician-box-balance { grid-template-columns: 1fr auto; }
 }
+
+/* BI — posição financeira por estoque e leitura numérica reforçada */
+.bi-page .kpi-card {
+  min-height: 132px;
+  padding: 20px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%);
+}
+.bi-page .kpi-card strong {
+  font-size: clamp(1.7rem, 2.2vw, 2.35rem);
+  letter-spacing: -.035em;
+  font-variant-numeric: tabular-nums;
+}
+.bi-page .kpi-card span {
+  text-transform: uppercase;
+  letter-spacing: .045em;
+  font-size: .76rem;
+}
+.warehouse-bi-overview {
+  display: grid;
+  gap: 20px;
+  overflow: hidden;
+  position: relative;
+}
+.warehouse-bi-overview::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, #2563eb, #0ea5e9, #10b981);
+}
+.warehouse-bi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.warehouse-bi-header h3 {
+  margin: 5px 0 4px;
+  font-size: 1.35rem;
+}
+.warehouse-bi-header p {
+  margin: 0;
+  color: var(--muted);
+}
+.warehouse-bi-total {
+  min-width: 280px;
+  padding: 18px 20px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #eff6ff, #ecfeff);
+  display: grid;
+  gap: 4px;
+}
+.warehouse-bi-total small,
+.warehouse-bi-total span {
+  color: var(--muted);
+  font-weight: 700;
+}
+.warehouse-bi-total strong {
+  font-size: clamp(1.75rem, 2.5vw, 2.5rem);
+  color: #0f3f8f;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+}
+.warehouse-bi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.warehouse-bi-card {
+  border: 1px solid #c7dff7;
+  border-radius: 20px;
+  padding: 18px;
+  background: linear-gradient(145deg, #ffffff 0%, #f5faff 100%);
+  box-shadow: 0 14px 30px rgba(15, 63, 143, .08);
+  display: grid;
+  gap: 14px;
+}
+.warehouse-bi-card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.warehouse-bi-card-title > div {
+  display: grid;
+  gap: 2px;
+}
+.warehouse-bi-card-title small,
+.warehouse-bi-card-title span {
+  color: var(--muted);
+}
+.warehouse-bi-card-title strong {
+  font-size: 1rem;
+}
+.warehouse-bi-card-title b {
+  color: #0f766e;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #d1fae5;
+  font-size: .78rem;
+}
+.warehouse-bi-value {
+  font-size: clamp(1.65rem, 2.4vw, 2.35rem);
+  font-weight: 900;
+  color: #0f3f8f;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+}
+.warehouse-bi-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.warehouse-bi-metrics > div {
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  display: grid;
+  gap: 3px;
+}
+.warehouse-bi-metrics small {
+  color: var(--muted);
+}
+.warehouse-bi-metrics strong {
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.warehouse-bi-progress {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.warehouse-bi-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #10b981);
+}
+.warehouse-bi-equation {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px dashed #93c5fd;
+  background: #f8fbff;
+  display: grid;
+  gap: 4px;
+}
+.warehouse-bi-equation span {
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.warehouse-bi-equation strong {
+  color: #1e3a8a;
+  font-variant-numeric: tabular-nums;
+}
+.warehouse-bi-loading {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+@media (max-width: 800px) {
+  .warehouse-bi-header { align-items: stretch; flex-direction: column; }
+  .warehouse-bi-total { min-width: 0; }
+  .warehouse-bi-metrics { grid-template-columns: 1fr; }
+}

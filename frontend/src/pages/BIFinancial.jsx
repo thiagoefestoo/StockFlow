@@ -4,6 +4,7 @@ import KpiCard from '../components/KpiCard';
 import ChartPanel from '../components/ChartPanel';
 import SimpleBar from '../components/SimpleBar';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
+import WarehouseValueOverview from '../components/WarehouseValueOverview';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
 function brl(value) {
@@ -204,6 +205,8 @@ export default function BIFinancial() {
         <KpiCard label="Reposição sugerida" value={brl(cards.replenishmentNeed)} hint="Itens abaixo do mínimo." tone="warning" />
         <KpiCard label="Cobertura rastreada" value={pct(cards.financialCoverage)} hint="Valor atual x entradas." tone="success" />
       </section>
+
+      <WarehouseValueOverview />
 
       <section className="finance-insights">
         {(data.insights || []).map((insight, index) => (

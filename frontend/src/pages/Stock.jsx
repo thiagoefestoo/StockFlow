@@ -114,6 +114,18 @@ export default function Stock() {
   const materialAuthorizedQuantity = (material) => (material.warehouseStocks || [])
     .reduce((sum, stock) => sum + Number(stock.quantity || 0), 0);
 
+  const warehouseRowsForMaterial = (material) => warehouses.map((warehouse) => {
+    const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
+    return {
+      warehouseId: warehouse.id,
+      warehouseName: warehouse.name,
+      warehouseCode: warehouse.code,
+      city: warehouse.city,
+      region: warehouse.region,
+      quantity: Number(stock?.quantity || 0),
+    };
+  });
+
   const warehouseTotals = useMemo(() => warehouses.map((warehouse) => {
     const quantity = materials.reduce((sum, material) => {
       const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
@@ -297,13 +309,13 @@ export default function Stock() {
                   <td><strong>{formatQuantity(materialAuthorizedQuantity(m), m.unit)}</strong></td>
                   <td>
                     <div className="warehouse-stock-list">
-                      {(m.warehouseStocks || []).map((stock) => (
+                      {warehouseRowsForMaterial(m).map((stock) => (
                         <div className="warehouse-stock-row" key={stock.warehouseId}>
                           <span>{stock.warehouseName}</span>
                           <strong>{formatQuantity(stock.quantity, m.unit)}</strong>
                         </div>
                       ))}
-                      {(!m.warehouseStocks || m.warehouseStocks.length === 0) && <small>Nenhum estoque autorizado.</small>}
+                      {warehouses.length === 0 && <small>Nenhum estoque autorizado.</small>}
                     </div>
                   </td>
                   <td>{formatQuantity(m.minStock)}</td>
@@ -421,14 +433,14 @@ export default function Stock() {
           <div className="warehouse-stock-detail">
             <h4>Quantidade nos estoques autorizados</h4>
             <div className="warehouse-stock-detail-grid">
-              {(details.warehouseStocks || []).map((stock) => (
+              {warehouseRowsForMaterial(details).map((stock) => (
                 <div className="warehouse-stock-detail-card" key={stock.warehouseId}>
                   <small>{stock.city || stock.region || stock.warehouseCode || 'Estoque regional'}</small>
                   <strong>{stock.warehouseName}</strong>
                   <span>{formatQuantity(stock.quantity, details.unit)}</span>
                 </div>
               ))}
-              {(!details.warehouseStocks || details.warehouseStocks.length === 0) && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
+              {warehouses.length === 0 && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
             </div>
           </div>
           {details.notes && <div className="viz-callout">📝 {details.notes}</div>}

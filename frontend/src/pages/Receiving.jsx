@@ -87,15 +87,14 @@ export default function Receiving() {
   }), [batches]);
 
   function addItem() {
-    const first = materials[0];
     setForm({
       ...form,
       items: [
         ...form.items,
         {
-          materialId: first?.id || '',
+          materialId: '',
           quantity: 1,
-          unitCost: first?.unitCost && Number(first.unitCost) > 0 ? first.unitCost : '',
+          unitCost: '',
           serialsText: '',
           manufacturerLot: '',
           purchaseOrder: '',
@@ -220,7 +219,7 @@ export default function Receiving() {
           return <div className="item-card" key={i}>
             <div className="item-head"><strong>Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => { const mat = materials.find((m) => Number(m.id) === Number(e.target.value)); updateItem(i, { materialId: e.target.value, unitCost: mat?.unitCost && Number(mat.unitCost) > 0 ? mat.unitCost : '', serialsText: '' }); }}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • {isSerialRequired(m) ? 'com serial' : 'sem serial'}</option>)}</select></label>
+              <label>Material<select value={item.materialId} onChange={(e) => { const mat = materials.find((m) => Number(m.id) === Number(e.target.value)); updateItem(i, { materialId: e.target.value, unitCost: mat?.unitCost && Number(mat.unitCost) > 0 ? mat.unitCost : '', serialsText: '' }); }}><option value="">Selecionar item</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • {isSerialRequired(m) ? 'com serial' : 'sem serial'}</option>)}</select></label>
               <label>Quantidade<input type="number" min="1" step="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label>
               <label>Valor unitário obrigatório<input type="number" min="0.01" step="0.01" value={item.unitCost} onChange={(e) => updateItem(i, { unitCost: e.target.value })} placeholder="Informe o valor unitário" /></label>
               <label>Pedido/OC<input value={item.purchaseOrder || ''} onChange={(e) => updateItem(i, { purchaseOrder: e.target.value })} /></label>

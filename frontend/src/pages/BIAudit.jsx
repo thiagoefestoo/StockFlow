@@ -4,6 +4,7 @@ import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import ChartPanel from '../components/ChartPanel';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
+import WarehouseValueOverview from '../components/WarehouseValueOverview';
 
 function objChartFromRows(rows = [], labelKey, valueKey = 'total') { return { labels: rows.map((r) => r[labelKey]), datasets: [{ label: 'Total', data: rows.map((r) => Number(r[valueKey] || 0)) }] }; }
 function countBy(rows = [], key) { return rows.reduce((acc, row) => { const value = row[key] || 'sem_informacao'; acc[value] = (acc[value] || 0) + 1; return acc; }, {}); }
@@ -57,6 +58,7 @@ export default function BIAudit() {
       <div className="toolbar"><div><h2>BI Auditoria e Patrimônio</h2><p>Controle de risco: movimentações, guias, auditoria, assinaturas e equipamentos antigos na carga.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
       <div className="kpi-grid"><KpiCard label="Tipos de movimento" value={data.movementsByType.length} /><KpiCard label="Eventos de auditoria" value={data.auditByAction.reduce((s, a) => s + Number(a.total), 0)} /><KpiCard label="Guias recentes" value={data.recentTransfers.length} /><KpiCard label="Custódias críticas" value={data.oldestCustody.filter((a) => a.custodyDays >= 60).length} tone="danger" /></div>
+      <WarehouseValueOverview />
       <section className="bi-charts-grid">
         <ChartPanel title="Movimentações por tipo" subtitle="Entradas, transferências, baixas e ajustes." data={charts.movementsByType} />
         <ChartPanel title="Auditoria por ação" subtitle="Eventos auditáveis gravados pelo sistema." data={charts.auditByAction} />

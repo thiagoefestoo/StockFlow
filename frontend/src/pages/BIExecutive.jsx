@@ -4,6 +4,7 @@ import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import ChartPanel from '../components/ChartPanel';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
+import WarehouseValueOverview from '../components/WarehouseValueOverview';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function countBy(rows = [], key) { return rows.reduce((acc, row) => { const value = row[key] || 'sem_informacao'; acc[value] = (acc[value] || 0) + 1; return acc; }, {}); }
@@ -68,6 +69,7 @@ export default function BIExecutive() {
       <div className="toolbar"><div><h2>BI Executivo</h2><p>Visão consolidada do estoque, patrimônio, OS, transferências, assinaturas e carga em campo.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
       <div className="kpi-grid"><KpiCard label="Patrimônio total" value={brl(c.patrimonyTotal)} /><KpiCard label="Valor com técnicos" value={brl(c.patrimonyInTechnicians)} tone="warning" /><KpiCard label="Equip. em estoque" value={c.assetsInStock} /><KpiCard label="Equip. instalados" value={c.installedAssets} /><KpiCard label="Equip. perdidos" value={c.lostAssets || 0} tone="danger" /><KpiCard label="Valor perdido" value={brl(c.lostValue)} tone="danger" /><KpiCard label="Guias pendentes" value={c.pendingSignatures} tone="danger" /><KpiCard label="Custódia +60 dias" value={c.custody60} tone="danger" /></div>
+      <WarehouseValueOverview />
       <section className="bi-charts-grid">
         <ChartPanel title="Estoque x carga x instalado" subtitle="Comparativo dos principais materiais por posição operacional." data={charts.stockVsTechnician} />
         <ChartPanel title="Ranking patrimonial por técnico" subtitle="Valor em responsabilidade dos técnicos." data={charts.topTechnicians} />
