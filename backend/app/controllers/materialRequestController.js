@@ -21,6 +21,7 @@ const { writeAudit } = require('../services/auditService');
 const { userWarehouseIds, assertWarehouseAccess } = require('../utils/warehouseAccess');
 const { approveMaterialRequest, validateApprover } = require('../services/materialRequestApprovalService');
 const { Op } = require('sequelize');
+const { hasModuleAccess } = require('../config/modulePermissions');
 
 function nextRequestNumber(prefix = 'REQ') {
   const now = new Date();
@@ -422,6 +423,11 @@ async function deliverStockRecharge({ req, request, transaction, deliveryOverrid
 exports.deliver = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
+  const operationalRole = ['admin', 'supervisor', 'estoquista'].includes(req.user.role);
+  if (!operationalRole) return fail(res, 403, 'Apenas usuários operacionais autorizados podem entregar ou receber cargas.');
+  if (request.requestType !== 'recarga_estoque' && !hasModuleAccess(req.user, 'materialRequestDelivery')) {
+    return fail(res, 403, 'Você não tem permissão para entregar cargas aprovadas. Solicite a liberação ao administrador.');
+  }
   if (request.status !== 'aprovado') return fail(res, 400, 'A solicitação precisa estar aprovada para ser entregue/recebida.');
 
   const deliveryOverrides = Array.isArray(req.body.items) ? req.body.items : [];

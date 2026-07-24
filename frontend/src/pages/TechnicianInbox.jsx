@@ -33,10 +33,16 @@ export default function TechnicianInbox() {
   const [requestForm, setRequestForm] = useState(reqEmpty);
   const [message, setMessage] = useState('');
   const [details, setDetails] = useState(null);
+  const [requestConfirmOpen, setRequestConfirmOpen] = useState(false);
+  const [submittingRequest, setSubmittingRequest] = useState(false);
 
   async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []); }
   async function loadStock(id = selectedTech) {
-    if (!id) return;
+    if (!id) {
+      setStock(null);
+      setRequests([]);
+      return;
+    }
     const [stockRes, requestsRes] = await Promise.all([
       api.get(`/technicians/${id}/stock`),
       api.get(`/material-requests?technicianId=${id}`),
@@ -195,18 +201,45 @@ export default function TechnicianInbox() {
     }
   }
 
+  function changeSelectedTechnician(value) {
+    setSelectedTech(value);
+    setStock(null);
+    setRequests([]);
+    loadStock(value);
+  }
+
+  function requestConfirmation() {
+    try {
+      if (!selectedTech) throw new Error('Selecione o técnico antes de solicitar material.');
+      if (!String(requestForm.requesterNotes || '').trim()) throw new Error('Informe a justificativa da solicitação.');
+      const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
+      if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
+      setRequestModal(false);
+      setRequestConfirmOpen(true);
+    } catch (error) {
+      setMessage(error.message || 'Revise a solicitação.');
+    }
+  }
+
   async function sendRequest() {
+    if (submittingRequest) return;
+    setSubmittingRequest(true);
     try {
       const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
       if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
       const response = await api.post('/material-requests', { ...requestForm, items: cleanItems, technicianId: selectedTech });
       setMessage(response.data?.message || 'Solicitação registrada.');
+      setRequestConfirmOpen(false);
       setRequestModal(false);
       setRequestForm(reqEmpty);
       setActiveMobileSection('solicitacoes');
       loadStock(selectedTech);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao solicitar material.');
+      setRequestConfirmOpen(false);
+      setRequestModal(true);
+    } finally {
+      setSubmittingRequest(false);
     }
   }
 
@@ -225,7 +258,7 @@ export default function TechnicianInbox() {
       </section>
 
       {message && <div className="alert danger">{message}</div>}
-      {isSupervisor && <section className="panel"><label>Operar como técnico<select value={selectedTech} onChange={(e) => { setSelectedTech(e.target.value); loadStock(e.target.value); }}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></section>}
+      {isSupervisor && <section className={`panel technician-operator-panel ${selectedTech ? 'technician-selected' : 'technician-required'}`}><label>Operar como técnico<select value={selectedTech} onChange={(e) => changeSelectedTechnician(e.target.value)}><option value="">Selecione o técnico</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><small>{selectedTech ? 'Técnico selecionado. Você já pode operar a caixa.' : 'Selecione um técnico para liberar as operações desta página.'}</small></label></section>}
 
       <nav className="technician-mobile-tabs" aria-label="Atalhos da caixa do técnico">
         {['resumo', 'baixa', 'caixa', 'solicitacoes'].map((key) => (
@@ -324,13 +357,29 @@ export default function TechnicianInbox() {
         {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", formatQuantity(details.item.totalQuantity)], ["Valor", brl(details.item.totalValue)], ["Atualização", dt(details.item.updatedAt)], ["Observação", details.item.requesterNotes]]} />}
       </DetailsModal>
 
-      <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={sendRequest}>Enviar solicitação</button></>}>
+      <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={requestConfirmation}>Enviar solicitação</button></>}>
         <div className="form-stack">
           <label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
           <label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label>
           <div className="subtoolbar"><h4>Itens</h4><button className="ghost" onClick={addRequestItem}>Adicionar</button></div>
           {requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeRequestItem(i)}>Remover</button></div><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecione o material</option>{materialsCatalog.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" min="1" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}
           {!requestForm.items.length && <div className="empty-state small">Adicione ao menos um item para solicitar material.</div>}
+        </div>
+      </Modal>
+
+      <Modal
+        open={requestConfirmOpen}
+        title="Confirmar solicitação"
+        onClose={() => { if (!submittingRequest) { setRequestConfirmOpen(false); setRequestModal(true); } }}
+        footer={<>
+          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setRequestConfirmOpen(false); setRequestModal(true); }}>Não</button>
+          <button type="button" disabled={submittingRequest} onClick={sendRequest}>{submittingRequest ? 'Enviando...' : 'Sim, solicitar'}</button>
+        </>}
+      >
+        <p><strong>Deseja realmente solicitar esse pedido?</strong></p>
+        <div className="detail-grid compact">
+          <div className="detail-card"><span>Técnico</span><strong>{technicians.find((t) => String(t.id) === String(selectedTech))?.name || user?.name || '-'}</strong></div>
+          <div className="detail-card"><span>Itens</span><strong>{formatQuantity(requestForm.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0))}</strong></div>
         </div>
       </Modal>
     </div>

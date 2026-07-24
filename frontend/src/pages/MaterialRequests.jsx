@@ -40,6 +40,8 @@ export default function MaterialRequests() {
   const [details, setDetails] = useState(null);
   const [message, setMessage] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [confirmRequestOpen, setConfirmRequestOpen] = useState(false);
+  const [submittingRequest, setSubmittingRequest] = useState(false);
 
   async function load() {
     try {
@@ -130,14 +132,26 @@ export default function MaterialRequests() {
       setMessage('Selecione uma justificativa para a solicitação.');
       return;
     }
+    setModal(false);
+    setConfirmRequestOpen(true);
+  }
+
+  async function confirmRequestSubmission() {
+    if (submittingRequest) return;
+    setSubmittingRequest(true);
     try {
       const response = await api.post('/material-requests', requestPayload());
       setMessage(response.data?.message || (form.requestType === 'recarga_estoque' ? 'Solicitação de recarga enviada para aprovação.' : 'Solicitação registrada.'));
+      setConfirmRequestOpen(false);
       setModal(false);
       setForm(baseForm);
-      load();
+      await load();
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao salvar solicitação.');
+      setConfirmRequestOpen(false);
+      setModal(true);
+    } finally {
+      setSubmittingRequest(false);
     }
   }
 
@@ -189,7 +203,8 @@ export default function MaterialRequests() {
     return approvalLimit > 0 && Number(request.totalValue || 0) <= approvalLimit;
   }
   const canApprove = isAdmin || canAccessModule('approvals');
-  const canDeliver = ['admin', 'supervisor', 'estoquista'].includes(user?.role);
+  const canReceiveRecharge = ['admin', 'supervisor', 'estoquista'].includes(user?.role);
+  const canDeliverTechnicianLoad = isAdmin || canAccessModule('materialRequestDelivery');
 
   return (
     <div className="page-grid erp-page">
@@ -221,7 +236,7 @@ export default function MaterialRequests() {
       </section>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{canDeliver && r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : <Link className="ghost" to={`/transferencias?requestId=${r.id}`}>Entregar carga</Link>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <Link className="ghost" to={`/transferencias?requestId=${r.id}`}>Entregar carga</Link>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
       </section>
 
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>
@@ -244,9 +259,29 @@ export default function MaterialRequests() {
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{canDeliver && details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : <Link className="ghost" to={`/transferencias?requestId=${details.id}`}>Entregar carga</Link>)}</>}>
+      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <Link className="ghost" to={`/transferencias?requestId=${details.id}`}>Entregar carga</Link>)}</>}>
         {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
       </DetailsModal>
+
+      <Modal
+        open={confirmRequestOpen}
+        title="Confirmar solicitação"
+        onClose={() => { if (!submittingRequest) { setConfirmRequestOpen(false); setModal(true); } }}
+        footer={<>
+          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setConfirmRequestOpen(false); setModal(true); }}>Não</button>
+          <button type="button" disabled={submittingRequest} onClick={confirmRequestSubmission}>{submittingRequest ? 'Enviando...' : 'Sim, solicitar'}</button>
+        </>}
+      >
+        <div className="form-stack">
+          <p><strong>Deseja realmente solicitar esse pedido?</strong></p>
+          <div className="detail-grid compact">
+            <div className="detail-card"><span>Tipo</span><strong>{requestTypeLabel(form.requestType)}</strong></div>
+            <div className="detail-card"><span>Itens</span><strong>{formatQuantity(form.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0))}</strong></div>
+            <div className="detail-card"><span>Destino</span><strong>{form.requestType === 'recarga_estoque' ? warehouses.find((w) => String(w.id) === String(form.warehouseId))?.name || '-' : isTechnician ? user?.name || '-' : technicians.find((t) => String(t.id) === String(form.technicianId))?.name || '-'}</strong></div>
+          </div>
+          <div className="viz-callout">Após confirmar, o pedido será registrado e seguirá as regras de aprovação e entrega configuradas no sistema.</div>
+        </div>
+      </Modal>
 
       <Modal open={decision.open} title={decision.type === 'approve' ? 'Aprovar solicitação' : decision.type === 'reject' ? 'Reprovar solicitação' : decision.item?.requestType === 'recarga_estoque' ? 'Receber recarga no estoque' : 'Entregar carga e gerar guia'} onClose={() => setDecision({ open: false, type: '', item: null, notes: '', items: [] })} footer={<><button className="ghost" onClick={() => setDecision({ open: false, type: '', item: null, notes: '', items: [] })}>Cancelar</button><button onClick={runDecision}>{decision.type === 'deliver' ? decision.item?.requestType === 'recarga_estoque' ? 'Receber no estoque' : 'Entregar e gerar guia' : 'Confirmar'}</button></>}>
         <p><strong>{decision.item?.requestNumber}</strong> • {decision.item?.requestType === 'recarga_estoque' ? decision.item?.Warehouse?.name : decision.item?.Technician?.name}</p>

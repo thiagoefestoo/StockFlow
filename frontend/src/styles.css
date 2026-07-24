@@ -2129,3 +2129,32 @@ input[readonly], textarea[readonly] {
     width: auto;
   }
 }
+
+
+/* Seleção obrigatória do técnico na Caixa do Técnico */
+.technician-operator-panel {
+  transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.technician-operator-panel.technician-required {
+  background: #fff1f2;
+  border: 2px solid #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .08);
+}
+.technician-operator-panel.technician-required label,
+.technician-operator-panel.technician-required label > small {
+  color: #b91c1c;
+  font-weight: 700;
+}
+.technician-operator-panel.technician-required select {
+  background: #fff7f7;
+  border-color: #dc2626;
+  color: #991b1b;
+}
+.technician-operator-panel.technician-selected {
+  background: #ffffff;
+  border-color: var(--border, #dbe5f1);
+}
+.technician-operator-panel.technician-selected label > small {
+  color: #64748b;
+  font-weight: 500;
+}

@@ -7,6 +7,7 @@ const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
+const { hasModuleAccess } = require('../config/modulePermissions');
 
 
 async function estimateTransferValue(items = [], sourceWarehouseId) {
@@ -62,6 +63,9 @@ exports.create = asyncHandler(async (req, res) => {
 
   let linkedRequest = null;
   if (materialRequestId) {
+    if (!['admin', 'supervisor', 'estoquista'].includes(req.user.role) || !hasModuleAccess(req.user, 'materialRequestDelivery')) {
+      return fail(res, 403, 'Você não tem permissão para entregar cargas aprovadas. Solicite a liberação ao administrador.');
+    }
     linkedRequest = await MaterialRequest.findByPk(materialRequestId, { include: [{ model: MaterialRequestItem, include: [Material] }] });
     if (!linkedRequest) return fail(res, 404, 'Solicitação de material não encontrada.');
     if (linkedRequest.status !== 'aprovado') return fail(res, 400, 'A solicitação precisa estar aprovada para gerar entrega.');
