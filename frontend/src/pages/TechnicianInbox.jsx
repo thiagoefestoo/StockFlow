@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -18,6 +19,7 @@ function statusLabel(value) { return ({ pendente_aprovacao: 'Pendente aprovaçã
 function sectionLabel(key) { return ({ resumo: 'Resumo', baixa: 'Baixar OS', caixa: 'Minha carga', solicitacoes: 'Solicitações' }[key] || key); }
 
 export default function TechnicianInbox() {
+  const navigate = useNavigate();
   const { user, isSupervisor } = useAuth();
   const [technicians, setTechnicians] = useState([]);
   const [selectedTech, setSelectedTech] = useState(user?.technicianId || '');
@@ -217,7 +219,7 @@ export default function TechnicianInbox() {
           <p>Tela otimizada para celular: veja só o essencial primeiro e abra cada operação quando precisar.</p>
         </div>
         <div className="row-actions technician-hero-actions">
-          <button type="button" onClick={() => setRequestModal(true)} disabled={!selectedTech}>Solicitar material</button>
+          <button type="button" onClick={() => navigate('/solicitacoes-material')} disabled={!selectedTech}>Solicitar material</button>
           <button type="button" className="ghost" onClick={() => loadStock(selectedTech)} disabled={!selectedTech}>Atualizar</button>
         </div>
       </section>
@@ -254,7 +256,7 @@ export default function TechnicianInbox() {
         <div className="mobile-quick-actions">
           <button type="button" onClick={() => showSection('baixa')}>Baixar OS</button>
           <button type="button" className="ghost" onClick={() => showSection('caixa')}>Ver minha carga</button>
-          <button type="button" className="ghost" onClick={() => setRequestModal(true)}>Solicitar material</button>
+          <button type="button" className="ghost" onClick={() => navigate('/solicitacoes-material')}>Solicitar material</button>
         </div>
         {requests.slice(0, 4).map((r) => <button type="button" className="request-notice" key={r.id} onClick={() => setDetails({ type: 'request', item: r })}><b>{r.requestNumber}</b><span>{statusLabel(r.status)} • {formatQuantity(r.totalQuantity)} item(ns) • {dt(r.updatedAt)}</span></button>)}
         {!requests.length && <div className="empty-state small">Nenhuma solicitação registrada para sua caixa.</div>}

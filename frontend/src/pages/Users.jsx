@@ -93,6 +93,8 @@ export default function Users() {
   const [message, setMessage] = useState('');
 
   const filteredUsers = useMemo(() => users, [users]);
+  const accountLimitReached = !!stats.accountLimitReached;
+  const accountLimitMessage = `Limite máximo de ${stats.accountLimit || 30} contas atingido. Entre em contato com o Engenheiro de Software do Sistema para mais informações.`;
   const cityOptions = useMemo(() => {
     const values = new Set();
     warehouses.forEach((w) => { if (w.city) values.add(String(w.city).trim()); });
@@ -112,6 +114,10 @@ export default function Users() {
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openCreate(role = 'tecnico') {
+    if (accountLimitReached) {
+      setMessage(accountLimitMessage);
+      return;
+    }
     setForm({ ...emptyUser, role, password: role === 'tecnico' ? 'tec123456' : '', modulePermissions: normalizeModulePermissions(null, role) });
     setModal(true);
   }
@@ -250,14 +256,15 @@ export default function Users() {
         <div className="row-actions">
           <button className="ghost" onClick={() => exportUsers(filteredUsers)}>⬇️ Exportar CSV</button>
           <button className="ghost" onClick={load}>🔄 Atualizar</button>
-          <button onClick={() => openCreate('tecnico')}>➕ Novo usuário</button>
+          <button disabled={accountLimitReached} title={accountLimitReached ? accountLimitMessage : ''} onClick={() => openCreate('tecnico')}>➕ Novo usuário</button>
         </div>
       </section>
 
       {message && <div className={message.startsWith('✅') ? 'alert success' : 'alert danger'}>{message}</div>}
+      {accountLimitReached && <div className="alert warning">{accountLimitMessage}</div>}
 
       <div className="kpi-grid small">
-        <KpiCard label="Usuários" value={stats.total || 0} />
+        <KpiCard label="Contas cadastradas" value={`${stats.accountUsed ?? stats.total ?? 0}/${stats.accountLimit || 30}`} hint={`${stats.accountRemaining ?? 0} vaga(s) disponível(is)`} tone={accountLimitReached ? 'warning' : 'default'} />
         <KpiCard label="Ativos" value={stats.ativos || 0} />
         <KpiCard label="Bloqueados" value={stats.bloqueados || 0} />
         <KpiCard label="Técnicos" value={stats.tecnicos || 0} />
@@ -299,7 +306,7 @@ export default function Users() {
       <section className="panel">
         <div className="panel-title">
           <div><h3>👥 Contas do sistema</h3><p>Somente administradores visualizam esta página. Contas técnicas criam ou sincronizam automaticamente o cadastro do técnico pelo nome/e-mail.</p></div>
-          <div className="row-actions"><button className="ghost" onClick={() => openCreate('admin')}>Criar admin</button><button className="ghost" onClick={() => openCreate('supervisor')}>Criar supervisor</button><button onClick={() => openCreate('tecnico')}>Criar técnico</button></div>
+          <div className="row-actions"><button className="ghost" disabled={accountLimitReached} title={accountLimitReached ? accountLimitMessage : ''} onClick={() => openCreate('admin')}>Criar admin</button><button className="ghost" disabled={accountLimitReached} title={accountLimitReached ? accountLimitMessage : ''} onClick={() => openCreate('supervisor')}>Criar supervisor</button><button disabled={accountLimitReached} title={accountLimitReached ? accountLimitMessage : ''} onClick={() => openCreate('tecnico')}>Criar técnico</button></div>
         </div>
         <div className="table-wrap">
           <table>

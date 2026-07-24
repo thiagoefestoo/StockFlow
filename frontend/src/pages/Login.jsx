@@ -40,6 +40,9 @@ export default function Login() {
         <label>Senha<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} name="superinfra_login_password" placeholder="Digite sua senha" autoComplete="new-password" /></label>
         {error && <div className="alert danger">{error}</div>}
         <button disabled={loading}>{loading ? 'Entrando...' : 'Acessar sistema'}</button>
+        <a className="android-download-link" href="/SuperInfra-Android.apk" download>
+          <span aria-hidden="true">🤖</span> Baixar aplicativo para Android
+        </a>
       </form>
     </div>
   );

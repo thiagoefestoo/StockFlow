@@ -18,6 +18,7 @@ const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
 const { money, daysBetween } = require('../utils/number');
 const { hasModuleAccess } = require('../config/modulePermissions');
+const { assertUserAccountCapacity } = require('../services/userAccountLimitService');
 
 const technicianInclude = [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }];
 
@@ -141,6 +142,7 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
   };
 
   if (!user) {
+    await assertUserAccountCapacity();
     user = await User.create({
       ...common,
       mustChangePassword: !!mustChangePassword,
@@ -197,10 +199,11 @@ exports.create = asyncHandler(async (req, res) => {
   }
   const payload = technicianPayload(req.body);
   if (!payload.name || payload.name.length < 3) return fail(res, 400, 'Informe o nome do técnico.');
+  const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
+  if (wantsPortalUser) await assertUserAccountCapacity();
   const technician = await Technician.create(payload);
 
   let portalUser = null;
-  const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
   if (wantsPortalUser) {
     portalUser = await syncPortalUser({
       req,
@@ -233,11 +236,13 @@ exports.update = asyncHandler(async (req, res) => {
     return fail(res, 403, 'Você não tem permissão para editar o limite de transferência sem aprovação.');
   }
 
+  let portalUser = await findPortalUserForTechnician(technician);
+  const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
+  if (wantsPortalUser && !portalUser) await assertUserAccountCapacity();
+
   const before = technician.toJSON();
   await technician.update(technicianPayload({ ...technician.toJSON(), ...req.body }));
 
-  let portalUser = await findPortalUserForTechnician(technician);
-  const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
   if (wantsPortalUser) {
     portalUser = await syncPortalUser({
       req,

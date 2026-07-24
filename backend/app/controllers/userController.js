@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
 const { normalizeModulePermissions } = require('../config/modulePermissions');
+const { getUserAccountCapacity, assertUserAccountCapacity } = require('../services/userAccountLimitService');
 
 function computedStatus(user) {
   if (user.deletedAt) return 'excluido';
@@ -119,6 +120,8 @@ exports.list = asyncHandler(async (req, res) => {
   let list = users.map(hide);
   if (status) list = list.filter((u) => u.accessStatus === status || u.status === status);
 
+  const accountCapacity = await getUserAccountCapacity();
+
   const stats = {
     total: users.length,
     ativos: users.filter((u) => computedStatus(u) === 'ativo').length,
@@ -129,6 +132,10 @@ exports.list = asyncHandler(async (req, res) => {
     admins: users.filter((u) => u.role === 'admin').length,
     supervisores: users.filter((u) => u.role === 'supervisor').length,
     estoquistas: users.filter((u) => u.role === 'estoquista').length,
+    accountLimit: accountCapacity.limit,
+    accountUsed: accountCapacity.used,
+    accountRemaining: accountCapacity.remaining,
+    accountLimitReached: accountCapacity.reached,
   };
 
   return ok(res, { users: list, stats });
@@ -151,6 +158,7 @@ exports.create = asyncHandler(async (req, res) => {
   if (!name || !email || !password) return fail(res, 400, 'Nome, e-mail e senha são obrigatórios.');
   if (String(password).length < 6) return fail(res, 400, 'A senha precisa ter pelo menos 6 caracteres.');
   if (!['admin', 'supervisor', 'estoquista', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
+  await assertUserAccountCapacity();
   await assertEmailAvailable(email);
   const normalizedWarehouseIds = Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [];
   const normalizedCityAccess = Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [];

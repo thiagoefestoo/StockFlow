@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const env = require('../../config/env');
 const { User } = require('../models');
+const { assertUserAccountCapacity } = require('./userAccountLimitService');
 
 async function ensureBootstrapAdmin() {
   if (!env.autoCreateAdmin) return null;
@@ -19,18 +20,19 @@ async function ensureBootstrapAdmin() {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const [user, created] = await User.findOrCreate({
-    where: { email },
-    defaults: {
+  let user = await User.findOne({ where: { email } });
+  const created = !user;
+
+  if (created) {
+    await assertUserAccountCapacity();
+    user = await User.create({
       name,
       email,
       passwordHash,
       role: 'admin',
       status: 'ativo',
-    },
-  });
-
-  if (!created) {
+    });
+  } else {
     await user.update({
       name,
       passwordHash,

@@ -14,6 +14,29 @@ async function ensureRuntimeSchema() {
   }
 
 
+  if (users) {
+    await sequelize.query(`
+      CREATE OR REPLACE FUNCTION enforce_user_account_limit()
+      RETURNS trigger AS $$
+      BEGIN
+        LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+        IF (SELECT COUNT(*) FROM users) >= 30 THEN
+          RAISE EXCEPTION 'Limite máximo de 30 contas atingido. Entre em contato com o Engenheiro de Software do Sistema para mais informações.'
+            USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS users_account_limit_30 ON users;
+      CREATE TRIGGER users_account_limit_30
+      BEFORE INSERT ON users
+      FOR EACH ROW
+      EXECUTE FUNCTION enforce_user_account_limit();
+    `);
+  }
+
+
   const technicians = await queryInterface.describeTable('technicians').catch(() => null);
   if (technicians && !technicians.transferApprovalLimit) {
     await queryInterface.addColumn('technicians', 'transferApprovalLimit', {
