@@ -111,9 +111,9 @@ export default function Stock() {
 
   useEffect(() => { load(); }, []);
 
-  const totalEstoque = materials.reduce((s, m) => s + Number(m.mainStock || 0), 0);
-  const low = materials.filter((m) => Number(m.mainStock || 0) <= Number(m.minStock || 0) && Number(m.minStock || 0) > 0).length;
-  const valorCatalogo = materials.reduce((s, m) => s + (Number(m.mainStock || 0) * Number(m.unitCost || 0)), 0);
+  const materialAuthorizedQuantity = (material) => (material.warehouseStocks || [])
+    .reduce((sum, stock) => sum + Number(stock.quantity || 0), 0);
+
   const warehouseTotals = useMemo(() => warehouses.map((warehouse) => {
     const quantity = materials.reduce((sum, material) => {
       const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
@@ -125,6 +125,25 @@ export default function Stock() {
     }, 0);
     return { ...warehouse, quantity, value };
   }), [materials, warehouses]);
+
+  const totalEstoque = useMemo(
+    () => warehouseTotals.reduce((sum, warehouse) => sum + Number(warehouse.quantity || 0), 0),
+    [warehouseTotals],
+  );
+  const valorCatalogo = useMemo(
+    () => warehouseTotals.reduce((sum, warehouse) => sum + Number(warehouse.value || 0), 0),
+    [warehouseTotals],
+  );
+  const low = materials.filter((material) => {
+    const current = materialAuthorizedQuantity(material);
+    return current <= Number(material.minStock || 0) && Number(material.minStock || 0) > 0;
+  }).length;
+  const quantityEquation = warehouseTotals.length
+    ? `${warehouseTotals.map((warehouse) => `${warehouse.name}: ${formatQuantity(warehouse.quantity)}`).join(' + ')} = ${formatQuantity(totalEstoque)}`
+    : 'Nenhum estoque autorizado para calcular.';
+  const valueEquation = warehouseTotals.length
+    ? `${warehouseTotals.map((warehouse) => `${warehouse.name}: ${brl(warehouse.value)}`).join(' + ')} = ${brl(valorCatalogo)}`
+    : 'Nenhum estoque autorizado para calcular.';
 
   const preview = useMemo(() => {
     const estoqueMinimo = asNumber(form.minStock);
@@ -237,32 +256,36 @@ export default function Stock() {
       </div>
 
       <div className="kpi-grid small">
-        <KpiCard label="Total entre todos os estoques" value={formatQuantity(totalEstoque)} hint="Somatório dos estoques autorizados para este usuário" />
+        <KpiCard label="Quantidade total — todos os estoques" value={formatQuantity(totalEstoque)} hint="Soma das quantidades de todos os estoques autorizados" />
+        <KpiCard label="Valor total — todos os estoques" value={brl(valorCatalogo)} hint="Soma financeira dos estoques autorizados" />
         <KpiCard label="Alertas de mínimo" value={low} tone={low ? 'warning' : 'success'} />
-        <KpiCard label="Valor estimado em estoque" value={brl(valorCatalogo)} />
       </div>
 
-      <section className="panel">
-        <div className="subtoolbar"><div><h3>Total por estoque</h3><small>Quantidades e valores somente dos estoques liberados para o usuário.</small></div></div>
-        <div className="kpi-grid small">
+      <section className="panel stock-calculation-panel">
+        <div className="subtoolbar"><div><h3>Cálculo separado e total consolidado</h3><small>Cada estoque é calculado separadamente e, abaixo, o sistema apresenta a soma geral conferida.</small></div></div>
+        <div className="stock-calculation-grid">
           {warehouseTotals.map((warehouse) => (
-            <KpiCard
-              key={warehouse.id}
-              label={warehouse.name}
-              value={formatQuantity(warehouse.quantity)}
-              hint={`${brl(warehouse.value)} em materiais`}
-              tone={warehouse.quantity > 0 ? 'success' : 'default'}
-            />
+            <article className="stock-calculation-card" key={warehouse.id}>
+              <span>{warehouse.name}</span>
+              <strong>{formatQuantity(warehouse.quantity)}</strong>
+              <small>Quantidade neste estoque</small>
+              <em>{brl(warehouse.value)}</em>
+              <small>Valor estimado neste estoque</small>
+            </article>
           ))}
           {warehouseTotals.length === 0 && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
         </div>
+        {warehouseTotals.length > 0 && <div className="stock-calculation-reconciliation">
+          <div><span>Soma das quantidades</span><strong>{quantityEquation}</strong></div>
+          <div><span>Soma dos valores</span><strong>{valueEquation}</strong></div>
+        </div>}
       </section>
 
       <section className="panel">
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>SKU</th><th>Material</th><th>Categoria</th><th>Serial</th><th>Total autorizado</th><th>Quantidade por estoque</th><th>Mínimo</th><th>Valor</th><th>Política</th><th className="action-cell">Opções</th></tr>
+              <tr><th>SKU</th><th>Material</th><th>Categoria</th><th>Serial</th><th>Total em todos os estoques</th><th>Quantidade separada por estoque</th><th>Mínimo</th><th>Valor</th><th>Política</th><th className="action-cell">Opções</th></tr>
             </thead>
             <tbody>
               {materials.map((m) => (
@@ -271,7 +294,7 @@ export default function Stock() {
                   <td><b>{m.name}</b><br /><small>{m.storageLocation || m.category || 'Sem dados complementares'}</small></td>
                   <td>{m.category}</td>
                   <td>{booleanValue(m.requiresSerial) ? 'Sim' : 'Não'}</td>
-                  <td><strong>{formatQuantity(m.mainStock, m.unit)}</strong></td>
+                  <td><strong>{formatQuantity(materialAuthorizedQuantity(m), m.unit)}</strong></td>
                   <td>
                     <div className="warehouse-stock-list">
                       {(m.warehouseStocks || []).map((stock) => (
@@ -390,7 +413,7 @@ export default function Stock() {
         {details && <>
           <DetailGrid fields={[
             ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', booleanValue(details.requiresSerial) ? 'Sim' : 'Não'],
-            ['Estoque atual', formatQuantity(details.mainStock, details.unit)], ['Estoque mínimo', formatQuantity(details.minStock, details.unit)], ['Estoque máximo', formatQuantity(details.maxStock, details.unit)], ['Ponto de pedido', formatQuantity(details.reorderPoint, details.unit)], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
+            ['Total em todos os estoques', formatQuantity(materialAuthorizedQuantity(details), details.unit)], ['Estoque mínimo', formatQuantity(details.minStock, details.unit)], ['Estoque máximo', formatQuantity(details.maxStock, details.unit)], ['Ponto de pedido', formatQuantity(details.reorderPoint, details.unit)], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
             ['Criticidade', details.criticality], ['Política', details.movementPolicy], ['Inspeção', details.qualityInspection], ['Pode ir para técnico', details.allowTechnicianTransfer], ['Pode ir para cliente', details.allowCustomerInstall], ['Exige retorno', details.requiresReturnOnRemoval],
             ['NCM', details.ncm], ['Código fiscal', details.fiscalCode], ['Código contábil', details.accountingCode], ['Centro de custo', details.costCenter], ['Prefixo patrimonial', details.patrimonyPrefix], ['Local', details.storageLocation], ['Prateleira', details.shelf],
             ['Garantia', `${details.warrantyDays || 0} dia(s)`], ['Vida útil', `${details.usefulLifeMonths || 0} mês(es)`], ['Peso', `${details.weightKg || 0} kg`], ['Dimensões', details.dimensions], ['Status', details.active ? 'Ativo' : 'Inativo'], ['Criado em', details.createdAt],

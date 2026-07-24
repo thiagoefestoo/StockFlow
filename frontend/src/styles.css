@@ -2294,3 +2294,104 @@ input[readonly], textarea[readonly] {
   .serial-column-preview-head,
   .serial-column-preview-row { grid-template-columns: 52px minmax(0, 1fr); }
 }
+
+
+/* Conferência explícita dos totais gerais e separados por estoque */
+.stock-calculation-panel {
+  border-top: 4px solid #2563eb;
+}
+.stock-calculation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.stock-calculation-card {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #bfdbfe;
+  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+}
+.stock-calculation-card span {
+  color: #334155;
+  font-weight: 800;
+}
+.stock-calculation-card strong {
+  color: #0f3d8a;
+  font-size: 1.65rem;
+  line-height: 1;
+}
+.stock-calculation-card em {
+  margin-top: 7px;
+  color: #047857;
+  font-size: 1.08rem;
+  font-style: normal;
+  font-weight: 850;
+}
+.stock-calculation-card small {
+  color: #64748b;
+}
+.stock-calculation-reconciliation {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid #a7f3d0;
+  background: #ecfdf5;
+}
+.stock-calculation-reconciliation div {
+  display: grid;
+  gap: 3px;
+}
+.stock-calculation-reconciliation span {
+  color: #065f46;
+  font-size: .82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.stock-calculation-reconciliation strong {
+  color: #064e3b;
+  overflow-wrap: anywhere;
+}
+
+/* Saldo disponível imediatamente abaixo do material escolhido na baixa de OS */
+.technician-box-balance {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  align-items: center;
+  margin: 8px 0 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+}
+.technician-box-balance span {
+  color: #334155;
+  font-weight: 750;
+}
+.technician-box-balance strong {
+  color: #1d4ed8;
+  font-size: 1.25rem;
+}
+.technician-box-balance small {
+  grid-column: 1 / -1;
+  color: #64748b;
+}
+.technician-box-balance.empty {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.technician-box-balance.empty strong,
+.technician-box-balance.empty span {
+  color: #b91c1c;
+}
+
+@media (max-width: 720px) {
+  .stock-calculation-grid { grid-template-columns: 1fr; }
+  .technician-box-balance { grid-template-columns: 1fr auto; }
+}

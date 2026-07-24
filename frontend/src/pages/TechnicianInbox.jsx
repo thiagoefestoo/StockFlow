@@ -85,6 +85,15 @@ export default function TechnicianInbox() {
     ];
     return available.filter(Boolean).filter((material, index, list) => list.findIndex((item) => item.id === material.id) === index);
   }, [stock]);
+  function technicianMaterialBalance(materialId) {
+    if (!materialId) return 0;
+    const material = stockMaterials.find((item) => Number(item.id) === Number(materialId));
+    if (!material) return 0;
+    if (material.requiresSerial) return serialByMaterial(materialId).length;
+    const balance = (stock?.balances || []).find((row) => Number(row.materialId) === Number(materialId));
+    return Number(balance?.quantity || 0);
+  }
+
   const serialRequiredForService = serviceRequiresSerial(osForm.serviceType, osForm.addressChangeType);
   const boxGroups = useMemo(() => {
     const map = {};
@@ -312,10 +321,16 @@ export default function TechnicianInbox() {
           {osForm.materials.map((m, i) => {
             const material = stockMaterials.find((x) => Number(x.id) === Number(m.materialId));
             const serials = serialByMaterial(m.materialId);
+            const availableBalance = technicianMaterialBalance(m.materialId);
             return <div className="item-card technician-os-item" key={i}>
               <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeOsMaterial(i)}>Remover</button></div>
               <label>Material<select value={m.materialId} onChange={(e) => updateOsMaterial(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{stockMaterials.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><div className="serial-list compact-serial-list">{serials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" min="1" value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /></label>}
+              {material && <div className={`technician-box-balance ${availableBalance <= 0 ? 'empty' : ''}`}>
+                <span>Saldo na caixa do técnico</span>
+                <strong>{formatQuantity(availableBalance, material.unit)}</strong>
+                <small>{material.requiresSerial ? `${serials.length} serial(is) disponível(is) para baixa` : 'Quantidade máxima disponível para esta OS'}</small>
+              </div>}
+              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><div className="serial-list compact-serial-list">{serials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" min="1" max={availableBalance || undefined} value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /><small>Saldo disponível: {formatQuantity(availableBalance, material?.unit)}</small></label>}
             </div>;
           })}
           {!osForm.materials.length && <div className="empty-state small">Clique em “Adicionar item” para informar o material usado na OS.</div>}
