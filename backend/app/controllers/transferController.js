@@ -62,6 +62,8 @@ exports.create = asyncHandler(async (req, res) => {
   if (sourceWarehouse.status && sourceWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de origem precisa estar ativo para transferir material.');
 
   let linkedRequest = null;
+  const linkedRequestItemsByMaterial = new Map();
+  const linkedRequestItemsById = new Map();
   if (materialRequestId) {
     if (!['admin', 'supervisor', 'estoquista'].includes(req.user.role) || !hasModuleAccess(req.user, 'materialRequestDelivery')) {
       return fail(res, 403, 'Você não tem permissão para entregar cargas aprovadas. Solicite a liberação ao administrador.');
@@ -72,6 +74,32 @@ exports.create = asyncHandler(async (req, res) => {
     if (linkedRequest.requestType === 'recarga_estoque') return fail(res, 400, 'Recarga de estoque deve ser recebida pela tela de solicitações.');
     if (Number(linkedRequest.technicianId) !== Number(technicianId)) return fail(res, 400, 'O técnico selecionado não corresponde à solicitação.');
     if (linkedRequest.warehouseId && Number(linkedRequest.warehouseId) !== Number(sourceWarehouseId)) return fail(res, 400, 'O estoque de origem não corresponde ao estoque da solicitação.');
+
+    for (const requestItem of linkedRequest.MaterialRequestItems || []) {
+      linkedRequestItemsById.set(Number(requestItem.id), requestItem);
+      const materialId = Number(requestItem.materialId);
+      const rows = linkedRequestItemsByMaterial.get(materialId) || [];
+      rows.push(requestItem);
+      linkedRequestItemsByMaterial.set(materialId, rows);
+    }
+
+    const submittedRequestItems = new Set();
+    for (const item of items) {
+      const materialId = Number(item.materialId);
+      const requestItemId = Number(item.requestItemId || 0);
+      const materialRows = linkedRequestItemsByMaterial.get(materialId) || [];
+      const requestItem = requestItemId ? linkedRequestItemsById.get(requestItemId) : (materialRows.length === 1 ? materialRows[0] : null);
+      if (!requestItem || Number(requestItem.materialId) !== materialId) return fail(res, 400, 'A transferência contém item que não pertence à solicitação aprovada.');
+      const requestItemKey = Number(requestItem.id);
+      if (submittedRequestItems.has(requestItemKey)) return fail(res, 400, 'O mesmo item da solicitação não pode aparecer mais de uma vez na entrega.');
+      submittedRequestItems.add(requestItemKey);
+      const approvedMaximum = qty(requestItem.approvedQuantity || requestItem.quantity);
+      const deliveryQuantity = qty(item.quantity);
+      if (deliveryQuantity <= 0) return fail(res, 400, `Informe a quantidade que será entregue de ${requestItem.Material?.name || 'material'}.`);
+      if (deliveryQuantity > approvedMaximum) {
+        return fail(res, 400, `A quantidade de ${requestItem.Material?.name || 'material'} não pode ultrapassar o solicitado/aprovado (${approvedMaximum}).`);
+      }
+    }
   }
 
   const estimatedTotalValue = await estimateTransferValue(items, sourceWarehouseId);
@@ -90,6 +118,7 @@ exports.create = asyncHandler(async (req, res) => {
     let totalQuantity = 0;
     let totalValue = 0;
     const usedSerials = new Set();
+    const deliveredRequestItems = [];
     for (const item of items) {
       const material = await Material.findByPk(item.materialId, { transaction });
       if (!material) throw new Error('Material não encontrado.');
@@ -101,6 +130,7 @@ exports.create = asyncHandler(async (req, res) => {
       if (material.requiresSerial) {
         if (requestedQuantity <= 0) throw new Error(`Informe a quantidade para ${material.name}.`);
         if (serials.length !== requestedQuantity) throw new Error(`Para ${material.name}, a quantidade informada precisa ser igual aos seriais selecionados. Quantidade: ${qty(requestedQuantity)}. Seriais: ${serials.length}.`);
+        let serialTotalCost = 0;
         for (const serialNumber of serials) {
           const serialKey = String(serialNumber).trim().toUpperCase();
           if (usedSerials.has(serialKey)) throw new Error(`Serial repetido na guia: ${serialNumber}.`);
@@ -117,8 +147,13 @@ exports.create = asyncHandler(async (req, res) => {
           asset.lastMovementAt = new Date();
           await asset.save({ transaction });
           await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'estoque', toOwnerType: 'tecnico', fromWarehouseId: sourceWarehouseId, toTechnicianId: technicianId, reference: record.transferNumber, createdById: req.user.id }, { transaction });
+          const assetCost = Number(asset.acquisitionCost || unitCost);
           totalQuantity += 1;
-          totalValue += Number(asset.acquisitionCost || unitCost);
+          totalValue += assetCost;
+          serialTotalCost += assetCost;
+        }
+        if (linkedRequest) {
+          deliveredRequestItems.push({ requestItemId: item.requestItemId || null, materialId: material.id, quantity: serials.length, serialNumbers: serials, unitCost: serials.length ? money(serialTotalCost / serials.length) : unitCost, totalCost: money(serialTotalCost) });
         }
       } else {
         await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: sourceWarehouseId, delta: -quantity, transaction });
@@ -127,8 +162,26 @@ exports.create = asyncHandler(async (req, res) => {
         await StockMovement.create({ type: 'transferencia_tecnico', materialId: material.id, quantity, fromOwnerType: 'estoque', toOwnerType: 'tecnico', fromWarehouseId: sourceWarehouseId, toTechnicianId: technicianId, reference: record.transferNumber, createdById: req.user.id }, { transaction });
         totalQuantity += quantity;
         totalValue += quantity * unitCost;
+        if (linkedRequest) {
+          deliveredRequestItems.push({ requestItemId: item.requestItemId || null, materialId: material.id, quantity, serialNumbers: [], unitCost, totalCost: money(quantity * unitCost) });
+        }
       }
     }
+
+    if (linkedRequest) {
+      for (const deliveredItem of deliveredRequestItems) {
+        const materialRows = linkedRequestItemsByMaterial.get(Number(deliveredItem.materialId)) || [];
+        const requestItem = deliveredItem.requestItemId
+          ? linkedRequestItemsById.get(Number(deliveredItem.requestItemId))
+          : (materialRows.length === 1 ? materialRows[0] : null);
+        if (!requestItem) continue;
+        requestItem.approvedQuantity = qty(deliveredItem.quantity);
+        requestItem.deliverySerials = deliveredItem.serialNumbers;
+        requestItem.totalCost = money(deliveredItem.totalCost);
+        await requestItem.save({ transaction });
+      }
+    }
+
     record.totalQuantity = qty(totalQuantity);
     record.totalValue = money(totalValue);
     await record.save({ transaction });
@@ -146,6 +199,8 @@ exports.create = asyncHandler(async (req, res) => {
     if (linkedRequest) {
       const beforeRequest = linkedRequest.toJSON();
       linkedRequest.status = 'entregue';
+      linkedRequest.totalQuantity = qty(totalQuantity);
+      linkedRequest.totalValue = money(totalValue);
       linkedRequest.deliveredAt = new Date();
       linkedRequest.deliveredById = req.user.id;
       linkedRequest.transferId = record.id;

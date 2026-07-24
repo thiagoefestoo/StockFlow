@@ -104,7 +104,7 @@ async function resolveRequestWarehouse({ req, warehouseId, technicianId, request
   }
 
   if (selectedWarehouseId) {
-    if (!['admin', 'supervisor'].includes(req.user.role)) {
+    if (req.user.role !== 'admin') {
       assertWarehouseAccess(req.user, selectedWarehouseId, 'Você só pode solicitar material para estoques autorizados ao seu usuário.');
     }
     const warehouse = await Warehouse.findByPk(selectedWarehouseId);
@@ -377,7 +377,7 @@ exports.reject = asyncHandler(async (req, res) => {
 
 async function deliverStockRecharge({ req, request, transaction, deliveryOverrides }) {
   if (!request.warehouseId) throw new Error('A recarga precisa estar vinculada a um estoque regional.');
-  if (!['admin', 'supervisor'].includes(req.user.role)) assertWarehouseAccess(req.user, request.warehouseId, 'Você só pode receber recarga nos seus estoques autorizados.');
+  if (req.user.role !== 'admin') assertWarehouseAccess(req.user, request.warehouseId, 'Você só pode receber recarga nos seus estoques autorizados.');
 
   let totalQuantity = 0;
   let totalValue = 0;

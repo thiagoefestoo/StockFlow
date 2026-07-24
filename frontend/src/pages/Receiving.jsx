@@ -8,7 +8,7 @@ import FloatingAlert from '../components/FloatingAlert';
 import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
-function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
+function splitSerials(value) { return String(value || '').split(/[\r\n\t,;]+/).map((s) => s.trim()).filter(Boolean); }
 function today() { return new Date().toISOString().slice(0, 10); }
 function emptyForm() {
   return {
@@ -113,6 +113,18 @@ export default function Receiving() {
   }
   function removeItem(index) { setForm({ ...form, items: form.items.filter((_, i) => i !== index) }); }
 
+  function pasteSerialColumn(event, itemIndex) {
+    const text = event.clipboardData?.getData('text') || '';
+    const pastedSerials = splitSerials(text);
+    if (!pastedSerials.length) return;
+    event.preventDefault();
+    updateItem(itemIndex, {
+      serialsText: pastedSerials.join('\n'),
+      quantity: pastedSerials.length,
+    });
+    setMessage(`${pastedSerials.length} serial(is) colado(s) em coluna. A quantidade foi ajustada automaticamente.`);
+  }
+
   function onFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -190,7 +202,7 @@ export default function Receiving() {
 
   return <div className="page-grid erp-page">
     <section className="toolbar"><div><span className="eyebrow">Entrada fiscal e logística</span><h2>Entrada completa de material</h2><p>Registre materiais diretamente no estoque regional de destino, com documento fiscal, valor obrigatório e seriais conferidos.</p></div><button onClick={() => { setForm({ ...emptyForm(), warehouseId: warehouses[0]?.id || '' }); setModal(true); }}>Nova entrada</button></section>
-    <FloatingAlert message={message} type={message.startsWith('Entrada registrada') ? 'success' : 'danger'} onClose={() => setMessage('')} />
+    <FloatingAlert message={message} type={message.startsWith('Entrada registrada') || message.includes('serial(is) colado(s)') ? 'success' : 'danger'} onClose={() => setMessage('')} />
     <div className="kpi-grid small"><KpiCard label="Entradas" value={batches.length} /><KpiCard label="Itens recebidos" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor recebido" value={brl(totals.totalValue)} /><KpiCard label="Com comprovante" value={totals.withProof} /></div>
     <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}</td><td>{b.sourceCompany}</td><td>{formatQuantity(b.totalItems)}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <AttachmentPreview compact name={b.proofAttachmentName} data={b.proofAttachmentData} /> : '-'}</td><td><button className="info" onClick={() => setDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div></section>
 
@@ -215,9 +227,22 @@ export default function Receiving() {
               <label>Condição<select value={item.condition} onChange={(e) => updateItem(i, { condition: e.target.value })}><option value="novo">Novo</option><option value="usado">Usado</option><option value="recondicionado">Recondicionado</option><option value="defeito">Defeito</option><option value="outro">Outro</option></select></label>
             </div>
             {requiresSerial ? <div className="serial-bulk panel-soft">
-              <h4>Seriais obrigatórios</h4>
-              <label>Lista de seriais<textarea rows={Math.min(Math.max(Number(item.quantity || 5), 5), 12)} value={item.serialsText || ''} onChange={(e) => updateItem(i, { serialsText: e.target.value })} placeholder={`Digite exatamente ${Number(item.quantity || 0) || 'a quantidade de'} serial(is), um por linha`} /></label>
-              <small>{serialStatus(item)}</small>
+              <h4>Seriais obrigatórios — preenchimento em coluna</h4>
+              <label>Colar coluna do Excel
+                <textarea
+                  rows={Math.min(Math.max(Number(item.quantity || 8), 8), 16)}
+                  value={item.serialsText || ''}
+                  onPaste={(event) => pasteSerialColumn(event, i)}
+                  onChange={(e) => updateItem(i, { serialsText: e.target.value.replace(/\t/g, '\n') })}
+                  placeholder={'Cole diretamente uma coluna do Excel. Cada serial deve ficar em uma linha:\nONU000001\nONU000002\nONU000003'}
+                />
+              </label>
+              <small>{serialStatus(item)} Ao colar uma coluna do Excel, a quantidade é ajustada automaticamente.</small>
+              {serials.length > 0 && <div className="serial-column-preview">
+                <div className="serial-column-preview-head"><span>Linha</span><strong>Serial</strong></div>
+                {serials.slice(0, 200).map((serial, serialIndex) => <div className="serial-column-preview-row" key={`${serial}-${serialIndex}`}><span>{serialIndex + 1}</span><strong>{serial}</strong></div>)}
+                {serials.length > 200 && <small>Exibindo os primeiros 200 de {serials.length} seriais. Todos serão enviados.</small>}
+              </div>}
               {repeated.length > 0 && <div className="alert danger compact-alert">Serial digitado repetido: {repeated.join(', ')}</div>}
             </div> : material ? <div className="alert info compact-alert">Este material está cadastrado como <strong>sem número de série</strong>. Informe apenas quantidade e valor; serial não será exigido nesta entrada.</div> : null}
             <label>Observação do item<textarea rows="2" value={item.itemNotes || ''} onChange={(e) => updateItem(i, { itemNotes: e.target.value })} /></label>

@@ -2180,3 +2180,107 @@ input[readonly], textarea[readonly] {
   color: #9a3412;
   border-color: #fdba74;
 }
+
+/* Quantidades separadas por estoque autorizado */
+.warehouse-stock-list {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+.warehouse-stock-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+}
+.warehouse-stock-row span {
+  color: #334155;
+  font-size: .82rem;
+}
+.warehouse-stock-row strong {
+  color: #0f3d8a;
+  white-space: nowrap;
+}
+.warehouse-stock-detail {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+}
+.warehouse-stock-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.warehouse-stock-detail-card {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+}
+.warehouse-stock-detail-card small { color: #64748b; }
+.warehouse-stock-detail-card strong { color: #0f172a; }
+.warehouse-stock-detail-card span { color: #1d4ed8; font-size: 1.15rem; font-weight: 850; }
+
+/* Colagem vertical de seriais vindos do Excel */
+.serial-column-preview {
+  display: grid;
+  max-height: 300px;
+  overflow: auto;
+  margin-top: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+}
+.serial-column-preview-head,
+.serial-column-preview-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.serial-column-preview-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+.serial-column-preview-row:last-child { border-bottom: 0; }
+.serial-column-preview-row span { color: #64748b; }
+.serial-column-preview-row strong { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #0f172a; }
+
+/* Fila e filtros das solicitações na página de transferências */
+.transfer-request-queue {
+  border-left: 4px solid #2563eb;
+}
+.transfer-request-queue .subtoolbar p {
+  margin: 4px 0 0;
+  color: #64748b;
+}
+.transfer-request-filters {
+  margin: 14px 0;
+}
+.requested-quantity-label {
+  display: block;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .warehouse-stock-list { min-width: 170px; }
+  .serial-column-preview-head,
+  .serial-column-preview-row { grid-template-columns: 52px minmax(0, 1fr); }
+}

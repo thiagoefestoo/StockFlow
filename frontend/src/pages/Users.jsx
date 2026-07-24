@@ -362,12 +362,12 @@ export default function Users() {
               </select>
             </label>
             {['estoquista', 'tecnico', 'supervisor'].includes(form.role) && <div className="form-field full-span">
-              <span className="field-label">Estoques autorizados</span>
+              <span className="field-label">Estoques visíveis e autorizados</span>
               <div className="city-checkbox-list warehouse-checkbox-list">
                 {warehouses.map((w) => <label className="check-pill" key={w.id}><input type="checkbox" checked={selectedWarehouseIds().includes(Number(w.id))} onChange={() => toggleWarehouseAccess(w)} /><span>{w.name} • {w.city || w.region || w.code}</span></label>)}
                 {warehouses.length === 0 && <small>Nenhum estoque regional cadastrado. Crie o estoque antes de vincular ao usuário.</small>}
               </div>
-              <small>O usuário verá e movimentará apenas os estoques marcados pelo administrador.</small>
+              <small>O usuário verá as quantidades e poderá movimentar apenas os estoques marcados pelo administrador. Supervisores também respeitam esta seleção.</small>
             </div>}
             {['estoquista', 'tecnico', 'supervisor'].includes(form.role) && <div className="form-field full-span">
               <span className="field-label">Cidades autorizadas</span>

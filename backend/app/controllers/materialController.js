@@ -3,7 +3,7 @@ const { Material, StockBalance, SerializedAsset, StockMovement, Warehouse } = re
 const { crudController } = require('./crudHelpers');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
-const { stockWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { stockWhereForUser, assertWarehouseAccess, warehouseListWhere } = require('../utils/warehouseAccess');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { money, qty } = require('../utils/number');
@@ -39,12 +39,48 @@ function normalizeSerials(value) {
 exports.list = asyncHandler(async (req, res) => {
   const records = await Material.findAll({ order: [['name', 'ASC']] });
   const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
-  const enriched = [];
-  for (const material of records) {
-    const mainBalance = await StockBalance.sum('quantity', { where: { materialId: material.id, ownerType: 'estoque', technicianId: null, ...warehouseScope } });
-    const assets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'estoque', ...warehouseScope } });
-    enriched.push({ ...material.toJSON(), mainStock: isTrue(material.requiresSerial) ? assets : Number(mainBalance || 0) });
+  const visibleWarehouses = await Warehouse.findAll({
+    where: warehouseListWhere(req.user),
+    attributes: ['id', 'name', 'code', 'city', 'region', 'status'],
+    order: [['city', 'ASC'], ['name', 'ASC']],
+  });
+
+  const [balances, assets] = await Promise.all([
+    StockBalance.findAll({
+      where: { ownerType: 'estoque', technicianId: null, ...warehouseScope },
+      attributes: ['materialId', 'warehouseId', 'quantity'],
+    }),
+    SerializedAsset.findAll({
+      where: { ownerType: 'estoque', ...warehouseScope },
+      attributes: ['materialId', 'warehouseId'],
+    }),
+  ]);
+
+  const balancesByMaterialWarehouse = new Map();
+  const assetsByMaterialWarehouse = new Map();
+  for (const balance of balances) {
+    const key = `${balance.materialId}:${balance.warehouseId || 0}`;
+    balancesByMaterialWarehouse.set(key, Number(balance.quantity || 0));
   }
+  for (const asset of assets) {
+    const key = `${asset.materialId}:${asset.warehouseId || 0}`;
+    assetsByMaterialWarehouse.set(key, Number(assetsByMaterialWarehouse.get(key) || 0) + 1);
+  }
+
+  const enriched = records.map((material) => {
+    const serialized = isTrue(material.requiresSerial);
+    const warehouseStocks = visibleWarehouses.map((warehouse) => ({
+      warehouseId: warehouse.id,
+      warehouseName: warehouse.name,
+      warehouseCode: warehouse.code,
+      city: warehouse.city,
+      region: warehouse.region,
+      quantity: Number((serialized ? assetsByMaterialWarehouse : balancesByMaterialWarehouse).get(`${material.id}:${warehouse.id}`) || 0),
+    }));
+    const mainStock = warehouseStocks.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+    return { ...material.toJSON(), mainStock, warehouseStocks };
+  });
+
   return ok(res, enriched);
 });
 

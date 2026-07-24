@@ -1,7 +1,10 @@
 const { Op } = require('sequelize');
 
 function isPrivileged(user) {
-  return ['admin', 'supervisor'].includes(user?.role);
+  // Somente o administrador possui acesso global aos estoques.
+  // Supervisores, estoquistas e técnicos respeitam os estoques marcados
+  // em Administração da conta, evitando visualização de saldos indevidos.
+  return user?.role === 'admin';
 }
 
 function normalizeIds(value) {

@@ -235,7 +235,7 @@ export default function Stock() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>SKU</th><th>Material</th><th>Categoria</th><th>Serial</th><th>Estoque</th><th>Mínimo</th><th>Valor</th><th>Política</th><th className="action-cell">Opções</th></tr>
+              <tr><th>SKU</th><th>Material</th><th>Categoria</th><th>Serial</th><th>Total autorizado</th><th>Quantidade por estoque</th><th>Mínimo</th><th>Valor</th><th>Política</th><th className="action-cell">Opções</th></tr>
             </thead>
             <tbody>
               {materials.map((m) => (
@@ -244,7 +244,18 @@ export default function Stock() {
                   <td><b>{m.name}</b><br /><small>{m.storageLocation || m.category || 'Sem dados complementares'}</small></td>
                   <td>{m.category}</td>
                   <td>{booleanValue(m.requiresSerial) ? 'Sim' : 'Não'}</td>
-                  <td>{formatQuantity(m.mainStock, m.unit)}</td>
+                  <td><strong>{formatQuantity(m.mainStock, m.unit)}</strong></td>
+                  <td>
+                    <div className="warehouse-stock-list">
+                      {(m.warehouseStocks || []).map((stock) => (
+                        <div className="warehouse-stock-row" key={stock.warehouseId}>
+                          <span>{stock.warehouseName}</span>
+                          <strong>{formatQuantity(stock.quantity, m.unit)}</strong>
+                        </div>
+                      ))}
+                      {(!m.warehouseStocks || m.warehouseStocks.length === 0) && <small>Nenhum estoque autorizado.</small>}
+                    </div>
+                  </td>
                   <td>{formatQuantity(m.minStock)}</td>
                   <td>{brl(m.unitCost)}</td>
                   <td><span className={`badge ${m.movementPolicy || 'livre'}`}>{m.movementPolicy || 'livre'}</span></td>
@@ -357,8 +368,21 @@ export default function Stock() {
             ['NCM', details.ncm], ['Código fiscal', details.fiscalCode], ['Código contábil', details.accountingCode], ['Centro de custo', details.costCenter], ['Prefixo patrimonial', details.patrimonyPrefix], ['Local', details.storageLocation], ['Prateleira', details.shelf],
             ['Garantia', `${details.warrantyDays || 0} dia(s)`], ['Vida útil', `${details.usefulLifeMonths || 0} mês(es)`], ['Peso', `${details.weightKg || 0} kg`], ['Dimensões', details.dimensions], ['Status', details.active ? 'Ativo' : 'Inativo'], ['Criado em', details.createdAt],
           ]} />
+          <div className="warehouse-stock-detail">
+            <h4>Quantidade nos estoques autorizados</h4>
+            <div className="warehouse-stock-detail-grid">
+              {(details.warehouseStocks || []).map((stock) => (
+                <div className="warehouse-stock-detail-card" key={stock.warehouseId}>
+                  <small>{stock.city || stock.region || stock.warehouseCode || 'Estoque regional'}</small>
+                  <strong>{stock.warehouseName}</strong>
+                  <span>{formatQuantity(stock.quantity, details.unit)}</span>
+                </div>
+              ))}
+              {(!details.warehouseStocks || details.warehouseStocks.length === 0) && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
+            </div>
+          </div>
           {details.notes && <div className="viz-callout">📝 {details.notes}</div>}
-          <div className="viz-callout">Este material pode ser movimentado por entrada fiscal, solicitação, aprovação, transferência para técnico, baixa por OS e retorno ao estoque. Todo movimento gera histórico e auditoria.</div>
+          <div className="viz-callout">As quantidades acima exibem somente os estoques autorizados no cadastro do usuário. Todo movimento gera histórico e auditoria.</div>
         </>}
       </DetailsModal>
     </div>
