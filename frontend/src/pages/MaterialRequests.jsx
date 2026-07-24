@@ -19,6 +19,14 @@ function statusLabel(value) {
 function requestTypeLabel(value) {
   return value === 'recarga_estoque' ? 'Recarga de estoque' : 'Carga para técnico';
 }
+function priorityLabel(value) {
+  return ({ baixa: 'Baixa', media: 'Média', alta: 'Alta', critica: 'Crítica' }[value] || value || '-');
+}
+function dateOnlyLabel(value) {
+  if (!value) return 'Não informado';
+  const [year, month, day] = String(value).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : value;
+}
 function splitSerials(value) {
   return String(value || '').split(/\n|,|;/).map((item) => item.trim()).filter(Boolean);
 }
@@ -66,6 +74,38 @@ export default function MaterialRequests() {
   useEffect(() => { load(); }, [statusFilter]);
 
   const totalValue = useMemo(() => requests.reduce((sum, r) => sum + Number(r.totalValue || 0), 0), [requests]);
+  const requestReview = useMemo(() => {
+    const reviewItems = form.items.map((item) => {
+      const material = selectedMaterial(item.materialId);
+      const quantity = Number(item.quantity || 0);
+      const unitCost = Number(material?.unitCost || 0);
+      const serials = splitSerials(item.serialNumbersText);
+      return {
+        key: `${item.materialId}-${material?.name || 'material'}-${quantity}`,
+        name: material?.name || 'Material não identificado',
+        category: material?.category || '-',
+        unit: material?.unit || 'un',
+        quantity,
+        unitCost,
+        totalCost: quantity * unitCost,
+        serialCount: serials.length,
+        requiresSerial: !!material?.requiresSerial,
+      };
+    });
+    const destination = form.requestType === 'recarga_estoque'
+      ? warehouses.find((warehouse) => String(warehouse.id) === String(form.warehouseId))
+      : isTechnician
+        ? { name: user?.name || 'Minha caixa técnica' }
+        : technicians.find((technician) => String(technician.id) === String(form.technicianId));
+    return {
+      items: reviewItems,
+      destination: form.requestType === 'recarga_estoque'
+        ? [destination?.name, destination?.city, destination?.state].filter(Boolean).join(' • ') || '-'
+        : destination?.name || '-',
+      totalQuantity: reviewItems.reduce((sum, item) => sum + item.quantity, 0),
+      totalValue: reviewItems.reduce((sum, item) => sum + item.totalCost, 0),
+    };
+  }, [form, materials, warehouses, technicians, isTechnician, user?.name]);
 
   function openCreate() {
     const firstWarehouseId = warehouses[0]?.id || '';
@@ -265,21 +305,53 @@ export default function MaterialRequests() {
 
       <Modal
         open={confirmRequestOpen}
-        title="Confirmar solicitação"
+        title="Revise e confirme a solicitação"
         onClose={() => { if (!submittingRequest) { setConfirmRequestOpen(false); setModal(true); } }}
         footer={<>
-          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setConfirmRequestOpen(false); setModal(true); }}>Não</button>
-          <button type="button" disabled={submittingRequest} onClick={confirmRequestSubmission}>{submittingRequest ? 'Enviando...' : 'Sim, solicitar'}</button>
+          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setConfirmRequestOpen(false); setModal(true); }}>Cancelar</button>
+          <button type="button" disabled={submittingRequest} onClick={confirmRequestSubmission}>{submittingRequest ? 'Enviando...' : 'Confirmar solicitação'}</button>
         </>}
       >
         <div className="form-stack">
-          <p><strong>Deseja realmente solicitar esse pedido?</strong></p>
-          <div className="detail-grid compact">
-            <div className="detail-card"><span>Tipo</span><strong>{requestTypeLabel(form.requestType)}</strong></div>
-            <div className="detail-card"><span>Itens</span><strong>{formatQuantity(form.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0))}</strong></div>
-            <div className="detail-card"><span>Destino</span><strong>{form.requestType === 'recarga_estoque' ? warehouses.find((w) => String(w.id) === String(form.warehouseId))?.name || '-' : isTechnician ? user?.name || '-' : technicians.find((t) => String(t.id) === String(form.technicianId))?.name || '-'}</strong></div>
+          <div>
+            <h4>Deseja realmente solicitar este pedido?</h4>
+            <p>Confira abaixo todos os dados antes de confirmar.</p>
           </div>
-          <div className="viz-callout">Após confirmar, o pedido será registrado e seguirá as regras de aprovação e entrega configuradas no sistema.</div>
+
+          <div className="detail-grid compact">
+            <div className="detail-card"><span>Tipo de solicitação</span><strong>{requestTypeLabel(form.requestType)}</strong></div>
+            <div className="detail-card"><span>Destino</span><strong>{requestReview.destination}</strong></div>
+            <div className="detail-card"><span>Prioridade</span><strong>{priorityLabel(form.priority)}</strong></div>
+            <div className="detail-card"><span>Necessário até</span><strong>{dateOnlyLabel(form.neededBy)}</strong></div>
+            <div className="detail-card"><span>Quantidade total</span><strong>{formatQuantity(requestReview.totalQuantity)}</strong></div>
+            <div className="detail-card"><span>Valor estimado</span><strong>{brl(requestReview.totalValue)}</strong></div>
+          </div>
+
+          <div className="item-card">
+            <small>Justificativa</small>
+            <strong>{form.requesterNotes || '-'}</strong>
+          </div>
+
+          <div>
+            <div className="subtoolbar"><h4>Materiais solicitados</h4><span>{requestReview.items.length} item(ns)</span></div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Material</th><th>Categoria</th><th>Quantidade</th><th>Valor unitário</th><th>Subtotal</th><th>Seriais informados</th></tr></thead>
+                <tbody>
+                  {requestReview.items.map((item, index) => <tr key={`${item.key}-${index}`}>
+                    <td><strong>{item.name}</strong><small className="block">Unidade: {item.unit}</small></td>
+                    <td>{item.category}</td>
+                    <td>{formatQuantity(item.quantity)}</td>
+                    <td>{brl(item.unitCost)}</td>
+                    <td><strong>{brl(item.totalCost)}</strong></td>
+                    <td>{item.requiresSerial ? formatQuantity(item.serialCount) : 'Não se aplica'}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="viz-callout">Ao confirmar, a solicitação será registrada e seguirá as regras de aprovação, limite financeiro e entrega configuradas no sistema.</div>
         </div>
       </Modal>
 
