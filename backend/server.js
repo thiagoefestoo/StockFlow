@@ -51,6 +51,7 @@ app.use('/api/materials', require('./app/routes/materialRoutes'));
 app.use('/api/companies', require('./app/routes/companyRoutes'));
 app.use('/api/warehouses', require('./app/routes/warehouseRoutes'));
 app.use('/api/technicians', require('./app/routes/technicianRoutes'));
+app.use('/api/technicians/:technicianId/tools', require('./app/routes/technicianToolRoutes'));
 app.use('/api/batches', require('./app/routes/batchRoutes'));
 app.use('/api/stock', require('./app/routes/stockRoutes'));
 app.use('/api/transfers', require('./app/routes/transferRoutes'));

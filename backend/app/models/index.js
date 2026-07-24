@@ -18,6 +18,7 @@ const MaterialRequest = require('./materialRequest');
 const MaterialRequestItem = require('./materialRequestItem');
 const ApprovalRequest = require('./approvalRequest');
 const Warehouse = require('./warehouse');
+const TechnicianTool = require('./technicianTool');
 
 ContractorCompany.hasMany(Technician, { foreignKey: 'companyId' });
 Technician.belongsTo(ContractorCompany, { foreignKey: 'companyId' });
@@ -26,6 +27,11 @@ Warehouse.hasMany(Technician, { foreignKey: 'defaultWarehouseId' });
 
 Technician.hasOne(User, { foreignKey: 'technicianId' });
 User.belongsTo(Technician, { foreignKey: 'technicianId' });
+
+Technician.hasMany(TechnicianTool, { foreignKey: 'technicianId' });
+TechnicianTool.belongsTo(Technician, { foreignKey: 'technicianId' });
+TechnicianTool.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+TechnicianTool.belongsTo(User, { as: 'removedBy', foreignKey: 'removedById' });
 
 Material.hasMany(SerializedAsset, { foreignKey: 'materialId' });
 SerializedAsset.belongsTo(Material, { foreignKey: 'materialId' });
@@ -113,4 +119,5 @@ module.exports = {
   MaterialRequestItem,
   ApprovalRequest,
   Warehouse,
+  TechnicianTool,
 };

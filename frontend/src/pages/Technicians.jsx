@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
@@ -21,6 +22,10 @@ const empty = {
   mustChangePassword: true,
   transferApprovalLimit: 500,
 };
+
+const emptyTool = { name: '', serialNumber: '', brand: '', referenceValue: '', notes: '' };
+const emptyRemoval = { status: 'devolvida', removalReason: '', replacementName: '', replacementSerial: '', replacementBrand: '', replacementValue: '' };
+const TOOL_STATUS_LABELS = { com_tecnico: 'Com o técnico', substituida: 'Substituída', perdida: 'Perdida', desgaste: 'Baixada por desgaste', devolvida: 'Devolvida' };
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -55,6 +60,17 @@ export default function Technicians() {
   const [limitModal, setLimitModal] = useState({ open: false, technician: null, value: 500 });
   const [limitSaving, setLimitSaving] = useState(false);
   const [limitError, setLimitError] = useState('');
+  const canViewTools = isAdmin || canAccessModule('technicianTools');
+  const canEditTools = isAdmin || canAccessModule('technicianToolsEdit');
+  const [tools, setTools] = useState([]);
+  const [toolModal, setToolModal] = useState(false);
+  const [toolForm, setToolForm] = useState(emptyTool);
+  const [toolSaving, setToolSaving] = useState(false);
+  const [toolError, setToolError] = useState('');
+  const [removeModal, setRemoveModal] = useState({ open: false, tool: null });
+  const [removeForm, setRemoveForm] = useState(emptyRemoval);
+  const [removeSaving, setRemoveSaving] = useState(false);
+  const [removeError, setRemoveError] = useState('');
 
   async function load() {
     const [t, c, w] = await Promise.all([
@@ -138,13 +154,83 @@ export default function Technicians() {
     }
   }
 
+  async function loadTools(technicianId) {
+    if (!canViewTools) return;
+    const res = await api.get(`/technicians/${technicianId}/tools`);
+    setTools(res.data.data?.tools || []);
+  }
+
   async function openDetails(technician) {
     const stock = (await api.get(`/technicians/${technician.id}/stock`)).data.data;
     setDetails({ open: true, technician, stock });
+    loadTools(technician.id);
   }
 
   async function refreshDetails() {
     if (details.technician) openDetails(details.technician);
+  }
+
+  function openAddTool() {
+    setToolError('');
+    setToolForm(emptyTool);
+    setToolModal(true);
+  }
+
+  async function saveTool() {
+    if (!details.technician) return;
+    setToolSaving(true);
+    setToolError('');
+    try {
+      await api.post(`/technicians/${details.technician.id}/tools`, {
+        name: toolForm.name,
+        serialNumber: toolForm.serialNumber,
+        brand: toolForm.brand || null,
+        referenceValue: Number(toolForm.referenceValue || 0),
+        notes: toolForm.notes || null,
+      });
+      setToolModal(false);
+      setToolForm(emptyTool);
+      await loadTools(details.technician.id);
+    } catch (err) {
+      setToolError(err.response?.data?.message || 'Não foi possível registrar a ferramenta.');
+    } finally {
+      setToolSaving(false);
+    }
+  }
+
+  function openRemoveTool(tool) {
+    setRemoveError('');
+    setRemoveForm(emptyRemoval);
+    setRemoveModal({ open: true, tool });
+  }
+
+  async function saveRemoveTool() {
+    if (!details.technician || !removeModal.tool) return;
+    if (!removeForm.removalReason.trim()) {
+      setRemoveError('Descreva o motivo da baixa.');
+      return;
+    }
+    setRemoveSaving(true);
+    setRemoveError('');
+    try {
+      const payload = { status: removeForm.status, removalReason: removeForm.removalReason };
+      if (removeForm.status === 'substituida' && removeForm.replacementSerial.trim()) {
+        payload.replacement = {
+          name: removeForm.replacementName || removeModal.tool.name,
+          serialNumber: removeForm.replacementSerial,
+          brand: removeForm.replacementBrand || null,
+          referenceValue: Number(removeForm.replacementValue || removeModal.tool.referenceValue || 0),
+        };
+      }
+      await api.post(`/technicians/${details.technician.id}/tools/${removeModal.tool.id}/remove`, payload);
+      setRemoveModal({ open: false, tool: null });
+      setRemoveForm(emptyRemoval);
+      await loadTools(details.technician.id);
+    } catch (err) {
+      setRemoveError(err.response?.data?.message || 'Não foi possível registrar a baixa da ferramenta.');
+    } finally {
+      setRemoveSaving(false);
+    }
   }
 
   const totalValue = useMemo(() => technicians.reduce((s, t) => s + Number(t.totalCustodyValue ?? t.assetValue ?? 0), 0), [technicians]);
@@ -259,11 +345,77 @@ export default function Technicians() {
           <section className="panel-soft"><h4>Resumo por material</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Seriais</th></tr></thead><tbody>{(details.stock?.groupedMaterials || []).map((row) => <tr key={row.material}><td>{row.material}</td><td>{formatQuantity(row.quantity)}</td><td>{brl(row.value)}</td><td>{(row.serials || []).slice(0, 6).join(', ')}{(row.serials || []).length > 6 ? '...' : ''}</td></tr>)}</tbody></table></div></section>
           <DetailList title="Equipamentos serializados na caixa" items={details.stock?.assets || []} render={(asset) => <><b>{asset.serialNumber}</b><span>{asset.Material?.name} • {asset.status} • {brl(asset.acquisitionCost)} • {asset.custodyDays ?? 0} dia(s) em custódia</span><small>{asset.brand || '-'} {asset.model || ''} • {asset.mac || 'sem MAC'}</small></>} />
           <DetailList title="Materiais consumíveis na caixa" items={details.stock?.balances || []} render={(balance) => <><b>{balance.Material?.name}</b><span>Quantidade: {formatQuantity(balance.quantity, balance.Material?.unit)} • valor previsto {brl(Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0))}</span></>} />
+          {canViewTools && (
+            <section className="detail-section">
+              <div className="toolbar" style={{ marginBottom: '0.5rem' }}>
+                <h4 style={{ margin: 0 }}>Ferramentas sob custódia (fora da caixa técnica)</h4>
+                <div className="action-toolbar">
+                  {details.technician && <Link className="ghost" to={`/ferramentas-tecnico/${details.technician.id}`} target="_blank" rel="noreferrer">Gerar termo (imprimir)</Link>}
+                  {canEditTools && <button onClick={openAddTool}>Adicionar ferramenta</button>}
+                </div>
+              </div>
+              <p><small>Ferramentas registradas aqui ficam apenas na ficha do técnico, para controle de custódia em caso de perda ou desligamento. Não aparecem na caixa técnica nem entram na movimentação de material/consumível.</small></p>
+              {tools.length === 0 && <div className="empty-state">Nenhuma ferramenta registrada na ficha deste técnico.</div>}
+              {tools.map((tool) => (
+                <div className="detail-row" key={tool.id}>
+                  <b>{tool.name}</b>
+                  <span>Série/patrimônio: {tool.serialNumber} • {tool.brand || 'sem marca/modelo'} • {brl(tool.referenceValue)} • entregue em {dt(tool.deliveredAt)}</span>
+                  <small>
+                    Status: {TOOL_STATUS_LABELS[tool.status] || tool.status}
+                    {tool.status !== 'com_tecnico' && ` • baixada em ${dt(tool.removedAt)} • motivo: ${tool.removalReason || '-'}`}
+                  </small>
+                  {canEditTools && tool.status === 'com_tecnico' && (
+                    <div className="action-toolbar"><button className="ghost danger-outline" onClick={() => openRemoveTool(tool)}>Baixar / substituir / perda</button></div>
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
           <DetailList title="Guias recentes" items={details.stock?.transfers || []} render={(tr) => <><b>{tr.transferNumber}</b><span>{tr.status} • {dt(tr.deliveredAt)} • {brl(tr.totalValue)} • {tr.TransferItems?.length || 0} item(ns)</span></>} />
           <DetailList title="Ordens de serviço" items={details.stock?.orders || []} render={(os) => <><b>{os.osNumber} • {os.customerName}</b><span>{os.status} • {os.serviceType} • {dt(os.createdAt)}</span><small>{os.customerCpf} • {os.city}</small></>} />
           <DetailList title="Histórico recente do técnico" items={details.stock?.movements || []} render={(m) => <><b>{m.type} • {m.reference || '-'}</b><span>{m.Material?.name || '-'} • qtd. {formatQuantity(m.quantity)} • {m.serialNumber || 'sem serial'} • {dt(m.movementAt)}</span><small>{m.fromTechnician?.name || m.fromOwnerType || '-'} → {m.toTechnician?.name || m.toOwnerType || '-'}</small></>} />
         </div>}
       </DetailsModal>
+
+      <Modal open={toolModal} title={`Adicionar ferramenta: ${details.technician?.name || ''}`} onClose={() => setToolModal(false)} footer={<><button className="ghost" onClick={() => setToolModal(false)}>Cancelar</button><button disabled={toolSaving} onClick={saveTool}>{toolSaving ? 'Salvando...' : 'Registrar ferramenta'}</button></>}>
+        <div className="form-stack">
+          {toolError && <div className="alert danger">{toolError}</div>}
+          <div className="form-grid">
+            <label>Nome/descrição<input value={toolForm.name} onChange={(e) => setToolForm({ ...toolForm, name: e.target.value })} placeholder="Ex.: Furadeira Bosch, Escada 5m" /></label>
+            <label>Nº de patrimônio/série<input value={toolForm.serialNumber} onChange={(e) => setToolForm({ ...toolForm, serialNumber: e.target.value })} /></label>
+            <label>Marca/modelo<input value={toolForm.brand} onChange={(e) => setToolForm({ ...toolForm, brand: e.target.value })} /></label>
+            <label>Valor de referência<input type="number" min="0" step="0.01" value={toolForm.referenceValue} onChange={(e) => setToolForm({ ...toolForm, referenceValue: e.target.value })} /></label>
+          </div>
+          <label>Observações<textarea rows={2} value={toolForm.notes} onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })} /></label>
+          <small>Este item ficará na ficha do técnico até que seja devolvido, substituído ou baixado por perda/desgaste. Não entra na caixa técnica nem na movimentação de material.</small>
+        </div>
+      </Modal>
+
+      <Modal open={removeModal.open} title={`Baixar ferramenta: ${removeModal.tool?.name || ''}`} onClose={() => setRemoveModal({ open: false, tool: null })} footer={<><button className="ghost" onClick={() => setRemoveModal({ open: false, tool: null })}>Cancelar</button><button disabled={removeSaving} onClick={saveRemoveTool}>{removeSaving ? 'Salvando...' : 'Confirmar baixa'}</button></>}>
+        <div className="form-stack">
+          {removeError && <div className="alert danger">{removeError}</div>}
+          <p><small>Série/patrimônio: <b>{removeModal.tool?.serialNumber}</b> • Valor de referência: {brl(removeModal.tool?.referenceValue)}</small></p>
+          <label>Motivo da baixa<select value={removeForm.status} onChange={(e) => setRemoveForm({ ...removeForm, status: e.target.value })}>
+            <option value="devolvida">Devolução</option>
+            <option value="perdida">Perda/extravio</option>
+            <option value="desgaste">Desgaste/quebra</option>
+            <option value="substituida">Substituição por outra ferramenta</option>
+          </select></label>
+          <label>Descrição do motivo<textarea rows={2} value={removeForm.removalReason} onChange={(e) => setRemoveForm({ ...removeForm, removalReason: e.target.value })} placeholder="Ex.: devolvida na saída de férias, perdida em campo em 12/07, cabo rompido..." /></label>
+          {removeForm.status === 'substituida' && (
+            <section className="panel-soft">
+              <h4>Ferramenta nova (opcional)</h4>
+              <div className="form-grid">
+                <label>Nome/descrição<input value={removeForm.replacementName} onChange={(e) => setRemoveForm({ ...removeForm, replacementName: e.target.value })} placeholder={removeModal.tool?.name} /></label>
+                <label>Nº de patrimônio/série<input value={removeForm.replacementSerial} onChange={(e) => setRemoveForm({ ...removeForm, replacementSerial: e.target.value })} /></label>
+                <label>Marca/modelo<input value={removeForm.replacementBrand} onChange={(e) => setRemoveForm({ ...removeForm, replacementBrand: e.target.value })} /></label>
+                <label>Valor de referência<input type="number" min="0" step="0.01" value={removeForm.replacementValue} onChange={(e) => setRemoveForm({ ...removeForm, replacementValue: e.target.value })} placeholder={removeModal.tool?.referenceValue} /></label>
+              </div>
+              <small>Se preencher o número de série da ferramenta nova, ela já entra automaticamente na ficha como item ativo.</small>
+            </section>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

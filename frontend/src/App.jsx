@@ -29,6 +29,7 @@ import Warehouses from './pages/Warehouses';
 import SerialLife from './pages/SerialLife';
 import TechnicianLosses from './pages/TechnicianLosses';
 import LossPrint from './pages/LossPrint';
+import TechnicianToolsPrint from './pages/TechnicianToolsPrint';
 import TechnicianReturns from './pages/TechnicianReturns';
 import LossEvaluation from './pages/LossEvaluation';
 
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="central-caixa-tecnico" element={<PrivateRoute module="technicianBoxControl"><TechnicianBoxControl /></PrivateRoute>} />
             <Route path="retorno-caixa-estoque" element={<PrivateRoute module="technicianReturns"><TechnicianReturns /></PrivateRoute>} />
             <Route path="tecnicos" element={<PrivateRoute module="technicians"><Technicians /></PrivateRoute>} />
+            <Route path="ferramentas-tecnico/:id" element={<PrivateRoute module="technicianTools"><TechnicianToolsPrint /></PrivateRoute>} />
             <Route path="usuarios" element={<PrivateRoute roles={['admin']} module="users"><Users /></PrivateRoute>} />
             <Route path="minha-conta" element={<Account />} />
             <Route path="os" element={<PrivateRoute module="serviceOrders"><ServiceOrders /></PrivateRoute>} />
