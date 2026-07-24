@@ -18,6 +18,9 @@ const adminGroups = [
 export default function Layout() {
   const { user, logout, isAdmin, canAccessPath } = useAuth();
   const location = useLocation();
+  const isSignatureDocumentRoute = /^\/(transferencias|perdas-tecnico)\/[^/]+$/.test(location.pathname)
+    || /^\/tecnicos\/[^/]+\/ferramentas-termo$/.test(location.pathname)
+    || /^\/ferramentas-tecnico\/[^/]+$/.test(location.pathname);
   const baseGroups = adminGroups.filter((group) => !group.adminOnly || isAdmin);
   const groups = useMemo(() => baseGroups
     .map((group) => ({ ...group, links: group.links.filter(([to]) => canAccessPath(to)) }))
@@ -109,7 +112,7 @@ export default function Layout() {
             <button className="ghost" onClick={logout}>Sair</button>
           </div>
         </header>
-        <LivePulse />
+        {!isSignatureDocumentRoute && <LivePulse />}
         <Outlet />
       </main>
     </div>

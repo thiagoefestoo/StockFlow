@@ -14,6 +14,9 @@ export default function TechnicianToolsPrint() {
   if (!term) return <div className="panel">Carregando termo de responsabilidade...</div>;
 
   const { technician, activeTools, generatedAt, totalValue } = term;
+  const tools = activeTools || [];
+  const calculatedTotalValue = tools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0);
+  const guideTotalValue = calculatedTotalValue > 0 ? calculatedTotalValue : Number(totalValue || 0);
 
   return (
     <div className="page-grid print-page">
@@ -30,18 +33,19 @@ export default function TechnicianToolsPrint() {
           <div><h1>TERMO DE RESPONSABILIDADE DE FERRAMENTAS</h1><p>Documento de custódia das ferramentas registradas em nome do técnico.</p></div>
           <strong>{dt(generatedAt)}</strong>
         </div>
+        <div className="guide-total-highlight"><span>Valor total do termo</span><strong>{brl(guideTotalValue)}</strong><small>{tools.length} ferramenta(s) sob custódia</small></div>
         <div className="paper-grid">
           <p><b>Técnico:</b> {technician?.name}</p>
           <p><b>CPF/documento:</b> {technician?.document || '-'}</p>
           <p><b>Telefone:</b> {technician?.phone || '-'}</p>
           <p><b>Empresa:</b> {technician?.ContractorCompany?.name || '-'}</p>
           <p><b>Data de emissão:</b> {dt(generatedAt)}</p>
-          <p><b>Valor total sob custódia:</b> {brl(totalValue)}</p>
+          <p><b>Valor total sob custódia:</b> {brl(guideTotalValue)}</p>
         </div>
         <table>
           <thead><tr><th>Ferramenta</th><th>Marca/modelo</th><th>Nº patrimônio/série</th><th>Entrega</th><th>Valor de referência</th></tr></thead>
           <tbody>
-            {(activeTools || []).map((tool) => (
+            {tools.map((tool) => (
               <tr key={tool.id}>
                 <td>{tool.name}</td>
                 <td>{tool.brand || '-'}</td>
@@ -50,7 +54,8 @@ export default function TechnicianToolsPrint() {
                 <td>{brl(tool.referenceValue)}</td>
               </tr>
             ))}
-            {(!activeTools || activeTools.length === 0) && <tr><td colSpan={5}>Nenhuma ferramenta ativa registrada nesta ficha.</td></tr>}
+            {tools.length === 0 && <tr><td colSpan={5}>Nenhuma ferramenta ativa registrada nesta ficha.</td></tr>}
+            {tools.length > 0 && <tr className="guide-total-row"><td colSpan={4}><strong>Total do termo</strong></td><td><strong>{brl(guideTotalValue)}</strong></td></tr>}
           </tbody>
         </table>
         <div className="stamp-box">

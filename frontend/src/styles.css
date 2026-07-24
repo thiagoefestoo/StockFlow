@@ -2623,6 +2623,21 @@ input[readonly], textarea[readonly] {
   background: #eff6ff;
   color: #0f3f8f;
 }
+.guide-total-highlight {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 18px;
+  margin: 14px 0 16px;
+  padding: 14px 18px;
+  border: 2px solid #0f3f8f;
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #0f3f8f;
+}
+.guide-total-highlight span { font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+.guide-total-highlight strong { grid-row: 1 / span 2; grid-column: 2; font-size: 1.55rem; font-variant-numeric: tabular-nums; }
+.guide-total-highlight small { color: #475569; font-weight: 700; }
 
 /* Impressão limpa: somente o documento/termo destinado à assinatura. */
 @media print {
@@ -2651,6 +2666,8 @@ input[readonly], textarea[readonly] {
     box-shadow: none !important;
     background: #fff !important;
   }
+  .live-pulse,
+  .operation-live,
   .print-page .no-print,
   .print-page .alert,
   .print-page .floating-alert,

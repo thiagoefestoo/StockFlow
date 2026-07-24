@@ -10,6 +10,11 @@ export default function TransferPrint() {
   useEffect(() => { api.get(`/transfers/${id}`).then((r) => setTransfer(r.data.data)); }, [id]);
   if (!transfer) return <div className="panel">Carregando guia...</div>;
   const isReturn = String(transfer.transferNumber || '').toUpperCase().startsWith('RETORNO-');
+  const items = transfer.TransferItems || [];
+  const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const calculatedTotalValue = items.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
+  const totalValue = calculatedTotalValue > 0 ? calculatedTotalValue : Number(transfer.totalValue || 0);
+  const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   return (
     <div className="page-grid print-page">
       <div className="toolbar no-print"><div><h2>{isReturn ? 'Guia de retorno' : 'Guia de entrega'} {transfer.transferNumber}</h2><p>Imprima esta página para assinatura/conferência.</p></div><button onClick={() => window.print()}>Imprimir guia</button></div>
@@ -19,8 +24,9 @@ export default function TransferPrint() {
           <div className="paper-brand-meta"><strong>Super Infra</strong><span>Controle de estoque, patrimônio e caixa técnica</span></div>
         </div>
         <div className="paper-head"><div><h1>{isReturn ? 'GUIA DE RETORNO DE MATERIAL' : 'GUIA DE ENTREGA DE MATERIAL'}</h1><p>{isReturn ? 'Documento para conferência do retorno do técnico para o estoque.' : 'Documento para conferência e assinatura do técnico responsável.'}</p></div><strong>{transfer.transferNumber}</strong></div>
-        <div className="paper-grid"><p><b>Técnico:</b> {transfer.Technician?.name}</p><p><b>CPF:</b> {transfer.Technician?.document || '-'}</p><p><b>{isReturn ? 'Estoque destino:' : 'Estoque origem:'}</b> {transfer.Warehouse?.name || '-'}</p><p><b>Data:</b> {new Date(transfer.deliveredAt).toLocaleString('pt-BR')}</p><p><b>Status:</b> {transfer.status}</p></div>
-        <table><thead><tr><th>Material</th><th>Serial</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>{transfer.TransferItems?.map((item) => <tr key={item.id}><td>{item.Material?.name}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{Number(item.totalCost).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>)}</tbody></table>
+        <div className="guide-total-highlight"><span>Valor total da guia</span><strong>{brl(totalValue)}</strong><small>{formatQuantity(totalQuantity)} item(ns) relacionado(s)</small></div>
+        <div className="paper-grid"><p><b>Técnico:</b> {transfer.Technician?.name}</p><p><b>CPF:</b> {transfer.Technician?.document || '-'}</p><p><b>{isReturn ? 'Estoque destino:' : 'Estoque origem:'}</b> {transfer.Warehouse?.name || '-'}</p><p><b>Data:</b> {new Date(transfer.deliveredAt).toLocaleString('pt-BR')}</p><p><b>Status:</b> {transfer.status}</p><p><b>Valor total:</b> {brl(totalValue)}</p></div>
+        <table><thead><tr><th>Material</th><th>Serial</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.Material?.name}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.totalCost)}</td></tr>)}<tr className="guide-total-row"><td colSpan="2"><strong>Total da guia</strong></td><td><strong>{formatQuantity(totalQuantity)}</strong></td><td><strong>{brl(totalValue)}</strong></td></tr></tbody></table>
         <div className="stamp-box"><strong>CARIMBO DE CONFERÊNCIA SUPER INFRA</strong><p>{transfer.stampText || (isReturn ? 'Recebido do técnico, conferido e retornado ao estoque informado.' : 'Recebido, conferido e assumida responsabilidade de guarda até baixa por OS ou devolução ao estoque.')}</p><div className="stamp-grid"><span>Data: ____/____/______</span><span>Hora: ____:____</span><span>Matrícula: __________</span></div></div><div className="signature-area"><div><span></span><p>Assinatura do Técnico</p></div><div><span></span><p>Responsável pelo Estoque</p></div></div>
         <p className="paper-note no-print">{isReturn ? 'Declaro que os materiais listados acima foram devolvidos pelo técnico e conferidos para retorno ao estoque.' : 'Declaro que recebi os materiais listados acima, com os números de série discriminados, ficando responsável pela guarda, utilização em OS ou devolução formal ao estoque.'}</p>
       </section>

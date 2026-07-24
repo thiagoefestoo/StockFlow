@@ -18,6 +18,11 @@ export default function LossPrint() {
 
   if (!loss) return <div className="panel">Carregando guia de perda...</div>;
 
+  const items = loss.TransferItems || [];
+  const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const calculatedTotalValue = items.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
+  const totalValue = calculatedTotalValue > 0 ? calculatedTotalValue : Number(loss.totalValue || 0);
+
   return (
     <div className="page-grid print-page">
       <div className="toolbar no-print">
@@ -30,20 +35,21 @@ export default function LossPrint() {
           <div className="paper-brand-meta"><strong>Super Infra</strong><span>Registro de perda, desconto e baixa de item sob responsabilidade técnica</span></div>
         </div>
         <div className="paper-head"><div><h1>GUIA DE PERDA/DESCONTO</h1><p>Documento para reconhecimento do técnico responsável pela guarda do item.</p></div><strong>{loss.transferNumber}</strong></div>
+        <div className="guide-total-highlight"><span>Valor total da guia</span><strong>{brl(totalValue)}</strong><small>{formatQuantity(totalQuantity)} item(ns) relacionado(s)</small></div>
         <div className="paper-grid">
           <p><b>Técnico:</b> {loss.Technician?.name}</p>
           <p><b>CPF:</b> {loss.Technician?.document || '-'}</p>
           <p><b>Tipo de baixa:</b> {isToolLoss ? 'Ferramenta' : 'Material'}</p>
           <p><b>Data do registro:</b> {new Date(loss.deliveredAt || loss.createdAt).toLocaleString('pt-BR')}</p>
           <p><b>Status do documento:</b> {loss.status}</p>
-          <p><b>Valor para desconto:</b> {brl(loss.totalValue)}</p>
+          <p><b>Valor para desconto:</b> {brl(totalValue)}</p>
           <p><b>Responsável pelo lançamento:</b> {loss.createdBy?.name || '-'}</p>
         </div>
         <table>
           <thead><tr><th>Item</th><th>Tipo</th><th>Patrimônio/serial</th><th>Qtd.</th><th>Valor</th></tr></thead>
           <tbody>
-            {loss.TransferItems?.map((item) => <tr key={item.id}><td>{itemName(item)}</td><td>{itemType(item)}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.totalCost)}</td></tr>)}
-            <tr className="guide-total-row"><td colSpan="3"><strong>Total da guia</strong></td><td><strong>{formatQuantity(loss.totalQuantity)}</strong></td><td><strong>{brl(loss.totalValue)}</strong></td></tr>
+            {items.map((item) => <tr key={item.id}><td>{itemName(item)}</td><td>{itemType(item)}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.totalCost)}</td></tr>)}
+            <tr className="guide-total-row"><td colSpan="3"><strong>Total da guia</strong></td><td><strong>{formatQuantity(totalQuantity)}</strong></td><td><strong>{brl(totalValue)}</strong></td></tr>
           </tbody>
         </table>
         <div className="stamp-box"><strong>RECONHECIMENTO DE PERDA/DESCONTO</strong><p>{loss.stampText || 'Reconheço a perda do(s) item(ns) listado(s), autorizo a conferência/desconto conforme política interna e declaro ciência da baixa em minha ficha de responsabilidade.'}</p><div className="stamp-grid"><span>Data: ____/____/______</span><span>Hora: ____:____</span><span>Matrícula: __________</span></div></div>
