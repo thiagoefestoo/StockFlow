@@ -361,10 +361,8 @@ export default function Transfers() {
         return `A quantidade a transferir de ${material.name} não pode ultrapassar o solicitado (${qtyLabel(requestedMaximum, material.unit)}).`;
       }
       if (deliveryQuantity === 0) {
-        if (requestLinked && available === 0) continue;
-        return requestLinked
-          ? `Existe saldo disponível de ${material.name} (${qtyLabel(available, material.unit)}). Informe a quantidade que será transferida.`
-          : `Informe uma quantidade válida para ${material.name}.`;
+        if (requestLinked) continue;
+        return `Informe uma quantidade válida para ${material.name}.`;
       }
       if (material.requiresSerial) {
         const quantity = Math.trunc(deliveryQuantity);
@@ -587,8 +585,8 @@ export default function Transfers() {
                         <>
                           {requestLinked && <small className="requested-quantity-label">Quantidade solicitada pelo técnico: <strong>{qtyLabel(item.requestedQuantity, material?.unit)}</strong></small>}
                           <small className={exceeds ? 'field-warning stock-balance-label' : 'stock-balance-label'}>Saldo disponível neste estoque: <strong>{qtyLabel(available, material?.unit)}</strong></small>
-                          {requestLinked && available === 0 && (
-                            <small className="zero-stock-release-label">✅ Estoque zerado. Este item pode seguir com quantidade 0 e a solicitação será liberada sem transferência física.</small>
+                          {requestLinked && toQuantityNumber(item.quantity) === 0 && (
+                            <small className="zero-stock-release-label">✅ Quantidade 0 selecionada. Este item não será transferido, mas os demais itens da solicitação poderão ser entregues normalmente.</small>
                           )}
                           {exceeds && (
                             <small className="field-warning">⚠️ Quantidade acima do que consta em estoque. Máximo disponível: {qtyLabel(available, material?.unit)}.</small>

@@ -110,19 +110,13 @@ export default function MaterialRequests() {
   }, [form, materials, warehouses, technicians, isTechnician, user?.name]);
 
   function openCreate() {
-    const firstWarehouseId = warehouses[0]?.id || '';
-    const nextType = isTechnician ? 'reposicao_carga' : user?.role === 'estoquista' ? 'recarga_estoque' : 'reposicao_carga';
     setForm({
       ...baseForm,
-      requestType: nextType,
-      technicianId: !isTechnician && nextType === 'reposicao_carga' ? technicians[0]?.id || '' : '',
-      warehouseId: nextType === 'recarga_estoque' ? firstWarehouseId : '',
+      requestType: 'reposicao_carga',
+      technicianId: !isTechnician ? technicians[0]?.id || '' : '',
+      warehouseId: '',
     });
     setModal(true);
-  }
-
-  function selectedMaterial(materialId) {
-    return materials.find((m) => Number(m.id) === Number(materialId));
   }
 
   function addItem() {
@@ -260,7 +254,7 @@ export default function MaterialRequests() {
         <div>
           <span className="eyebrow">Workflow de carga</span>
           <h2>Solicitações de material</h2>
-          <p>{isTechnician ? 'Solicite material para reposição da sua caixa técnica.' : 'Técnicos solicitam material e estoquistas solicitam recarga para seus estoques regionais.'}</p>
+          <p>{isTechnician ? 'Solicite material para reposição da sua caixa técnica.' : 'Registre cargas de material destinadas aos técnicos.'}</p>
         </div>
         <button onClick={openCreate}>{isTechnician ? 'Solicitar material' : 'Nova solicitação'}</button>
       </section>
@@ -290,18 +284,16 @@ export default function MaterialRequests() {
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>
         <form className="form-stack" onSubmit={save}>
           <div className="form-grid">
-            {!isTechnician && <label>Tipo de solicitação<select value={form.requestType} onChange={(e) => setForm({ ...form, requestType: e.target.value, technicianId: '', warehouseId: e.target.value === 'recarga_estoque' ? warehouses[0]?.id || '' : '', requesterNotes: '' })}><option value="recarga_estoque">Recarga de estoque regional</option><option value="reposicao_carga">Carga para técnico</option></select></label>}
+            {!isTechnician && <div className="mini-card"><small>Tipo de solicitação</small><strong>Carga para técnico</strong><span>A recarga de estoque regional não é criada nesta tela.</span></div>}
             {isTechnician && <div className="mini-card"><small>Solicitante</small><strong>{user?.name}</strong><span>Reposição da minha caixa</span></div>}
-            {!isTechnician && form.requestType === 'reposicao_carga' && <label>Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
-            {form.requestType === 'recarga_estoque' && <label>Estoque que receberá a recarga<select value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city} {w.state}</option>)}</select></label>}
+            {!isTechnician && <label>Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
             <label>Prioridade<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
             <label>Necessário até<input type="date" value={form.neededBy} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} /></label>
           </div>
           <label>Justificativa<select value={form.requesterNotes} onChange={(e) => setForm({ ...form, requesterNotes: e.target.value })} required><option value="">Selecione uma justificativa</option>{justificationOptions(form.requestType).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
           <div className="subtoolbar"><h4>Itens solicitados</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
           {form.items.map((item, i) => {
-            const material = selectedMaterial(item.materialId);
-            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecione o material</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="0" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div>{form.requestType === 'recarga_estoque' && material?.requiresSerial && <label>Seriais da recarga, se já souber<textarea rows="3" value={item.serialNumbersText || ''} onChange={(e) => updateItem(i, { serialNumbersText: e.target.value })} placeholder="Um serial por linha. Também pode preencher no recebimento após aprovação." /></label>}<button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
+            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecione o material</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
           })}
           {form.items.length === 0 && <div className="empty-state">Adicione materiais para enviar a solicitação.</div>}
         </form>

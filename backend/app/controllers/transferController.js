@@ -1,6 +1,6 @@
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
-const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockBalance, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification } = require('../models');
+const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
@@ -27,31 +27,6 @@ async function estimateTransferValue(items = [], sourceWarehouseId) {
     }
   }
   return money(totalValue);
-}
-
-async function availableQuantityForRequestItem(requestItem, sourceWarehouseId, transaction = null) {
-  const material = requestItem?.Material || await Material.findByPk(requestItem?.materialId, { transaction });
-  if (!material) return 0;
-  if (material.requiresSerial) {
-    return SerializedAsset.count({
-      where: {
-        materialId: material.id,
-        warehouseId: sourceWarehouseId,
-        ownerType: 'estoque',
-        status: 'em_estoque',
-      },
-      transaction,
-    });
-  }
-  const balance = await StockBalance.sum('quantity', {
-    where: {
-      materialId: material.id,
-      warehouseId: sourceWarehouseId,
-      ownerType: 'estoque',
-    },
-    transaction,
-  });
-  return qty(balance || 0);
 }
 
 function nextNumber() {
@@ -126,21 +101,13 @@ exports.create = asyncHandler(async (req, res) => {
       if (deliveryQuantity > approvedMaximum) {
         return fail(res, 400, `A quantidade de ${requestItem.Material?.name || 'material'} não pode ultrapassar o solicitado/aprovado (${approvedMaximum}).`);
       }
-      if (deliveryQuantity === 0) {
-        const available = await availableQuantityForRequestItem(requestItem, sourceWarehouseId);
-        if (available > 0) {
-          return fail(res, 400, `Existe saldo disponível de ${requestItem.Material?.name || 'material'} (${available}). Informe a quantidade que será transferida.`);
-        }
-      }
+      // Em uma entrega vinculada, quantidade 0 significa que este item não será atendido agora.
+      // Isso permite concluir uma carga parcial e entregar normalmente os demais materiais.
     }
 
     for (const requestItem of linkedRequest.MaterialRequestItems || []) {
       const requestItemKey = Number(requestItem.id);
       if (submittedRequestItems.has(requestItemKey)) continue;
-      const available = await availableQuantityForRequestItem(requestItem, sourceWarehouseId);
-      if (available > 0) {
-        return fail(res, 400, `O item ${requestItem.Material?.name || 'material'} possui saldo disponível (${available}) e precisa ter a quantidade de entrega informada.`);
-      }
       items.push({
         materialId: requestItem.materialId,
         requestItemId: requestItem.id,

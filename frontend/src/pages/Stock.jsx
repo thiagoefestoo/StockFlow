@@ -114,6 +114,17 @@ export default function Stock() {
   const totalEstoque = materials.reduce((s, m) => s + Number(m.mainStock || 0), 0);
   const low = materials.filter((m) => Number(m.mainStock || 0) <= Number(m.minStock || 0) && Number(m.minStock || 0) > 0).length;
   const valorCatalogo = materials.reduce((s, m) => s + (Number(m.mainStock || 0) * Number(m.unitCost || 0)), 0);
+  const warehouseTotals = useMemo(() => warehouses.map((warehouse) => {
+    const quantity = materials.reduce((sum, material) => {
+      const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
+      return sum + Number(stock?.quantity || 0);
+    }, 0);
+    const value = materials.reduce((sum, material) => {
+      const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
+      return sum + (Number(stock?.quantity || 0) * Number(material.unitCost || 0));
+    }, 0);
+    return { ...warehouse, quantity, value };
+  }), [materials, warehouses]);
 
   const preview = useMemo(() => {
     const estoqueMinimo = asNumber(form.minStock);
@@ -226,10 +237,26 @@ export default function Stock() {
       </div>
 
       <div className="kpi-grid small">
-        <KpiCard label="Itens no estoque" value={formatQuantity(totalEstoque)} />
+        <KpiCard label="Total entre todos os estoques" value={formatQuantity(totalEstoque)} hint="Somatório dos estoques autorizados para este usuário" />
         <KpiCard label="Alertas de mínimo" value={low} tone={low ? 'warning' : 'success'} />
         <KpiCard label="Valor estimado em estoque" value={brl(valorCatalogo)} />
       </div>
+
+      <section className="panel">
+        <div className="subtoolbar"><div><h3>Total por estoque</h3><small>Quantidades e valores somente dos estoques liberados para o usuário.</small></div></div>
+        <div className="kpi-grid small">
+          {warehouseTotals.map((warehouse) => (
+            <KpiCard
+              key={warehouse.id}
+              label={warehouse.name}
+              value={formatQuantity(warehouse.quantity)}
+              hint={`${brl(warehouse.value)} em materiais`}
+              tone={warehouse.quantity > 0 ? 'success' : 'default'}
+            />
+          ))}
+          {warehouseTotals.length === 0 && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
+        </div>
+      </section>
 
       <section className="panel">
         <div className="table-wrap">
