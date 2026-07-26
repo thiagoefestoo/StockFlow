@@ -10,6 +10,13 @@ const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../u
 const { hasModuleAccess } = require('../config/modulePermissions');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 
+const transferInclude = [
+  Technician,
+  { model: Technician, as: 'fromTechnician' },
+  Warehouse,
+  { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] },
+];
+
 
 async function estimateTransferValue(items = [], sourceWarehouseId) {
   let totalValue = 0;
@@ -37,13 +44,39 @@ function nextNumber() {
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const where = { ...stockWhereForUser(req.user, req.query.warehouseId), transferNumber: { [Op.notILike]: 'PERDA-%' } };
-  const transfers = await Transfer.findAll({ where, include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] }], order: [['deliveredAt', 'DESC']], limit: 300 });
+  const transferNumberWhere = { transferNumber: { [Op.notILike]: 'PERDA-%' } };
+  const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
+  let where;
+
+  if (req.user?.role === 'tecnico') {
+    const technicianId = Number(req.user.technicianId || -1);
+    where = {
+      ...transferNumberWhere,
+      [Op.or]: [
+        { technicianId },
+        { fromTechnicianId: technicianId },
+      ],
+    };
+  } else if (isPrivileged(req.user)) {
+    where = { ...warehouseScope, ...transferNumberWhere };
+  } else {
+    // Transferências de ferramentas não pertencem a um estoque específico.
+    // Usuários operacionais com acesso ao módulo devem visualizá-las, enquanto
+    // as transferências de materiais continuam limitadas aos estoques liberados.
+    where = {
+      ...transferNumberWhere,
+      [Op.or]: [
+        warehouseScope,
+        { transferType: 'ferramenta' },
+      ],
+    };
+  }
+  const transfers = await Transfer.findAll({ where, include: transferInclude, order: [['deliveredAt', 'DESC']], limit: 300 });
   return ok(res, transfers);
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] }] });
+  const transfer = await Transfer.findByPk(req.params.id, { include: transferInclude });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
   return ok(res, transfer);
 });
@@ -131,7 +164,7 @@ exports.create = asyncHandler(async (req, res) => {
   }
 
   const transfer = await sequelize.transaction(async (transaction) => {
-    const record = await Transfer.create({ transferNumber: nextNumber(), technicianId, deliveredAt: deliveredAt || new Date(), notes, createdById: req.user.id, warehouseId: sourceWarehouseId }, { transaction });
+    const record = await Transfer.create({ transferNumber: nextNumber(), transferType: 'material', technicianId, deliveredAt: deliveredAt || new Date(), notes, createdById: req.user.id, warehouseId: sourceWarehouseId }, { transaction });
     let totalQuantity = 0;
     let totalValue = 0;
     const usedSerials = new Set();
@@ -267,8 +300,129 @@ exports.create = asyncHandler(async (req, res) => {
   return created(res, transfer, qty(transfer.totalQuantity) > 0 ? 'Transferência registrada e guia gerada.' : 'Solicitação liberada sem transferência física porque o estoque estava zerado.');
 });
 
+
+function nextToolTransferNumber() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  return `FERRAMENTA-${stamp}`;
+}
+
+exports.transferTools = asyncHandler(async (req, res) => {
+  const { fromTechnicianId, technicianId, deliveredAt, notes } = req.body;
+  const toolIds = Array.isArray(req.body.toolIds) ? req.body.toolIds : [];
+
+  const sourceId = Number(fromTechnicianId);
+  const destinationId = Number(technicianId);
+  const normalizedToolIds = [...new Set(toolIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+
+  if (!sourceId) return fail(res, 400, 'Selecione o técnico de origem das ferramentas.');
+  if (!destinationId) return fail(res, 400, 'Selecione o técnico de destino das ferramentas.');
+  if (sourceId === destinationId) return fail(res, 400, 'O técnico de origem e o técnico de destino precisam ser diferentes.');
+  if (!normalizedToolIds.length) return fail(res, 400, 'Selecione ao menos uma ferramenta para transferir.');
+
+  const [sourceTechnician, destinationTechnician] = await Promise.all([
+    Technician.findByPk(sourceId),
+    Technician.findByPk(destinationId),
+  ]);
+  if (!sourceTechnician) return fail(res, 404, 'Técnico de origem não encontrado.');
+  if (!destinationTechnician) return fail(res, 404, 'Técnico de destino não encontrado.');
+
+  const result = await sequelize.transaction(async (transaction) => {
+    const tools = await TechnicianTool.findAll({
+      where: {
+        id: { [Op.in]: normalizedToolIds },
+        technicianId: sourceId,
+        status: 'com_tecnico',
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+      order: [['name', 'ASC']],
+    });
+
+    if (tools.length !== normalizedToolIds.length) {
+      throw new Error('Uma ou mais ferramentas não estão mais disponíveis na ficha do técnico de origem. Atualize a lista e tente novamente.');
+    }
+
+    const transferNumber = nextToolTransferNumber();
+    const record = await Transfer.create({
+      transferNumber,
+      transferType: 'ferramenta',
+      fromTechnicianId: sourceId,
+      technicianId: destinationId,
+      deliveredAt: deliveredAt || new Date(),
+      notes: String(notes || '').trim() || `Transferência de ferramentas de ${sourceTechnician.name} para ${destinationTechnician.name}.`,
+      stampText: 'Declaro que as ferramentas relacionadas foram conferidas e transferidas entre os técnicos indicados, permanecendo sob responsabilidade do técnico de destino.',
+      createdById: req.user.id,
+    }, { transaction });
+
+    let totalValue = 0;
+    const changedTools = [];
+
+    for (const tool of tools) {
+      const before = tool.toJSON();
+      const unitCost = money(tool.referenceValue || 0);
+
+      await TransferItem.create({
+        transferId: record.id,
+        itemType: 'ferramenta',
+        itemDescription: tool.name,
+        technicianToolId: tool.id,
+        quantity: 1,
+        unitCost,
+        totalCost: unitCost,
+        serialNumber: tool.serialNumber,
+      }, { transaction });
+
+      tool.technicianId = destinationId;
+      tool.deliveredAt = deliveredAt || new Date();
+      tool.notes = [
+        tool.notes,
+        `Transferida de ${sourceTechnician.name} para ${destinationTechnician.name} pela guia ${transferNumber}.`,
+      ].filter(Boolean).join(' | ');
+      await tool.save({ transaction });
+
+      totalValue += Number(unitCost);
+      changedTools.push({ before, after: tool.toJSON() });
+    }
+
+    record.totalQuantity = tools.length;
+    record.totalValue = money(totalValue);
+    await record.save({ transaction });
+
+    await Notification.create({
+      role: 'tecnico',
+      type: 'patrimonio',
+      severity: 'success',
+      title: `Ferramentas recebidas ${transferNumber}`,
+      message: `${tools.length} ferramenta(s) foram transferidas para a ficha de ${destinationTechnician.name}.`,
+      route: '/caixa-tecnico',
+      metadata: { transferId: record.id, technicianId: destinationId, fromTechnicianId: sourceId, toolIds: normalizedToolIds },
+    }, { transaction });
+
+    await writeAudit({
+      req,
+      action: 'transfer_technician_tools',
+      entity: 'Transfer',
+      entityId: record.id,
+      message: `Guia ${transferNumber} transferiu ${tools.length} ferramenta(s) de ${sourceTechnician.name} para ${destinationTechnician.name}.`,
+      afterData: {
+        ...record.toJSON(),
+        sourceTechnician: { id: sourceTechnician.id, name: sourceTechnician.name },
+        destinationTechnician: { id: destinationTechnician.id, name: destinationTechnician.name },
+        tools: changedTools,
+      },
+      transaction,
+    });
+
+    return record;
+  });
+
+  const createdTransfer = await Transfer.findByPk(result.id, { include: transferInclude });
+  return created(res, createdTransfer, 'Ferramentas transferidas para o técnico de destino e guia gerada para assinatura.');
+});
+
 exports.update = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: [Technician, Warehouse, { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] }] });
+  const transfer = await Transfer.findByPk(req.params.id, { include: transferInclude });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
   const before = transfer.toJSON();
   const { notes, status, deliveredAt, signatureResponsible } = req.body;

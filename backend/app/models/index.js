@@ -19,6 +19,7 @@ const MaterialRequestItem = require('./materialRequestItem');
 const ApprovalRequest = require('./approvalRequest');
 const Warehouse = require('./warehouse');
 const TechnicianTool = require('./technicianTool');
+const TechnicianToolDocument = require('./technicianToolDocument');
 
 ContractorCompany.hasMany(Technician, { foreignKey: 'companyId' });
 Technician.belongsTo(ContractorCompany, { foreignKey: 'companyId' });
@@ -32,6 +33,9 @@ Technician.hasMany(TechnicianTool, { foreignKey: 'technicianId' });
 TechnicianTool.belongsTo(Technician, { foreignKey: 'technicianId' });
 TechnicianTool.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
 TechnicianTool.belongsTo(User, { as: 'removedBy', foreignKey: 'removedById' });
+Technician.hasMany(TechnicianToolDocument, { as: 'toolDocuments', foreignKey: 'technicianId' });
+TechnicianToolDocument.belongsTo(Technician, { foreignKey: 'technicianId' });
+TechnicianToolDocument.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
 
 Material.hasMany(SerializedAsset, { foreignKey: 'materialId' });
 SerializedAsset.belongsTo(Material, { foreignKey: 'materialId' });
@@ -63,6 +67,7 @@ StockMovement.belongsTo(Warehouse, { as: 'fromWarehouse', foreignKey: 'fromWareh
 StockMovement.belongsTo(Warehouse, { as: 'toWarehouse', foreignKey: 'toWarehouseId' });
 
 Transfer.belongsTo(Technician, { foreignKey: 'technicianId' });
+Transfer.belongsTo(Technician, { as: 'fromTechnician', foreignKey: 'fromTechnicianId' });
 Transfer.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
 Transfer.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
 Transfer.hasMany(TransferItem, { foreignKey: 'transferId' });
@@ -122,4 +127,5 @@ module.exports = {
   ApprovalRequest,
   Warehouse,
   TechnicianTool,
+  TechnicianToolDocument,
 };

@@ -85,11 +85,12 @@ export default function TechnicianLosses() {
 
   const availableTools = useMemo(() => {
     const query = toolSearch.trim().toLowerCase();
+    const selectedIds = new Set((form.toolIds || []).map(Number));
     return (toolsData?.tools || [])
-      .filter((tool) => tool.status === 'com_tecnico')
+      .filter((tool) => tool.status === 'com_tecnico' && !selectedIds.has(Number(tool.id)))
       .filter((tool) => !query || [tool.name, tool.brand, tool.serialNumber].filter(Boolean).join(' ').toLowerCase().includes(query))
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [toolsData, toolSearch]);
+  }, [toolsData, toolSearch, form.toolIds]);
 
   function assetsByMaterial(materialId) {
     const query = serialSearch.trim().toLowerCase();
@@ -381,15 +382,13 @@ export default function TechnicianLosses() {
           <div className="subtoolbar"><div><h4>Ferramentas disponíveis na ficha</h4><small>Somente ferramentas que ainda estão com o técnico.</small></div><input className="loss-tool-search" value={toolSearch} onChange={(e) => setToolSearch(e.target.value)} placeholder="Buscar ferramenta ou patrimônio..." /></div>
           {form.technicianId && !availableTools.length && <div className="empty-state small">Este técnico não possui ferramentas ativas na ficha.</div>}
           <div className="loss-tool-list">
-            {availableTools.map((tool) => {
-              const selected = form.toolIds.map(Number).includes(Number(tool.id));
-              return <button type="button" key={tool.id} className={`loss-tool-card ${selected ? 'selected' : ''}`} onClick={() => toggleTool(tool.id)}>
-                <span><b>{tool.name}</b><small>{tool.brand || 'Sem marca'} • Patrimônio/série: {tool.serialNumber}</small><small>Em custódia desde {dt(tool.deliveredAt)}</small></span>
-                <strong>{brl(tool.referenceValue)}</strong>
-                <em>{selected ? 'Selecionada' : 'Selecionar'}</em>
-              </button>;
-            })}
+            {availableTools.map((tool) => <button type="button" key={tool.id} className="loss-tool-card" onClick={() => toggleTool(tool.id)}>
+              <span><b>{tool.name}</b><small>{tool.brand || 'Sem marca'} • Patrimônio/série: {tool.serialNumber}</small><small>Em custódia desde {dt(tool.deliveredAt)}</small></span>
+              <strong>{brl(tool.referenceValue)}</strong>
+              <em>Selecionar</em>
+            </button>)}
           </div>
+          {selectedTools.length > 0 && <section className="panel-soft"><h4>Ferramentas selecionadas ({selectedTools.length})</h4><small>Ao selecionar, a ferramenta sai da lista disponível para impedir repetição.</small><div className="loss-tool-list">{selectedTools.map((tool) => <button type="button" key={tool.id} className="loss-tool-card selected" onClick={() => toggleTool(tool.id)}><span><b>{tool.name}</b><small>{tool.brand || 'Sem marca'} • Patrimônio/série: {tool.serialNumber}</small></span><strong>{brl(tool.referenceValue)}</strong><em>Remover</em></button>)}</div></section>}
         </>}
 
         <div className="viz-callout">Ao registrar, o item sai da responsabilidade do técnico, entra no histórico de perda/desconto e a guia fica na fila para anexar o documento assinado.</div>

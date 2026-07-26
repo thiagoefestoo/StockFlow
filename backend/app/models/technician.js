@@ -9,6 +9,7 @@ const Technician = sequelize.define('Technician', {
   email: { type: DataTypes.STRING(180), allowNull: true },
   type: { type: DataTypes.ENUM('interno', 'terceirizado'), allowNull: false, defaultValue: 'interno' },
   status: { type: DataTypes.ENUM('ativo', 'inativo', 'bloqueado'), allowNull: false, defaultValue: 'ativo' },
+  companyId: { type: DataTypes.INTEGER, allowNull: true },
   vehiclePlate: { type: DataTypes.STRING(20), allowNull: true },
   notes: { type: DataTypes.TEXT, allowNull: true },
   serviceCities: { type: DataTypes.JSONB, allowNull: true, defaultValue: [] },

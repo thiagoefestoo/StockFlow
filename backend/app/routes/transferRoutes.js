@@ -5,6 +5,7 @@ router.use(authenticate, requireModule('transfers'));
 router.get('/', controller.list);
 router.get('/:id', controller.get);
 router.put('/:id', controller.update);
+router.post('/tools', controller.transferTools);
 router.post('/', controller.create);
 router.post('/:id/sign', controller.sign);
 module.exports = router;

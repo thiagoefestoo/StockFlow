@@ -2703,3 +2703,26 @@ input[readonly], textarea[readonly] {
 .operation-review-warning { margin: 0; }
 .option-used-note { color: #64748b; font-size: .82rem; font-weight: 750; }
 @media (max-width: 720px) { .operation-review-totals { grid-template-columns: 1fr; } }
+
+/* Atualização 42: transferência e termos de ferramentas */
+.tool-transfer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.tool-transfer-grid .panel-soft {
+  min-height: 220px;
+}
+.tool-transfer-grid .detail-row,
+.tool-document-row {
+  margin-bottom: 0.75rem;
+}
+.tool-document-row .attachment-preview {
+  margin-top: 0.45rem;
+}
+@media (max-width: 900px) {
+  .tool-transfer-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -132,6 +132,103 @@ async function ensureTransferItemLossSchema(queryInterface) {
   }
 }
 
+
+async function ensureTechnicianCompanySchema(queryInterface) {
+  const technicians = await queryInterface.describeTable('technicians').catch(() => null);
+  if (!technicians) return;
+
+  if (!technicians.companyId) {
+    await queryInterface.addColumn('technicians', 'companyId', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'contractor_companies', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    });
+    await queryInterface.addIndex('technicians', ['companyId']).catch(() => null);
+    console.log('✅ Coluna technicians.companyId criada para salvar a empresa do técnico.');
+  }
+}
+
+async function ensureTechnicianToolDocumentsSchema(queryInterface) {
+  let documents = await queryInterface.describeTable('technician_tool_documents').catch(() => null);
+
+  if (!documents) {
+    await queryInterface.createTable('technician_tool_documents', {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+      technicianId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'technicians', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      documentName: { type: DataTypes.STRING(255), allowNull: false },
+      documentData: { type: DataTypes.TEXT('long'), allowNull: false },
+      signedAt: { type: DataTypes.DATE, allowNull: true },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+      toolCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      totalValue: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+      createdById: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+      },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    });
+    await queryInterface.addIndex('technician_tool_documents', ['technicianId']);
+    await queryInterface.addIndex('technician_tool_documents', ['createdAt']);
+    console.log('✅ Tabela technician_tool_documents criada para termos assinados de ferramentas.');
+    documents = await queryInterface.describeTable('technician_tool_documents').catch(() => null);
+  }
+
+  if (!documents) return;
+
+  const missingColumns = [
+    ['signedAt', { type: DataTypes.DATE, allowNull: true }],
+    ['notes', { type: DataTypes.TEXT, allowNull: true }],
+    ['toolCount', { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }],
+    ['totalValue', { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 }],
+    ['createdById', { type: DataTypes.INTEGER, allowNull: true }],
+  ];
+
+  for (const [column, definition] of missingColumns) {
+    if (!documents[column]) {
+      await queryInterface.addColumn('technician_tool_documents', column, definition);
+      console.log(`✅ Coluna technician_tool_documents.${column} criada.`);
+    }
+  }
+}
+
+async function ensureToolTransferSchema(queryInterface) {
+  const transfers = await queryInterface.describeTable('transfers').catch(() => null);
+  if (!transfers) return;
+
+  if (!transfers.transferType) {
+    await queryInterface.addColumn('transfers', 'transferType', {
+      type: DataTypes.STRING(30),
+      allowNull: false,
+      defaultValue: 'material',
+    });
+    console.log('✅ Coluna transfers.transferType criada para identificar transferência de ferramentas.');
+  }
+
+  if (!transfers.fromTechnicianId) {
+    await queryInterface.addColumn('transfers', 'fromTechnicianId', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'technicians', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    });
+    await queryInterface.addIndex('transfers', ['fromTechnicianId']).catch(() => null);
+    console.log('✅ Coluna transfers.fromTechnicianId criada para origem de ferramentas.');
+  }
+}
+
 async function ensureRuntimeSchema() {
   const queryInterface = sequelize.getQueryInterface();
   const users = await queryInterface.describeTable('users').catch(() => null);
@@ -176,9 +273,12 @@ async function ensureRuntimeSchema() {
     console.log('✅ Coluna technicians.transferApprovalLimit criada para limite individual de transferências.');
   }
 
+  await ensureTechnicianCompanySchema(queryInterface);
   await ensureNotificationSchema(queryInterface);
   await ensureTechnicianToolsSchema(queryInterface);
+  await ensureTechnicianToolDocumentsSchema(queryInterface);
   await ensureTransferItemLossSchema(queryInterface);
+  await ensureToolTransferSchema(queryInterface);
 }
 
 module.exports = { ensureRuntimeSchema };

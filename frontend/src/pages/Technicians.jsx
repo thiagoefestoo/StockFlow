@@ -4,6 +4,7 @@ import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import AttachmentPreview from '../components/AttachmentPreview';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
@@ -25,12 +26,14 @@ const empty = {
 
 const emptyTool = { name: '', serialNumber: '', brand: '', referenceValue: '', notes: '' };
 const emptyRemoval = { status: 'devolvida', removalReason: '', replacementName: '', replacementSerial: '', replacementBrand: '', replacementValue: '' };
+const emptyToolDocument = { file: null, signedAt: '', notes: '' };
 const TOOL_STATUS_LABELS = { com_tecnico: 'Com o técnico', substituida: 'Substituída', perdida: 'Perdida', desgaste: 'Baixada por desgaste', devolvida: 'Devolvida' };
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function citiesToText(value) { return Array.isArray(value) ? value.join(', ') : ''; }
 function textToCities(value) { return String(value || '').split(',').map((item) => item.trim()).filter(Boolean); }
+function readFileAsDataUrl(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
 function formFromTechnician(technician) {
   return {
@@ -72,6 +75,11 @@ export default function Technicians() {
   const [removeForm, setRemoveForm] = useState(emptyRemoval);
   const [removeSaving, setRemoveSaving] = useState(false);
   const [removeError, setRemoveError] = useState('');
+  const [toolDocuments, setToolDocuments] = useState([]);
+  const [documentModal, setDocumentModal] = useState(false);
+  const [documentForm, setDocumentForm] = useState(emptyToolDocument);
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const [documentError, setDocumentError] = useState('');
 
   async function load() {
     const [t, c, w] = await Promise.all([
@@ -172,13 +180,28 @@ export default function Technicians() {
     }
   }
 
+  async function loadToolDocuments(technicianId) {
+    if (!canViewTools) {
+      setToolDocuments([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/technicians/${technicianId}/tools/documents`);
+      setToolDocuments(res.data.data?.documents || []);
+    } catch (err) {
+      setDocumentError(err.response?.data?.message || 'Não foi possível carregar os termos assinados.');
+    }
+  }
+
   async function openDetails(technician) {
     setToolError('');
+    setDocumentError('');
     setTools([]);
+    setToolDocuments([]);
     const stock = (await api.get(`/technicians/${technician.id}/stock`)).data.data;
     setDetails({ open: true, technician, stock });
     if (Array.isArray(stock?.tools)) setTools(stock.tools);
-    await loadTools(technician.id);
+    await Promise.all([loadTools(technician.id), loadToolDocuments(technician.id)]);
   }
 
   async function refreshDetails() {
@@ -248,8 +271,56 @@ export default function Technicians() {
     }
   }
 
+  function openDocumentUpload() {
+    setDocumentError('');
+    setDocumentForm({ ...emptyToolDocument, signedAt: new Date().toISOString().slice(0, 10) });
+    setDocumentModal(true);
+  }
+
+  async function saveToolDocument() {
+    if (!details.technician) return;
+    if (!documentForm.file) {
+      setDocumentError('Selecione o termo assinado em PDF ou imagem.');
+      return;
+    }
+    if (documentForm.file.size > 12 * 1024 * 1024) {
+      setDocumentError('O arquivo deve ter no máximo 12 MB.');
+      return;
+    }
+    setDocumentSaving(true);
+    setDocumentError('');
+    try {
+      const documentData = await readFileAsDataUrl(documentForm.file);
+      await api.post(`/technicians/${details.technician.id}/tools/documents`, {
+        documentName: documentForm.file.name,
+        documentData,
+        signedAt: documentForm.signedAt || undefined,
+        notes: documentForm.notes || null,
+      });
+      setDocumentModal(false);
+      setDocumentForm(emptyToolDocument);
+      await Promise.all([loadToolDocuments(details.technician.id), load()]);
+    } catch (err) {
+      setDocumentError(err.response?.data?.message || 'Não foi possível anexar o termo assinado.');
+    } finally {
+      setDocumentSaving(false);
+    }
+  }
+
+  async function deleteToolDocument(document) {
+    if (!details.technician || !window.confirm(`Remover o termo "${document.documentName}" da ficha?`)) return;
+    setDocumentError('');
+    try {
+      await api.delete(`/technicians/${details.technician.id}/tools/documents/${document.id}`);
+      await Promise.all([loadToolDocuments(details.technician.id), load()]);
+    } catch (err) {
+      setDocumentError(err.response?.data?.message || 'Não foi possível remover o termo assinado.');
+    }
+  }
+
   const totalValue = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.totalCustodyValue ?? technician.assetValue ?? 0), 0), [technicians]);
   const totalTools = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolCount || 0), 0), [technicians]);
+  const totalToolDocuments = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolDocumentCount || 0), 0), [technicians]);
   const cityOptions = useMemo(() => Array.from(new Set(warehouses.map((w) => String(w.city || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
   function selectedServiceCities() { return textToCities(form.serviceCitiesText); }
   function toggleServiceCity(city) {
@@ -280,6 +351,7 @@ export default function Technicians() {
         <KpiCard label="Ativos" value={technicians.filter((t) => t.status === 'ativo').length} />
         <KpiCard label="Com acesso" value={technicians.filter((t) => t.portalUser).length} />
         <KpiCard label="Ferramentas em custódia" value={totalTools} />
+        <KpiCard label="Termos assinados" value={totalToolDocuments} />
         <KpiCard label="Patrimônio em campo" value={brl(totalValue)} />
       </div>
 
@@ -287,7 +359,7 @@ export default function Technicians() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Técnico</th><th>E-mail</th><th>Empresa</th><th>Cidades</th><th>Estoque padrão</th><th>Ferramentas</th><th>Acesso</th><th>Status</th><th className="action-cell">Opções</th></tr>
+              <tr><th>Técnico</th><th>E-mail</th><th>Empresa</th><th>Cidades</th><th>Estoque padrão</th><th>Ferramentas</th><th>Termos</th><th>Acesso</th><th>Status</th><th className="action-cell">Opções</th></tr>
             </thead>
             <tbody>
               {technicians.map((t) => (
@@ -298,6 +370,7 @@ export default function Technicians() {
                   <td>{citiesToText(t.serviceCities) || '-'}</td>
                   <td>{t.defaultWarehouse?.name || '-'}</td>
                   <td><strong>{formatQuantity(t.toolCount || 0)}</strong><br /><small>{brl(t.toolValue || 0)}</small></td>
+                  <td><strong>{formatQuantity(t.toolDocumentCount || 0)}</strong><br /><small>assinado(s)</small></td>
                   <td>{t.portalUser ? <span className="badge ativo">Liberado</span> : <span className="badge pendente">Sem login</span>}</td>
                   <td>{t.status}</td>
                   <td>
@@ -359,7 +432,7 @@ export default function Technicians() {
       </Modal>
 
       <DetailsModal open={details.open} title={`Central do técnico: ${details.technician?.name || ''}`} onClose={() => setDetails({ open: false, technician: null, stock: null })} footer={<><button className="ghost" onClick={() => setDetails({ open: false, technician: null, stock: null })}>Fechar</button><button className="ghost" onClick={refreshDetails}>Atualizar</button>{canManageTransferLimit && details.technician && <button className="ghost" onClick={() => { openLimitEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar limite</button>}{canEditTechnician && details.technician && <button onClick={() => { openEdit(details.technician); setDetails({ open: false, technician: null, stock: null }); }}>Editar técnico</button>}</>}>
-        {details.technician && <div className="technician-command-center"><DetailGrid fields={[["Nome", details.technician.name], ["Documento", details.technician.document], ["Telefone", details.technician.phone], ["E-mail", details.technician.email], ["Empresa", details.technician.ContractorCompany?.name], ["Tipo", details.technician.type], ["Status", details.technician.status], ["Cidades atendidas", citiesToText(details.technician.serviceCities)], ["Estoque padrão", details.technician.defaultWarehouse?.name], ["Limite sem aprovação", brl(details.technician.transferApprovalLimit ?? 500)], ["Acesso de login", details.technician.portalUser ? 'Liberado' : 'Sem login'], ["Equipamentos", details.stock?.summary?.assetsCount ?? details.technician.assetCount], ["Valor equipamentos", brl(details.stock?.summary?.assetsValue ?? details.technician.assetValue)], ["Valor consumíveis", brl(details.stock?.summary?.consumableValue)], ["Ferramentas em custódia", details.stock?.summary?.toolsCount ?? details.technician.toolCount ?? 0], ["Valor das ferramentas", brl(details.stock?.summary?.toolsValue ?? details.technician.toolValue)], ["Valor total em nome", brl(details.stock?.summary?.totalValue ?? details.technician.totalCustodyValue)], ["OS abertas", details.stock?.summary?.openOrders], ["Custódia +60 dias", details.stock?.summary?.oldCustody], ["Criado em", dt(details.technician.createdAt)]]} />
+        {details.technician && <div className="technician-command-center"><DetailGrid fields={[["Nome", details.technician.name], ["Documento", details.technician.document], ["Telefone", details.technician.phone], ["E-mail", details.technician.email], ["Empresa", details.technician.ContractorCompany?.name], ["Tipo", details.technician.type], ["Status", details.technician.status], ["Cidades atendidas", citiesToText(details.technician.serviceCities)], ["Estoque padrão", details.technician.defaultWarehouse?.name], ["Limite sem aprovação", brl(details.technician.transferApprovalLimit ?? 500)], ["Acesso de login", details.technician.portalUser ? 'Liberado' : 'Sem login'], ["Equipamentos", details.stock?.summary?.assetsCount ?? details.technician.assetCount], ["Valor equipamentos", brl(details.stock?.summary?.assetsValue ?? details.technician.assetValue)], ["Valor consumíveis", brl(details.stock?.summary?.consumableValue)], ["Ferramentas em custódia", details.stock?.summary?.toolsCount ?? details.technician.toolCount ?? 0], ["Termos de ferramentas", toolDocuments.length || details.technician.toolDocumentCount || 0], ["Valor das ferramentas", brl(details.stock?.summary?.toolsValue ?? details.technician.toolValue)], ["Valor total em nome", brl(details.stock?.summary?.totalValue ?? details.technician.totalCustodyValue)], ["OS abertas", details.stock?.summary?.openOrders], ["Custódia +60 dias", details.stock?.summary?.oldCustody], ["Criado em", dt(details.technician.createdAt)]]} />
           <section className="panel-soft"><h4>Resumo por material</h4><div className="table-wrap compact"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Valor</th><th>Seriais</th></tr></thead><tbody>{(details.stock?.groupedMaterials || []).map((row) => <tr key={row.material}><td>{row.material}</td><td>{formatQuantity(row.quantity)}</td><td>{brl(row.value)}</td><td>{(row.serials || []).slice(0, 6).join(', ')}{(row.serials || []).length > 6 ? '...' : ''}</td></tr>)}</tbody></table></div></section>
           <DetailList title="Equipamentos serializados na caixa" items={details.stock?.assets || []} render={(asset) => <><b>{asset.serialNumber}</b><span>{asset.Material?.name} • {asset.status} • {brl(asset.acquisitionCost)} • {asset.custodyDays ?? 0} dia(s) em custódia</span><small>{asset.brand || '-'} {asset.model || ''} • {asset.mac || 'sem MAC'}</small></>} />
           <DetailList title="Materiais consumíveis na caixa" items={details.stock?.balances || []} render={(balance) => <><b>{balance.Material?.name}</b><span>Quantidade: {formatQuantity(balance.quantity, balance.Material?.unit)} • valor previsto {brl(Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0))}</span></>} />
@@ -369,6 +442,7 @@ export default function Technicians() {
                 <h4 style={{ margin: 0 }}>Ferramentas sob custódia (fora da caixa técnica)</h4>
                 <div className="action-toolbar">
                   {details.technician && <Link className="ghost" to={`/ferramentas-tecnico/${details.technician.id}`} target="_blank" rel="noreferrer">Gerar termo (imprimir)</Link>}
+                  {canEditTools && <button className="ghost" onClick={openDocumentUpload}>Anexar termo assinado</button>}
                   {canEditTools && <button onClick={openAddTool}>Adicionar ferramenta</button>}
                 </div>
               </div>
@@ -391,6 +465,25 @@ export default function Technicians() {
               ))}
             </section>
           )}
+          {canViewTools && (
+            <section className="detail-section">
+              <div className="toolbar" style={{ marginBottom: '0.5rem' }}>
+                <div><h4 style={{ margin: 0 }}>Termos assinados de ferramentas</h4><small>{toolDocuments.length} documento(s) anexado(s) à ficha.</small></div>
+                {canEditTools && <button className="ghost" onClick={openDocumentUpload}>Anexar documento</button>}
+              </div>
+              {documentError && <div className="alert danger">{documentError}</div>}
+              {toolDocuments.length === 0 && <div className="empty-state">Nenhum termo assinado foi anexado para este técnico.</div>}
+              {toolDocuments.map((document) => (
+                <div className="detail-row tool-document-row" key={document.id}>
+                  <b>{document.documentName}</b>
+                  <span>Assinado em {dt(document.signedAt)} • anexado por {document.createdBy?.name || 'usuário'} • {formatQuantity(document.toolCount || 0)} ferramenta(s) • {brl(document.totalValue)}</span>
+                  {document.notes && <small>{document.notes}</small>}
+                  <AttachmentPreview compact name={document.documentName} data={document.documentData} label="Termo assinado" />
+                  {canEditTools && <div className="action-toolbar"><button className="ghost danger-outline" onClick={() => deleteToolDocument(document)}>Remover documento</button></div>}
+                </div>
+              ))}
+            </section>
+          )}
           <DetailList title="Guias recentes" items={details.stock?.transfers || []} render={(tr) => <><b>{tr.transferNumber}</b><span>{tr.status} • {dt(tr.deliveredAt)} • {brl(tr.totalValue)} • {tr.TransferItems?.length || 0} item(ns)</span></>} />
           <DetailList title="Ordens de serviço" items={details.stock?.orders || []} render={(os) => <><b>{os.osNumber} • {os.customerName}</b><span>{os.status} • {os.serviceType} • {dt(os.createdAt)}</span><small>{os.customerCpf} • {os.city}</small></>} />
           <DetailList title="Histórico recente do técnico" items={details.stock?.movements || []} render={(m) => <><b>{m.type} • {m.reference || '-'}</b><span>{m.Material?.name || '-'} • qtd. {formatQuantity(m.quantity)} • {m.serialNumber || 'sem serial'} • {dt(m.movementAt)}</span><small>{m.fromTechnician?.name || m.fromOwnerType || '-'} → {m.toTechnician?.name || m.toOwnerType || '-'}</small></>} />
@@ -408,6 +501,16 @@ export default function Technicians() {
           </div>
           <label>Observações<textarea rows={2} value={toolForm.notes} onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })} /></label>
           <small>Este item ficará na ficha do técnico até que seja devolvido, substituído ou baixado por perda/desgaste. Não entra na caixa técnica nem na movimentação de material.</small>
+        </div>
+      </Modal>
+
+      <Modal open={documentModal} title={`Anexar termo assinado: ${details.technician?.name || ''}`} onClose={() => !documentSaving && setDocumentModal(false)} footer={<><button className="ghost" disabled={documentSaving} onClick={() => setDocumentModal(false)}>Cancelar</button><button disabled={documentSaving} onClick={saveToolDocument}>{documentSaving ? 'Anexando...' : 'Anexar termo assinado'}</button></>}>
+        <div className="form-stack">
+          {documentError && <div className="alert danger">{documentError}</div>}
+          <label>Documento assinado<input type="file" accept=".pdf,image/jpeg,image/png,image/webp" onChange={(e) => setDocumentForm({ ...documentForm, file: e.target.files?.[0] || null })} /><small>Formatos permitidos: PDF, JPG, PNG ou WEBP. Tamanho máximo: 12 MB.</small></label>
+          <label>Data da assinatura<input type="date" value={documentForm.signedAt || ''} onChange={(e) => setDocumentForm({ ...documentForm, signedAt: e.target.value })} /></label>
+          <label>Observações<textarea rows={3} value={documentForm.notes || ''} onChange={(e) => setDocumentForm({ ...documentForm, notes: e.target.value })} placeholder="Ex.: termo conferido e assinado na entrega das ferramentas." /></label>
+          <div className="viz-callout">O sistema registrará no documento a quantidade e o valor das ferramentas ativas na ficha no momento do anexo.</div>
         </div>
       </Modal>
 

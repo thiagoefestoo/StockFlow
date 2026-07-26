@@ -10,6 +10,7 @@ const {
   Technician,
   ServiceOrder,
   Notification,
+  TechnicianToolDocument,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
@@ -73,6 +74,7 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
       pendingTransferSignatures,
       pendingLossSignatures,
       openOrders,
+      toolDocumentCount,
     ] = await Promise.all([
       ApprovalRequest.count({ where: { status: 'pendente' } }),
       MaterialRequest.count({ where: { ...requestScope, status: 'aprovado' } }),
@@ -80,6 +82,7 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
       Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura', transferNumber: { [Op.notILike]: 'PERDA-%' } } }),
       Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura', transferNumber: { [Op.iLike]: 'PERDA-%' } } }),
       ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
+      TechnicianToolDocument.count().catch(() => 0),
     ]);
 
     setRouteIfAllowed(routes, user, 'approvals', '/aprovacoes', pendingApprovals || pendingRequestApprovals);
@@ -88,6 +91,7 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
     setRouteIfAllowed(routes, user, 'technicianLosses', '/perdas-tecnico', pendingLossSignatures);
     setRouteIfAllowed(routes, user, 'lossEvaluation', '/avaliacao-perdas', pendingLossSignatures);
     setRouteIfAllowed(routes, user, 'serviceOrders', '/os', openOrders);
+    setRouteIfAllowed(routes, user, 'technicians', '/tecnicos', toolDocumentCount);
   } else if (user?.role === 'tecnico') {
     const requestScope = requestScopeFor(user);
     const transferScope = transferScopeFor(user);

@@ -42,11 +42,17 @@ function isReturnTransfer(transfer) {
   return String(transfer?.transferNumber || '').toUpperCase().startsWith('RETORNO-');
 }
 
+function isToolTransfer(transfer) {
+  return transfer?.transferType === 'ferramenta' || String(transfer?.transferNumber || '').toUpperCase().startsWith('FERRAMENTA-');
+}
+
 function transferTypeLabel(transfer) {
+  if (isToolTransfer(transfer)) return 'Ferramenta técnico → técnico';
   return isReturnTransfer(transfer) ? 'Retorno técnico → estoque' : 'Entrega estoque → técnico';
 }
 
 function transferWarehouseLabel(transfer) {
+  if (isToolTransfer(transfer)) return 'Técnico de origem';
   return isReturnTransfer(transfer) ? 'Estoque destino' : 'Estoque origem';
 }
 
@@ -104,6 +110,12 @@ export default function Transfers() {
   const [notice, setNotice] = useState({ text: '', type: 'danger' });
   const [saving, setSaving] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [toolTransferModal, setToolTransferModal] = useState(false);
+  const [toolTransferReview, setToolTransferReview] = useState(false);
+  const [toolTransferForm, setToolTransferForm] = useState({ fromTechnicianId: '', technicianId: '', notes: '', toolIds: [] });
+  const [sourceTools, setSourceTools] = useState([]);
+  const [sourceToolsLoading, setSourceToolsLoading] = useState(false);
+  const [toolTransferSaving, setToolTransferSaving] = useState(false);
 
   function showNotice(text, type = 'danger') {
     setNotice({ text, type });
@@ -456,6 +468,84 @@ export default function Transfers() {
     }
   }
 
+  function openToolTransfer() {
+    setToolTransferForm({ fromTechnicianId: '', technicianId: '', notes: '', toolIds: [] });
+    setSourceTools([]);
+    setToolTransferReview(false);
+    setToolTransferModal(true);
+  }
+
+  async function selectToolSource(fromTechnicianId) {
+    setToolTransferForm((current) => ({ ...current, fromTechnicianId, technicianId: String(current.technicianId) === String(fromTechnicianId) ? '' : current.technicianId, toolIds: [] }));
+    setSourceTools([]);
+    if (!fromTechnicianId) return;
+    setSourceToolsLoading(true);
+    try {
+      const response = await api.get(`/technicians/${fromTechnicianId}/tools`);
+      setSourceTools((response.data.data?.tools || []).filter((tool) => tool.status === 'com_tecnico'));
+    } catch (error) {
+      showNotice(error.response?.data?.message || 'Não foi possível carregar as ferramentas do técnico de origem.');
+    } finally {
+      setSourceToolsLoading(false);
+    }
+  }
+
+  function addToolToTransfer(toolId) {
+    const id = Number(toolId);
+    if (!id || toolTransferForm.toolIds.some((selectedId) => Number(selectedId) === id)) return;
+    setToolTransferForm((current) => ({ ...current, toolIds: [...current.toolIds, id] }));
+  }
+
+  function removeToolFromTransfer(toolId) {
+    setToolTransferForm((current) => ({ ...current, toolIds: current.toolIds.filter((id) => Number(id) !== Number(toolId)) }));
+  }
+
+  function validateToolTransfer() {
+    if (!toolTransferForm.fromTechnicianId) return 'Selecione o técnico de origem das ferramentas.';
+    if (!toolTransferForm.technicianId) return 'Selecione o técnico de destino das ferramentas.';
+    if (String(toolTransferForm.fromTechnicianId) === String(toolTransferForm.technicianId)) return 'O técnico de origem e o técnico de destino precisam ser diferentes.';
+    if (!toolTransferForm.toolIds.length) return 'Selecione ao menos uma ferramenta para transferir.';
+    const activeIds = new Set(sourceTools.filter((tool) => tool.status === 'com_tecnico').map((tool) => Number(tool.id)));
+    if (toolTransferForm.toolIds.some((id) => !activeIds.has(Number(id)))) return 'Uma ferramenta selecionada não está mais disponível na ficha do técnico de origem.';
+    return null;
+  }
+
+  function openToolTransferReview() {
+    const error = validateToolTransfer();
+    if (error) {
+      showNotice(error);
+      return;
+    }
+    setToolTransferReview(true);
+  }
+
+  async function saveToolTransfer() {
+    const error = validateToolTransfer();
+    if (error) {
+      showNotice(error);
+      return;
+    }
+    setToolTransferSaving(true);
+    try {
+      const response = await api.post('/transfers/tools', {
+        fromTechnicianId: toolTransferForm.fromTechnicianId,
+        technicianId: toolTransferForm.technicianId,
+        notes: toolTransferForm.notes || null,
+        toolIds: toolTransferForm.toolIds.map(Number),
+      });
+      setToolTransferReview(false);
+      setToolTransferModal(false);
+      setToolTransferForm({ fromTechnicianId: '', technicianId: '', notes: '', toolIds: [] });
+      setSourceTools([]);
+      showNotice(response.data?.message || 'Ferramentas transferidas e guia gerada.', 'success');
+      await load();
+    } catch (error) {
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível transferir as ferramentas.');
+    } finally {
+      setToolTransferSaving(false);
+    }
+  }
+
   async function saveEdit() {
     try {
       const response = await api.put(`/transfers/${edit.item.id}`, edit.form);
@@ -503,17 +593,20 @@ export default function Transfers() {
     const search = transferSearch.trim().toLowerCase();
     return transfers.filter((transfer) => {
       const isReturn = isReturnTransfer(transfer);
-      if (transferTypeFilter === 'entrega' && isReturn) return false;
+      const isTool = isToolTransfer(transfer);
+      if (transferTypeFilter === 'entrega' && (isReturn || isTool)) return false;
       if (transferTypeFilter === 'retorno' && !isReturn) return false;
+      if (transferTypeFilter === 'ferramenta' && !isTool) return false;
       if (transferStatusFilter && transfer.status !== transferStatusFilter) return false;
       if (!search) return true;
       const text = [
         transfer.transferNumber,
         transfer.Technician?.name,
+        transfer.fromTechnician?.name,
         transfer.Warehouse?.name,
         transfer.status,
         transfer.notes,
-        ...(transfer.TransferItems || []).flatMap((item) => [item.Material?.name, item.serialNumber]),
+        ...(transfer.TransferItems || []).flatMap((item) => [item.Material?.name, item.TechnicianTool?.name, item.itemDescription, item.serialNumber]),
       ].filter(Boolean).join(' ').toLowerCase();
       return text.includes(search);
     });
@@ -554,12 +647,29 @@ export default function Transfers() {
       ? 'Todos os itens estão com quantidade zero. A solicitação será liberada sem movimentação de material.'
       : 'Ao confirmar, o saldo do estoque será movimentado e a guia será gerada para a caixa do técnico.';
 
+  const toolSourceTechnician = technicians.find((technician) => String(technician.id) === String(toolTransferForm.fromTechnicianId));
+  const toolDestinationTechnician = technicians.find((technician) => String(technician.id) === String(toolTransferForm.technicianId));
+  const selectedToolIds = new Set(toolTransferForm.toolIds.map(Number));
+  const selectedTools = sourceTools.filter((tool) => selectedToolIds.has(Number(tool.id)));
+  const availableToolsForTransfer = sourceTools.filter((tool) => tool.status === 'com_tecnico' && !selectedToolIds.has(Number(tool.id)));
+  const toolTransferValue = selectedTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0);
+  const toolTransferReviewItems = selectedTools.map((tool) => ({
+    key: tool.id,
+    name: tool.name,
+    detail: `${tool.brand || 'sem marca/modelo'} • patrimônio/série ${tool.serialNumber}`,
+    quantity: 1,
+    unit: 'un',
+    serialCount: 1,
+    serialPreview: tool.serialNumber,
+    totalValue: Number(tool.referenceValue || 0),
+  }));
+
   return (
     <div className="page-grid transfer-page">
       <FloatingAlert message={notice.text} type={notice.type} onClose={() => setNotice({ text: '', type: 'danger' })} />
       <div className="toolbar">
         <div><h2>🔁 Transferir material para técnico</h2><p>Selecione o estoque de origem, os materiais disponíveis nele e gere a guia para assinatura.</p></div>
-        <button onClick={openNewTransfer}>➕ Nova transferência</button>
+        <div className="action-toolbar"><button className="ghost" onClick={openToolTransfer}>🧰 Transferir ferramentas</button><button onClick={openNewTransfer}>➕ Nova transferência</button></div>
       </div>
 
       <section className="panel transfer-request-queue">
@@ -580,13 +690,13 @@ export default function Transfers() {
       <section className="panel filters">
         <div className="form-grid">
           <label>🔎 Pesquisar<input value={transferSearch} onChange={(e) => setTransferSearch(e.target.value)} placeholder="Guia, técnico, estoque, material ou serial" /></label>
-          <label>Tipo<select value={transferTypeFilter} onChange={(e) => setTransferTypeFilter(e.target.value)}><option value="">Todos</option><option value="entrega">Entrega para técnico</option><option value="retorno">Retorno para estoque</option></select></label>
+          <label>Tipo<select value={transferTypeFilter} onChange={(e) => setTransferTypeFilter(e.target.value)}><option value="">Todos</option><option value="entrega">Entrega para técnico</option><option value="retorno">Retorno para estoque</option><option value="ferramenta">Ferramenta entre técnicos</option></select></label>
           <label>Status<select value={transferStatusFilter} onChange={(e) => setTransferStatusFilter(e.target.value)}><option value="">Todos</option><option value="pendente_assinatura">Pendente de assinatura</option><option value="assinado">Assinado</option><option value="cancelado">Cancelado</option></select></label>
           <label className="filter-action"><span>&nbsp;</span><button type="button" className="ghost" onClick={() => { setTransferSearch(''); setTransferTypeFilter(''); setTransferStatusFilter(''); }}>Limpar filtros</button></label>
         </div>
       </section>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>{zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
         <div className="transfer-wizard">
@@ -707,12 +817,58 @@ export default function Transfers() {
         onConfirm={save}
       />
 
+      <Modal open={toolTransferModal} title="🧰 Transferir ferramentas entre técnicos" onClose={() => !toolTransferSaving && setToolTransferModal(false)} footer={<><button className="ghost" disabled={toolTransferSaving} onClick={() => setToolTransferModal(false)}>Cancelar</button><button disabled={toolTransferSaving} onClick={openToolTransferReview}>Revisar transferência</button></>}>
+        <div className="form-stack">
+          <div className="form-grid">
+            <label>Técnico de origem<select value={toolTransferForm.fromTechnicianId} onChange={(e) => selectToolSource(e.target.value)}><option value="">Selecione</option>{technicians.map((technician) => <option key={technician.id} value={technician.id}>{technician.name} — {technician.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
+            <label>Técnico de destino<select value={toolTransferForm.technicianId} onChange={(e) => setToolTransferForm({ ...toolTransferForm, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.filter((technician) => String(technician.id) !== String(toolTransferForm.fromTechnicianId)).map((technician) => <option key={technician.id} value={technician.id}>{technician.name} — {technician.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
+            <label className="span-2">Motivo/observação<input value={toolTransferForm.notes} onChange={(e) => setToolTransferForm({ ...toolTransferForm, notes: e.target.value })} placeholder="Ex.: troca de equipe, substituição de técnico, remanejamento de ferramentas" /></label>
+          </div>
+          <div className="viz-callout">A lista mostra apenas ferramentas ativas cadastradas na ficha do técnico de origem. Ao selecionar uma ferramenta, ela sai da lista disponível e não pode ser repetida.</div>
+          {sourceToolsLoading && <div className="empty-state">Carregando ferramentas do técnico de origem...</div>}
+          {!sourceToolsLoading && toolTransferForm.fromTechnicianId && sourceTools.length === 0 && <div className="empty-state">Este técnico não possui ferramentas ativas cadastradas na ficha.</div>}
+          <div className="tool-transfer-grid">
+            <section className="panel-soft">
+              <h4>Ferramentas disponíveis</h4>
+              {availableToolsForTransfer.length === 0 && <div className="empty-state small">Nenhuma ferramenta disponível para selecionar.</div>}
+              {availableToolsForTransfer.map((tool) => <div className="detail-row" key={tool.id}><b>{tool.name}</b><span>{tool.brand || 'sem marca/modelo'} • patrimônio/série {tool.serialNumber}</span><small>{brl(tool.referenceValue)}</small><div className="action-toolbar"><button type="button" onClick={() => addToolToTransfer(tool.id)}>Selecionar</button></div></div>)}
+            </section>
+            <section className="panel-soft">
+              <h4>Ferramentas selecionadas ({selectedTools.length})</h4>
+              {selectedTools.length === 0 && <div className="empty-state small">Selecione as ferramentas que serão transferidas.</div>}
+              {selectedTools.map((tool) => <div className="detail-row" key={tool.id}><b>{tool.name}</b><span>{tool.brand || 'sem marca/modelo'} • patrimônio/série {tool.serialNumber}</span><small>{brl(tool.referenceValue)}</small><div className="action-toolbar"><button type="button" className="ghost danger-outline" onClick={() => removeToolFromTransfer(tool.id)}>Remover</button></div></div>)}
+            </section>
+          </div>
+          <div className="submit-bar"><span>Selecionadas: <strong>{selectedTools.length}</strong> • valor: <strong>{brl(toolTransferValue)}</strong></span></div>
+        </div>
+      </Modal>
+
+      <OperationReviewModal
+        open={toolTransferReview}
+        title="Revisar transferência de ferramentas"
+        description="Confira os técnicos de origem e destino, as ferramentas, os patrimônios/séries e os valores antes de confirmar."
+        metadata={[
+          { label: 'Técnico de origem', value: toolSourceTechnician?.name, hint: toolSourceTechnician?.ContractorCompany?.name || 'Ficha de ferramentas' },
+          { label: 'Técnico de destino', value: toolDestinationTechnician?.name, hint: toolDestinationTechnician?.ContractorCompany?.name || 'Nova responsabilidade' },
+          { label: 'Motivo/observação', value: toolTransferForm.notes || 'Não informado' },
+          { label: 'Tipo de fluxo', value: 'Ferramenta entre técnicos' },
+        ]}
+        items={toolTransferReviewItems}
+        totalQuantity={selectedTools.length}
+        totalValue={toolTransferValue}
+        warning="Ao confirmar, as ferramentas sairão da ficha do técnico de origem e passarão para a ficha do técnico de destino. Uma guia pendente de assinatura será gerada."
+        loading={toolTransferSaving}
+        confirmLabel="Confirmar transferência de ferramentas"
+        onCancel={() => setToolTransferReview(false)}
+        onConfirm={saveToolTransfer}
+      />
+
       <Modal open={edit.open} title={`✏️ Editar guia ${edit.item?.transferNumber || ''}`} onClose={() => setEdit({ open: false, item: null, form: {} })} footer={<><button className="ghost" onClick={() => setEdit({ open: false, item: null, form: {} })}>Cancelar</button><button onClick={saveEdit}>Salvar alteração</button></>}>
         <div className="form-grid"><label>Status<select value={edit.form.status || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, status: e.target.value } })}><option value="pendente_assinatura">Pendente de assinatura</option><option value="assinado">Assinado</option><option value="cancelado">Cancelado</option></select></label><label>Data de entrega<input type="datetime-local" value={edit.form.deliveredAt || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, deliveredAt: e.target.value } })} /></label><label>Responsável pela assinatura<input value={edit.form.signatureResponsible || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, signatureResponsible: e.target.value } })} /></label></div><label>Observações<textarea rows="4" value={edit.form.notes || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, notes: e.target.value } })} /></label><div className="viz-callout">🛡️ Alterações administrativas gravam histórico de auditoria.</div>
       </Modal>
 
       <DetailsModal open={!!details} title={`🔎 Detalhes da guia ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/transferencias/${details.id}`}>Abrir guia</Link>}{isAdmin && details && <button onClick={() => { setEdit({ open: true, item: details, form: { notes: details.notes || '', status: details.status || 'pendente_assinatura', deliveredAt: details.deliveredAt ? String(details.deliveredAt).slice(0, 16) : '', signatureResponsible: details.signatureResponsible || '' } }); setDetails(null); }}>Editar</button>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", transferTypeLabel(details)], ["Técnico", details.Technician?.name], [transferWarehouseLabel(details), details.Warehouse?.name || details.warehouseId || '-'], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Anexo da guia" />}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", transferTypeLabel(details)], ["Técnico", details.Technician?.name], [transferWarehouseLabel(details), isToolTransfer(details) ? (details.fromTechnician?.name || '-') : (details.Warehouse?.name || details.warehouseId || '-')], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Anexo da guia" />}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.TechnicianTool?.name || item.itemDescription || item.Material?.name || 'Item'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

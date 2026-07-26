@@ -13,6 +13,7 @@ const {
   User,
   Warehouse,
   TechnicianTool,
+  TechnicianToolDocument,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -75,7 +76,7 @@ function technicianPayload(body) {
     email: normalizeEmail(body.email),
     type: body.type || 'interno',
     status: body.status || 'ativo',
-    companyId: body.companyId || null,
+    companyId: body.companyId === '' || body.companyId === null || body.companyId === undefined ? null : Number(body.companyId),
     vehiclePlate: body.vehiclePlate ? String(body.vehiclePlate).trim().toUpperCase() : null,
     notes: body.notes ? String(body.notes).trim() : null,
     serviceCities: normalizeCities(body.serviceCities),
@@ -181,6 +182,9 @@ exports.list = asyncHandler(async (req, res) => {
       }).catch(() => [])
       : [];
     const toolValue = activeTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0);
+    const toolDocumentCount = hasModuleAccess(req.user, 'technicianTools')
+      ? await TechnicianToolDocument.count({ where: { technicianId: technician.id } }).catch(() => 0)
+      : 0;
     const portalUser = await findPortalUserForTechnician(technician);
     data.push({
       ...technician.toJSON(),
@@ -190,6 +194,7 @@ exports.list = asyncHandler(async (req, res) => {
       consumableValue: money(consumableValue),
       toolCount: activeTools.length,
       toolValue: money(toolValue),
+      toolDocumentCount,
       totalCustodyValue: money(Number(assetValue || 0) + consumableValue + toolValue),
     });
   }
@@ -200,7 +205,10 @@ exports.get = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   const portalUser = await findPortalUserForTechnician(technician);
-  return ok(res, { ...technician.toJSON(), portalUser: publicPortalUser(portalUser) });
+  const toolDocumentCount = hasModuleAccess(req.user, 'technicianTools')
+    ? await TechnicianToolDocument.count({ where: { technicianId: technician.id } }).catch(() => 0)
+    : 0;
+  return ok(res, { ...technician.toJSON(), portalUser: publicPortalUser(portalUser), toolDocumentCount });
 });
 
 exports.create = asyncHandler(async (req, res) => {
