@@ -4,7 +4,7 @@ const sequelize = require('../../config/db');
 const StockMovement = sequelize.define('StockMovement', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   type: {
-    type: DataTypes.ENUM('entrada', 'transferencia_tecnico', 'retorno_tecnico', 'baixa_os', 'ajuste', 'perda', 'cancelamento'),
+    type: DataTypes.ENUM('entrada', 'transferencia_tecnico', 'retorno_tecnico', 'baixa_os', 'ajuste', 'perda', 'cancelamento', 'saida_logistica_reversa'),
     allowNull: false,
   },
   quantity: { type: DataTypes.DECIMAL(12, 3), allowNull: false, defaultValue: 1 },

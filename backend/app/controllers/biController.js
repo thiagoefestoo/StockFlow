@@ -20,6 +20,7 @@ const {
 const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
 const { money, daysBetween } = require('../utils/number');
+const { reverseWarehouseIds, warehouseOutsideReverse, movementOutsideReverse } = require('../utils/reverseLogistics');
 
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
@@ -219,11 +220,12 @@ function filterMovements(movements, filters) {
 }
 
 async function getFilterOptions() {
+  const reverseIds = await reverseWarehouseIds();
   const [materials, technicians, companies, batches] = await Promise.all([
     Material.findAll({ order: [['name', 'ASC']] }),
     Technician.findAll({ include: [ContractorCompany], order: [['name', 'ASC']] }),
     ContractorCompany.findAll({ order: [['name', 'ASC']] }),
-    StockBatch.findAll({ attributes: ['sourceCompany'], order: [['sourceCompany', 'ASC']] }),
+    StockBatch.findAll({ where: warehouseOutsideReverse(reverseIds), attributes: ['sourceCompany'], order: [['sourceCompany', 'ASC']] }),
   ]);
   return {
     materials: materials.map((m) => ({ id: m.id, name: `${m.name} (${m.sku})`, category: m.category, requiresSerial: m.requiresSerial })),
@@ -266,6 +268,8 @@ function addRowMetric(map, key, patch) {
 async function calculateStockPosition(materials, filters = {}) {
   const rows = [];
   const totals = { estoque: 0, tecnico: 0, cliente: 0, manutencao: 0, perdido: 0, totalAtual: 0 };
+  const reverseIds = await reverseWarehouseIds();
+  const reverseSet = new Set(reverseIds);
 
   for (const material of materials) {
     if (!materialMatches(material, { ...filters, search: '' })) continue;
@@ -284,6 +288,7 @@ async function calculateStockPosition(materials, filters = {}) {
     if (material.requiresSerial) {
       let assets = await SerializedAsset.findAll({ where: { materialId: material.id }, include: [Technician] });
       assets = assets.filter((asset) => {
+        if (asset.ownerType === 'estoque' && reverseSet.has(Number(asset.warehouseId))) return false;
         if (!matchesSelected(asset.ownerType, filters.ownerTypes)) return false;
         if (!matchesSelected(asset.status, filters.assetStatuses)) return false;
         if ((filters.technicianIds.length || filters.companyIds.length) && !technicianMatches(asset.Technician, filters)) return false;
@@ -301,6 +306,7 @@ async function calculateStockPosition(materials, filters = {}) {
     } else {
       const balances = await StockBalance.findAll({ where: { materialId: material.id }, include: [Technician] });
       balances.filter((row) => {
+        if (row.ownerType === 'estoque' && reverseSet.has(Number(row.warehouseId))) return false;
         if (!matchesSelected(row.ownerType, filters.ownerTypes)) return false;
         if ((filters.technicianIds.length || filters.companyIds.length) && !technicianMatches(row.Technician, filters)) return false;
         return true;
@@ -345,13 +351,14 @@ async function calculateStockPosition(materials, filters = {}) {
 }
 
 async function loadBiData(filters) {
+  const reverseIds = await reverseWarehouseIds();
   let materials = await Material.findAll({ order: [['name', 'ASC']] });
   materials = materials.filter((m) => materialMatches(m, { ...filters, search: filters.search && (filters.materialIds.length || filters.categories.length || filters.requiresSerial !== null) ? filters.search : '' }));
   let [batches, transfers, orders, movements, technicians, materialRequests, approvalRequests] = await Promise.all([
-    StockBatch.findAll({ include: [{ model: StockBatchItem, include: [Material] }, { association: 'createdBy' }], order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']], limit: 2000 }),
+    StockBatch.findAll({ where: warehouseOutsideReverse(reverseIds), include: [{ model: StockBatchItem, include: [Material] }, { association: 'createdBy' }], order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']], limit: 2000 }),
     Transfer.findAll({ include: [Technician, { model: TransferItem, include: [Material, SerializedAsset] }], order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC']], limit: 2000 }),
     ServiceOrder.findAll({ include: [Technician, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }], order: [['createdAt', 'DESC']], limit: 2000 }),
-    StockMovement.findAll({ include: [Material, SerializedAsset, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }, { association: 'createdBy' }], order: [['movementAt', 'DESC']], limit: 3000 }),
+    StockMovement.findAll({ where: movementOutsideReverse(reverseIds), include: [Material, SerializedAsset, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }, { association: 'createdBy' }], order: [['movementAt', 'DESC']], limit: 3000 }),
     Technician.findAll({ include: [ContractorCompany], order: [['name', 'ASC']] }),
     MaterialRequest.findAll({ include: [Technician], order: [['createdAt', 'DESC']], limit: 1000 }),
     ApprovalRequest.findAll({ order: [['createdAt', 'DESC']], limit: 1000 }),

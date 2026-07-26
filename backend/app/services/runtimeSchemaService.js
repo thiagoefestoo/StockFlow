@@ -229,6 +229,32 @@ async function ensureToolTransferSchema(queryInterface) {
   }
 }
 
+
+async function ensureReverseLogisticsSchema(queryInterface) {
+  const warehouses = await queryInterface.describeTable('warehouses').catch(() => null);
+  if (warehouses && !warehouses.isReverseLogistics) {
+    await queryInterface.addColumn('warehouses', 'isReverseLogistics', {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    });
+    await queryInterface.addIndex('warehouses', ['isReverseLogistics']).catch(() => null);
+    console.log('✅ Coluna warehouses.isReverseLogistics criada para separar estoques de logística reversa.');
+  }
+
+  // PostgreSQL exige inclusão explícita de novos valores em ENUMs existentes.
+  await sequelize.query(`
+    DO $$
+    BEGIN
+      ALTER TYPE enum_stock_movements_type ADD VALUE IF NOT EXISTS 'saida_logistica_reversa';
+    EXCEPTION
+      WHEN undefined_object THEN NULL;
+    END $$;
+  `).catch((error) => {
+    console.warn('Não foi possível atualizar o enum de movimentações para logística reversa:', error.message);
+  });
+}
+
 async function ensureRuntimeSchema() {
   const queryInterface = sequelize.getQueryInterface();
   const users = await queryInterface.describeTable('users').catch(() => null);
@@ -279,6 +305,7 @@ async function ensureRuntimeSchema() {
   await ensureTechnicianToolDocumentsSchema(queryInterface);
   await ensureTransferItemLossSchema(queryInterface);
   await ensureToolTransferSchema(queryInterface);
+  await ensureReverseLogisticsSchema(queryInterface);
 }
 
 module.exports = { ensureRuntimeSchema };

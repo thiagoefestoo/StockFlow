@@ -85,7 +85,7 @@ export default function Technicians() {
     const [t, c, w] = await Promise.all([
       api.get('/technicians'),
       api.get('/companies'),
-      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+      api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
     setTechnicians(t.data.data || []);
     setCompanies(c.data.data || []);

@@ -114,6 +114,11 @@ async function resolveRequestWarehouse({ req, warehouseId, technicianId, request
       error.statusCode = 404;
       throw error;
     }
+    if (warehouse.isReverseLogistics) {
+      const error = new Error('Estoque de logística reversa não pode receber solicitações, recargas ou cargas técnicas. Utilize apenas entrada e saída para fornecedor.');
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   return selectedWarehouseId;

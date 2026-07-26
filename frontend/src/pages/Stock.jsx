@@ -103,7 +103,7 @@ export default function Stock() {
   async function load() {
     const [materialsResponse, warehousesResponse] = await Promise.all([
       api.get('/materials'),
-      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+      api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
     setMaterials(materialsResponse.data.data || []);
     setWarehouses(warehousesResponse.data.data || []);

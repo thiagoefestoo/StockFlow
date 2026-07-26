@@ -97,6 +97,7 @@ exports.create = asyncHandler(async (req, res) => {
   const sourceWarehouse = await Warehouse.findByPk(sourceWarehouseId);
   if (!sourceWarehouse) return fail(res, 404, 'Estoque de origem não encontrado.');
   if (sourceWarehouse.status && sourceWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de origem precisa estar ativo para transferir material.');
+  if (sourceWarehouse.isReverseLogistics) return fail(res, 400, 'Estoque de logística reversa não pode transferir materiais para técnicos.');
 
   let linkedRequest = null;
   const linkedRequestItemsByMaterial = new Map();

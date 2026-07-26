@@ -85,6 +85,22 @@ function technicianPayload(body) {
   };
 }
 
+
+async function validateOperationalDefaultWarehouse(defaultWarehouseId) {
+  if (!defaultWarehouseId) return;
+  const warehouse = await Warehouse.findByPk(defaultWarehouseId);
+  if (!warehouse || warehouse.status !== 'ativo') {
+    const error = new Error('Estoque padrão do técnico não encontrado ou inativo.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (warehouse.isReverseLogistics) {
+    const error = new Error('Estoque de logística reversa não pode ser definido como estoque padrão de técnico.');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 function publicPortalUser(user) {
   if (!user) return null;
   return {
@@ -217,6 +233,7 @@ exports.create = asyncHandler(async (req, res) => {
   }
   const payload = technicianPayload(req.body);
   if (!payload.name || payload.name.length < 3) return fail(res, 400, 'Informe o nome do técnico.');
+  try { await validateOperationalDefaultWarehouse(payload.defaultWarehouseId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
   if (wantsPortalUser) await assertUserAccountCapacity();
   const technician = await Technician.create(payload);
@@ -259,7 +276,9 @@ exports.update = asyncHandler(async (req, res) => {
   if (wantsPortalUser && !portalUser) await assertUserAccountCapacity();
 
   const before = technician.toJSON();
-  await technician.update(technicianPayload({ ...technician.toJSON(), ...req.body }));
+  const updatePayload = technicianPayload({ ...technician.toJSON(), ...req.body });
+  try { await validateOperationalDefaultWarehouse(updatePayload.defaultWarehouseId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+  await technician.update(updatePayload);
 
   if (wantsPortalUser) {
     portalUser = await syncPortalUser({

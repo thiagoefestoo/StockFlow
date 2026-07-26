@@ -10,6 +10,7 @@ const {
   MaterialRequest,
 } = require('../models');
 const { daysBetween, money } = require('../utils/number');
+const { reverseWarehouseIds, warehouseOutsideReverse } = require('../utils/reverseLogistics');
 
 async function createOnce(where, payload) {
   const existing = await Notification.findOne({ where });
@@ -19,11 +20,12 @@ async function createOnce(where, payload) {
 
 async function generateSmartNotifications() {
   const created = [];
+  const reverseIds = await reverseWarehouseIds();
+  const operationalWarehouseWhere = warehouseOutsideReverse(reverseIds);
   const materials = await Material.findAll({ where: { active: true } });
   for (const material of materials) {
-    const balance = await StockBalance.findOne({ where: { materialId: material.id, ownerType: 'estoque', technicianId: null } });
-    const nonSerialQty = Number(balance?.quantity || 0);
-    const serialQty = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'estoque' } });
+    const nonSerialQty = Number(await StockBalance.sum('quantity', { where: { materialId: material.id, ownerType: 'estoque', technicianId: null, ...operationalWarehouseWhere } }) || 0);
+    const serialQty = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'estoque', ...operationalWarehouseWhere } });
     const totalAvailable = material.requiresSerial ? serialQty : nonSerialQty;
     if (Number(material.minStock || 0) > 0 && totalAvailable <= Number(material.minStock)) {
       created.push(await createOnce(

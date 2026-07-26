@@ -142,6 +142,11 @@ export default function Users() {
     else selected.add(city);
     patchForm({ cityAccessText: Array.from(selected).join(', ') });
   }
+  const selectableWarehouses = useMemo(
+    () => warehouses.filter((warehouse) => form.role !== 'tecnico' || !warehouse.isReverseLogistics),
+    [warehouses, form.role],
+  );
+
   function selectedWarehouseIds() {
     return (form.warehouseIds || []).map((id) => Number(id)).filter(Boolean);
   }
@@ -364,8 +369,8 @@ export default function Users() {
             {['estoquista', 'tecnico', 'supervisor'].includes(form.role) && <div className="form-field full-span">
               <span className="field-label">Estoques visíveis e autorizados</span>
               <div className="city-checkbox-list warehouse-checkbox-list">
-                {warehouses.map((w) => <label className="check-pill" key={w.id}><input type="checkbox" checked={selectedWarehouseIds().includes(Number(w.id))} onChange={() => toggleWarehouseAccess(w)} /><span>{w.name} • {w.city || w.region || w.code}</span></label>)}
-                {warehouses.length === 0 && <small>Nenhum estoque regional cadastrado. Crie o estoque antes de vincular ao usuário.</small>}
+                {selectableWarehouses.map((w) => <label className={`check-pill ${w.isReverseLogistics ? 'reverse-logistics-check' : ''}`} key={w.id}><input type="checkbox" checked={selectedWarehouseIds().includes(Number(w.id))} onChange={() => toggleWarehouseAccess(w)} /><span>{w.isReverseLogistics ? '[LOGÍSTICA REVERSA] ' : ''}{w.name} • {w.city || w.region || w.code}</span></label>)}
+                {selectableWarehouses.length === 0 && <small>{form.role === 'tecnico' ? 'Nenhum estoque operacional disponível. Estoques de logística reversa não podem ser vinculados a técnicos.' : 'Nenhum estoque regional cadastrado. Crie o estoque antes de vincular ao usuário.'}</small>}
               </div>
               <small>O usuário verá as quantidades e poderá movimentar apenas os estoques marcados pelo administrador. Supervisores também respeitam esta seleção.</small>
             </div>}

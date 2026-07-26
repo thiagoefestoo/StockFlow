@@ -126,7 +126,7 @@ export default function Transfers() {
       const [t, tec, wh, requests] = await Promise.all([
         api.get('/transfers'),
         api.get('/technicians'),
-        api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+        api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
         api.get('/material-requests', { params: { status: 'aprovado', requestType: 'reposicao_carga' } }).catch(() => ({ data: { data: [] } })),
       ]);
       setTransfers(t.data.data || []);

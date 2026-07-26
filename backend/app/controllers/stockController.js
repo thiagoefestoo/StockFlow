@@ -23,6 +23,7 @@ const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { reverseWarehouseIds } = require('../utils/reverseLogistics');
 
 function parseSerials(value) {
   if (Array.isArray(value)) return value.map((s) => String(s).trim()).filter(Boolean);
@@ -48,10 +49,12 @@ function composeServiceNotes(notes, serviceType, addressChangeType) {
 exports.overview = asyncHandler(async (req, res) => {
   const materials = await Material.findAll({ order: [['name', 'ASC']] });
   const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
+  const reverseIds = await reverseWarehouseIds();
+  const operationalWarehouseScope = reverseIds.length ? { warehouseId: { [Op.notIn]: reverseIds } } : {};
   const rows = [];
   for (const material of materials) {
-    const balanceWhere = { materialId: material.id, ownerType: 'estoque', technicianId: null, ...warehouseScope };
-    const assetWhere = { materialId: material.id, ownerType: 'estoque', ...warehouseScope };
+    const balanceWhere = { materialId: material.id, ownerType: 'estoque', technicianId: null, [Op.and]: [warehouseScope, operationalWarehouseScope] };
+    const assetWhere = { materialId: material.id, ownerType: 'estoque', [Op.and]: [warehouseScope, operationalWarehouseScope] };
     const mainBalance = await StockBalance.sum('quantity', { where: balanceWhere });
     const mainAssets = await SerializedAsset.count({ where: assetWhere });
     const techAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'tecnico' } });
@@ -69,11 +72,16 @@ exports.overview = asyncHandler(async (req, res) => {
 
 exports.assets = asyncHandler(async (req, res) => {
   const where = {};
+  const reverseIds = await reverseWarehouseIds();
   if (req.query.status) where.status = req.query.status;
   if (req.query.ownerType) where.ownerType = req.query.ownerType;
   if (req.query.materialId) where.materialId = req.query.materialId;
   if (req.query.technicianId) where.technicianId = req.query.technicianId;
-  if ((req.query.ownerType || 'estoque') === 'estoque') Object.assign(where, stockWhereForUser(req.user, req.query.warehouseId));
+  if ((req.query.ownerType || 'estoque') === 'estoque') {
+    const scopes = [stockWhereForUser(req.user, req.query.warehouseId)];
+    if (reverseIds.length) scopes.push({ warehouseId: { [Op.notIn]: reverseIds } });
+    where[Op.and] = scopes;
+  }
   if (req.query.serial) where.serialNumber = { [Op.iLike]: `%${req.query.serial}%` };
   const limit = Math.min(Number(req.query.limit || 800), 2000);
   const assets = await SerializedAsset.findAll({ where, include: [Material, Technician, Warehouse], order: [['updatedAt', 'DESC']], limit });
@@ -194,6 +202,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
   const targetWarehouse = await Warehouse.findByPk(targetWarehouseId);
   if (!targetWarehouse) return fail(res, 404, 'Estoque de destino não encontrado.');
   if (targetWarehouse.status && targetWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de destino precisa estar ativo.');
+  if (targetWarehouse.isReverseLogistics) return fail(res, 400, 'Retorno de técnico não pode ser enviado ao estoque de logística reversa.');
   try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque de destino.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
   const result = await sequelize.transaction(async (transaction) => {

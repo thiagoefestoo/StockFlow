@@ -62,7 +62,7 @@ export default function MaterialRequests() {
         api.get(reqUrl),
         api.get('/materials'),
         api.get('/material-requests/summary'),
-        api.get('/warehouses'),
+        api.get('/warehouses?operationalOnly=true'),
       ]);
       setRequests(reqRes.data.data || []);
       setMaterials(matRes.data.data || []);

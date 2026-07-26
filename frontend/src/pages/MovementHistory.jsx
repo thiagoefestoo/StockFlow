@@ -7,6 +7,21 @@ import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../uti
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function csvEscape(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+function movementTypeLabel(type) {
+  const labels = {
+    entrada: 'Entrada',
+    transferencia_tecnico: 'Transferência técnico',
+    retorno_tecnico: 'Retorno técnico',
+    baixa_os: 'Baixa por OS',
+    ajuste: 'Ajuste',
+    perda: 'Perda',
+    cancelamento: 'Cancelamento',
+    saida_logistica_reversa: 'Saída logística reversa',
+  };
+  return labels[type] || type || '-';
+}
+function movementOrigin(row) { return row.fromWarehouse?.name || row.fromTechnician?.name || row.fromOwnerType || '-'; }
+function movementDestination(row) { return row.toWarehouse?.name || row.toTechnician?.name || row.toOwnerType || '-'; }
 function downloadExcelLike(filename, rows) {
   const htmlRows = rows.map((row) => `<tr>${row.map((cell) => `<td>${String(cell ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')}</td>`).join('')}</tr>`).join('');
   const blob = new Blob([`<html><head><meta charset="utf-8" /></head><body><table>${htmlRows}</table></body></html>`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
@@ -52,19 +67,20 @@ export default function MovementHistory() {
     const serials = filtered.filter((m) => m.serialNumber).length;
     const transferencias = filtered.filter((m) => m.type === 'transferencia_tecnico').length;
     const baixas = filtered.filter((m) => m.type === 'baixa_os').length;
+    const reversas = filtered.filter((m) => m.type === 'saida_logistica_reversa').length;
     const quantidade = filtered.reduce((sum, m) => sum + Number(m.quantity || 0), 0);
-    return { serials, transferencias, baixas, quantidade };
+    return { serials, transferencias, baixas, reversas, quantidade };
   }, [filtered]);
 
   function exportExcel() {
     const header = ['Data', 'Tipo', 'Material', 'Quantidade', 'Serial', 'Origem', 'Destino', 'Referencia', 'Operador', 'Observacao'];
-    const body = filtered.map((m) => [dt(m.movementAt), m.type, m.Material?.name || '', formatQuantity(m.quantity), m.serialNumber || '', m.fromTechnician?.name || m.fromOwnerType || '', m.toTechnician?.name || m.toOwnerType || '', m.reference || '', m.createdBy?.name || 'Sistema', m.notes || '']);
+    const body = filtered.map((m) => [dt(m.movementAt), movementTypeLabel(m.type), m.Material?.name || '', formatQuantity(m.quantity), m.serialNumber || '', movementOrigin(m), movementDestination(m), m.reference || '', m.createdBy?.name || 'Sistema', m.notes || '']);
     downloadExcelLike('superinfra-historico-movimentacoes.xls', [header, ...body]);
   }
 
   function exportCsv() {
     const header = ['Data', 'Tipo', 'Material', 'Quantidade', 'Serial', 'Origem', 'Destino', 'Referencia', 'Operador', 'Observacao'];
-    const body = filtered.map((m) => [dt(m.movementAt), m.type, m.Material?.name || '', formatQuantity(m.quantity), m.serialNumber || '', m.fromTechnician?.name || m.fromOwnerType || '', m.toTechnician?.name || m.toOwnerType || '', m.reference || '', m.createdBy?.name || 'Sistema', m.notes || '']);
+    const body = filtered.map((m) => [dt(m.movementAt), movementTypeLabel(m.type), m.Material?.name || '', formatQuantity(m.quantity), m.serialNumber || '', movementOrigin(m), movementDestination(m), m.reference || '', m.createdBy?.name || 'Sistema', m.notes || '']);
     const csv = [header, ...body].map((row) => row.map(csvEscape).join(';')).join('\n');
     const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -77,13 +93,13 @@ export default function MovementHistory() {
 
   return (
     <div className="page-grid history-page">
-      <section className="toolbar"><div><span className="eyebrow">🧾 Auditoria patrimonial</span><h2>Histórico de movimentações completo</h2><p>Rastreamento de entrada, transferência, retorno, baixa por OS, ajuste, perda e cancelamento.</p></div><div className="row-actions"><button className="ghost" onClick={load}>🔄 Atualizar</button><button className="ghost" onClick={exportCsv}>⬇️ CSV</button><button onClick={exportExcel}>📗 Excel</button></div></section>
+      <section className="toolbar"><div><span className="eyebrow">🧾 Auditoria patrimonial</span><h2>Histórico de movimentações completo</h2><p>Rastreamento de entrada, transferência, retorno, baixa por OS, ajuste, perda, cancelamento e saídas de logística reversa.</p></div><div className="row-actions"><button className="ghost" onClick={load}>🔄 Atualizar</button><button className="ghost" onClick={exportCsv}>⬇️ CSV</button><button onClick={exportExcel}>📗 Excel</button></div></section>
       {message && <div className="alert danger">{message}</div>}
-      <div className="kpi-grid small"><KpiCard label="Movimentos exibidos" value={filtered.length} /><KpiCard label="Qtd. movimentada" value={formatQuantity(stats.quantidade)} /><KpiCard label="Com serial" value={stats.serials} /><KpiCard label="Transferências" value={stats.transferencias} /><KpiCard label="Baixas por OS" value={stats.baixas} /></div>
-      <section className="panel filters"><div className="form-grid"><label>🔎 Pesquisar<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Serial, material, técnico, referência..." /></label><label>Tipo<select value={type} onChange={(e) => setType(e.target.value)}><option value="">Todos</option><option value="entrada">Entrada</option><option value="transferencia_tecnico">Transferência técnico</option><option value="retorno_tecnico">Retorno técnico</option><option value="baixa_os">Baixa OS</option><option value="ajuste">Ajuste</option><option value="perda">Perda</option><option value="cancelamento">Cancelamento</option></select></label><label>Técnico<select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}><option value="">Todos</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label className="filter-action"><span>&nbsp;</span><button type="button" onClick={load}>Aplicar filtros</button></label></div></section>
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Material</th><th>Qtd.</th><th>Serial</th><th>Origem</th><th>Destino</th><th>Referência</th><th>Operador</th><th className="action-cell">Opções</th></tr></thead><tbody>{filtered.map((m) => <tr key={m.id}><td>{dt(m.movementAt)}</td><td><span className="badge">{m.type}</span></td><td>{m.Material?.name || '-'}</td><td>{formatQuantity(m.quantity)}</td><td>{m.serialNumber || '-'}</td><td>{m.fromTechnician?.name || m.fromOwnerType || '-'}</td><td>{m.toTechnician?.name || m.toOwnerType || '-'}</td><td>{m.reference || '-'}</td><td>{m.createdBy?.name || 'Sistema'}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>🔎 Detalhes</button></div></td></tr>)}</tbody></table></div></section>
+      <div className="kpi-grid small"><KpiCard label="Movimentos exibidos" value={filtered.length} /><KpiCard label="Qtd. movimentada" value={formatQuantity(stats.quantidade)} /><KpiCard label="Com serial" value={stats.serials} /><KpiCard label="Transferências" value={stats.transferencias} /><KpiCard label="Baixas por OS" value={stats.baixas} /><KpiCard label="Saídas reversas" value={stats.reversas} /></div>
+      <section className="panel filters"><div className="form-grid"><label>🔎 Pesquisar<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Serial, material, técnico, referência..." /></label><label>Tipo<select value={type} onChange={(e) => setType(e.target.value)}><option value="">Todos</option><option value="entrada">Entrada</option><option value="transferencia_tecnico">Transferência técnico</option><option value="retorno_tecnico">Retorno técnico</option><option value="baixa_os">Baixa OS</option><option value="ajuste">Ajuste</option><option value="perda">Perda</option><option value="cancelamento">Cancelamento</option><option value="saida_logistica_reversa">Saída logística reversa</option></select></label><label>Técnico<select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}><option value="">Todos</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label className="filter-action"><span>&nbsp;</span><button type="button" onClick={load}>Aplicar filtros</button></label></div></section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Material</th><th>Qtd.</th><th>Serial</th><th>Origem</th><th>Destino</th><th>Referência</th><th>Operador</th><th className="action-cell">Opções</th></tr></thead><tbody>{filtered.map((m) => <tr key={m.id}><td>{dt(m.movementAt)}</td><td><span className={`badge ${m.type}`}>{movementTypeLabel(m.type)}</span></td><td>{m.Material?.name || '-'}</td><td>{formatQuantity(m.quantity)}</td><td>{m.serialNumber || '-'}</td><td>{movementOrigin(m)}</td><td>{movementDestination(m)}</td><td>{m.reference || '-'}</td><td>{m.createdBy?.name || 'Sistema'}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>🔎 Detalhes</button></div></td></tr>)}</tbody></table></div></section>
       <DetailsModal open={!!details} title="🔎 Detalhes completos da movimentação" onClose={() => setDetails(null)}>
-        {details && <><DetailGrid fields={[["Data", dt(details.movementAt)], ["Tipo", details.type], ["Material", details.Material?.name], ["Categoria", details.Material?.category], ["Quantidade", formatQuantity(details.quantity)], ["Serial", details.serialNumber], ["MAC", details.SerializedAsset?.mac], ["Marca/modelo", `${details.SerializedAsset?.brand || '-'} ${details.SerializedAsset?.model || ''}`], ["Valor do ativo", brl(details.SerializedAsset?.acquisitionCost)], ["Origem", details.fromTechnician?.name || details.fromOwnerType], ["Destino", details.toTechnician?.name || details.toOwnerType], ["Referência", details.reference], ["Operador", details.createdBy?.name || 'Sistema'], ["E-mail operador", details.createdBy?.email], ["Observação", details.notes], ["Criado em", dt(details.createdAt)], ["Atualizado em", dt(details.updatedAt)]]} /><div className="viz-callout">🛡️ Este registro ajuda a responder quem movimentou, quando movimentou, de onde saiu, para onde foi, qual serial estava envolvido e qual documento operacional originou a ação.</div></>}
+        {details && <><DetailGrid fields={[["Data", dt(details.movementAt)], ["Tipo", movementTypeLabel(details.type)], ["Material", details.Material?.name], ["Categoria", details.Material?.category], ["Quantidade", formatQuantity(details.quantity)], ["Serial", details.serialNumber], ["MAC", details.SerializedAsset?.mac], ["Marca/modelo", `${details.SerializedAsset?.brand || '-'} ${details.SerializedAsset?.model || ''}`], ["Valor do ativo", brl(details.SerializedAsset?.acquisitionCost)], ["Origem", movementOrigin(details)], ["Destino", movementDestination(details)], ["Referência", details.reference], ["Operador", details.createdBy?.name || 'Sistema'], ["E-mail operador", details.createdBy?.email], ["Observação", details.notes], ["Criado em", dt(details.createdAt)], ["Atualizado em", dt(details.updatedAt)]]} /><div className="viz-callout">🛡️ Este registro ajuda a responder quem movimentou, quando movimentou, de onde saiu, para onde foi, qual serial estava envolvido e qual documento operacional originou a ação.</div></>}
       </DetailsModal>
     </div>
   );

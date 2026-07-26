@@ -40,7 +40,7 @@ exports.list = asyncHandler(async (req, res) => {
   const records = await Material.findAll({ order: [['name', 'ASC']] });
   const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
   const visibleWarehouses = await Warehouse.findAll({
-    where: warehouseListWhere(req.user),
+    where: { ...warehouseListWhere(req.user), isReverseLogistics: false },
     attributes: ['id', 'name', 'code', 'city', 'region', 'status'],
     order: [['city', 'ASC'], ['name', 'ASC']],
   });
@@ -104,6 +104,7 @@ exports.create = asyncHandler(async (req, res) => {
 
   const warehouse = await Warehouse.findByPk(initialWarehouseId);
   if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque regional informado não existe ou está inativo.');
+  if (warehouse.isReverseLogistics) return fail(res, 400, 'O cadastro inicial de material não pode usar estoque de logística reversa. Cadastre o material e utilize a tela Entrada em Estoque.');
 
   const serials = normalizeSerials(initialSerialNumbers.length ? initialSerialNumbers : initialSerialsText);
   const requiresSerial = isTrue(normalizedPayload.requiresSerial);

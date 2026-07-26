@@ -17,7 +17,7 @@ export default function WarehouseValueOverview() {
     setLoading(true);
     Promise.all([
       api.get('/materials'),
-      api.get('/warehouses'),
+      api.get('/warehouses?operationalOnly=true'),
     ])
       .then(([materialsResponse, warehousesResponse]) => {
         if (!active) return;

@@ -4,6 +4,7 @@ const { authenticate, requireRoles, requireModule } = require('../middlewares/au
 router.use(authenticate);
 router.get('/', requireModule('warehouses', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianBoxControl', 'technicianReturns'), controller.list);
 router.post('/transfer-stock', requireModule('warehouses', 'transfers'), controller.transferStock);
+router.post('/:id/reverse-exit', requireModule('warehouses'), controller.reverseExit);
 router.post('/:id/request-delete', requireModule('warehouses'), controller.requestDelete);
 router.get('/:id', requireModule('warehouses'), controller.get);
 router.post('/', requireModule('warehouses'), controller.create);

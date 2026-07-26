@@ -13,6 +13,7 @@ const Warehouse = sequelize.define('Warehouse', {
   responsibleName: { type: DataTypes.STRING(160), allowNull: true },
   status: { type: DataTypes.ENUM('ativo', 'inativo', 'bloqueado'), allowNull: false, defaultValue: 'ativo' },
   approvalLimit: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+  isReverseLogistics: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   notes: { type: DataTypes.TEXT, allowNull: true },
 }, { tableName: 'warehouses' });
 

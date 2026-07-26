@@ -2726,3 +2726,61 @@ input[readonly], textarea[readonly] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Atualização 44: logística reversa */
+.reverse-logistics-row td {
+  background: #f3e5d2 !important;
+  border-color: #d7b98f !important;
+}
+.reverse-logistics-row:hover td {
+  background: #ecd7ba !important;
+}
+.reverse-logistics-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #b7793f;
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 900;
+  vertical-align: middle;
+}
+.reverse-action {
+  background: linear-gradient(135deg, #9a5d2e, #b7793f) !important;
+  border-color: #8a4f25 !important;
+  color: #fff !important;
+}
+.reverse-logistics-check {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #d7b98f;
+  border-radius: 16px;
+  background: #fbf3e8;
+}
+.reverse-logistics-check input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+}
+.reverse-logistics-check span {
+  display: grid;
+  gap: 4px;
+}
+.reverse-logistics-check small {
+  color: #6b4b2f;
+  line-height: 1.35;
+}
+.reverse-exit-form .item-card {
+  border-color: #d7b98f;
+  background: #fffaf4;
+}
+
+.badge.saida_logistica_reversa {
+  background: #f3e5d8;
+  color: #7c421f;
+  border-color: #dfc2aa;
+}

@@ -26,6 +26,7 @@ async function buildWarehouseTransferPlan({ fromWarehouseId, toWarehouseId, refe
   ]);
   if (!fromWarehouse || !toWarehouse) throw new Error('Estoque de origem ou destino não encontrado.');
   if (fromWarehouse.status !== 'ativo' || toWarehouse.status !== 'ativo') throw new Error('Só é possível transferir entre estoques ativos.');
+  if (fromWarehouse.isReverseLogistics || toWarehouse.isReverseLogistics) throw new Error('Estoque de logística reversa não participa de transferências entre estoques.');
 
   const normalizedItems = [];
   let totalQuantity = 0;

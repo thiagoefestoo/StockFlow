@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
-const { User, Technician, AuditLog, ContractorCompany } = require('../models');
+const { User, Technician, AuditLog, ContractorCompany, Warehouse } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
@@ -61,6 +61,20 @@ async function resolveContractorCompany(companyName) {
     company = await ContractorCompany.create({ name: cleanName, status: 'ativa', notes: 'Empresa criada automaticamente pelo cadastro de usuário técnico.' });
   }
   return company;
+}
+
+async function assertTechnicianOperationalWarehouses(role, warehouseIds = []) {
+  if (role !== 'tecnico') return;
+  const ids = Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [];
+  if (!ids.length) return;
+  const reverse = await Warehouse.findAll({
+    where: { id: { [Op.in]: ids }, isReverseLogistics: true },
+    attributes: ['id', 'name'],
+  });
+  if (reverse.length) {
+    const names = reverse.map((warehouse) => warehouse.name).join(', ');
+    throw Object.assign(new Error(`Técnicos não podem ser vinculados a estoque de logística reversa: ${names}.`), { statusCode: 400 });
+  }
 }
 
 async function resolveTechnicianLink({ role, technicianId, name, email, phone, warehouseIds = [], cityAccess = [], companyName = '' }) {
@@ -162,6 +176,7 @@ exports.create = asyncHandler(async (req, res) => {
   await assertEmailAvailable(email);
   const normalizedWarehouseIds = Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [];
   const normalizedCityAccess = Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [];
+  await assertTechnicianOperationalWarehouses(role, normalizedWarehouseIds);
   const resolvedTechnician = await resolveTechnicianLink({ role, technicianId, name, email, phone, warehouseIds: normalizedWarehouseIds, cityAccess: normalizedCityAccess, companyName });
   const user = await User.create({
     name,
@@ -195,6 +210,7 @@ exports.update = asyncHandler(async (req, res) => {
   if (email && email !== user.email) await assertEmailAvailable(String(email).toLowerCase().trim(), user.id);
   const normalizedWarehouseIds = warehouseIds === undefined ? user.warehouseIds : (Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : []);
   const normalizedCityAccess = cityAccess === undefined ? user.cityAccess : (Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : []);
+  await assertTechnicianOperationalWarehouses(nextRole, normalizedWarehouseIds);
   const resolvedTechnician = await resolveTechnicianLink({ role: nextRole, technicianId: technicianId === undefined ? user.technicianId : technicianId, name: name ?? user.name, email: email || user.email, phone: phone === undefined ? user.phone : phone, warehouseIds: normalizedWarehouseIds, cityAccess: normalizedCityAccess, companyName });
 
   Object.assign(user, {

@@ -17,6 +17,7 @@ const empty = {
   address: '',
   responsibleName: '',
   approvalLimit: 0,
+  isReverseLogistics: false,
   status: 'ativo',
   notes: '',
 };
@@ -157,6 +158,10 @@ function emptyTransfer(toWarehouseId = '') {
   return { fromWarehouseId: '', toWarehouseId, reference: '', notes: '', items: [] };
 }
 
+function emptyReverseExit() {
+  return { reference: '', supplierName: '', documentNumber: '', notes: '', items: [] };
+}
+
 export default function Warehouses() {
   const { isAdmin, user } = useAuth();
   const [rows, setRows] = useState([]);
@@ -171,6 +176,12 @@ export default function Warehouses() {
   const [message, setMessage] = useState('');
   const [transferReviewOpen, setTransferReviewOpen] = useState(false);
   const [transferSaving, setTransferSaving] = useState(false);
+  const [reverseExitModal, setReverseExitModal] = useState(false);
+  const [reverseExitWarehouse, setReverseExitWarehouse] = useState(null);
+  const [reverseExitDetails, setReverseExitDetails] = useState(null);
+  const [reverseExitForm, setReverseExitForm] = useState(emptyReverseExit());
+  const [reverseExitReviewOpen, setReverseExitReviewOpen] = useState(false);
+  const [reverseExitSaving, setReverseExitSaving] = useState(false);
 
   const canManageStructure = isAdmin || user?.role === 'supervisor';
 
@@ -195,7 +206,9 @@ export default function Warehouses() {
   useEffect(() => { load(); }, []);
   useEffect(() => { if (transferModal) loadAssets(transferForm.fromWarehouseId); }, [transferModal, transferForm.fromWarehouseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalValue = rows.reduce((s, r) => s + Number(r.totalValue || 0), 0);
+  const operationalRows = useMemo(() => rows.filter((row) => !row.isReverseLogistics), [rows]);
+  const reverseRows = useMemo(() => rows.filter((row) => row.isReverseLogistics), [rows]);
+  const totalValue = operationalRows.reduce((sum, row) => sum + Number(row.totalValue || 0), 0);
 
   const assetsByMaterial = useMemo(() => {
     const map = {};
@@ -226,6 +239,10 @@ export default function Warehouses() {
   }
 
   function openTransfer(row = null) {
+    if (row?.isReverseLogistics) {
+      setMessage('Estoque de logística reversa não participa de transferências. Use Registrar saída para fornecedor.');
+      return;
+    }
     setTransferForm(emptyTransfer(row?.id || ''));
     setAvailableAssets([]);
     setAssetSearch('');
@@ -307,6 +324,140 @@ export default function Warehouses() {
   }
 
 
+  async function openReverseExit(row) {
+    try {
+      setMessage('');
+      const response = await api.get(`/warehouses/${row.id}`);
+      setReverseExitWarehouse(row);
+      setReverseExitDetails(response.data.data);
+      setReverseExitForm(emptyReverseExit());
+      setReverseExitModal(true);
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Não foi possível carregar o estoque de logística reversa.');
+    }
+  }
+
+  const reverseInventoryMaterials = useMemo(() => {
+    if (!reverseExitDetails) return [];
+    const map = new Map();
+    for (const balance of reverseExitDetails.balances || []) {
+      const material = balance.Material;
+      if (!material || Number(balance.quantity || 0) <= 0) continue;
+      map.set(Number(material.id), {
+        materialId: Number(material.id),
+        name: material.name,
+        sku: material.sku,
+        unit: material.unit || 'un',
+        unitCost: Number(material.unitCost || 0),
+        requiresSerial: false,
+        availableQuantity: Number(balance.quantity || 0),
+        assets: [],
+      });
+    }
+    for (const asset of reverseExitDetails.assets || []) {
+      const material = asset.Material;
+      if (!material) continue;
+      const key = Number(material.id);
+      const current = map.get(key) || {
+        materialId: key,
+        name: material.name,
+        sku: material.sku,
+        unit: material.unit || 'un',
+        unitCost: Number(material.unitCost || 0),
+        requiresSerial: true,
+        availableQuantity: 0,
+        assets: [],
+      };
+      current.requiresSerial = true;
+      current.assets.push(asset);
+      current.availableQuantity = current.assets.length;
+      map.set(key, current);
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [reverseExitDetails]);
+
+  function addReverseExitItem() {
+    const selected = new Set(reverseExitForm.items.map((item) => Number(item.materialId)));
+    const first = reverseInventoryMaterials.find((item) => !selected.has(Number(item.materialId)));
+    setReverseExitForm((current) => ({
+      ...current,
+      items: [...current.items, { materialId: first?.materialId || '', quantity: 1, serialNumbers: [] }],
+    }));
+  }
+
+  function updateReverseExitItem(index, patch) {
+    setReverseExitForm((current) => {
+      const items = [...current.items];
+      items[index] = { ...items[index], ...patch };
+      return { ...current, items };
+    });
+  }
+
+  function removeReverseExitItem(index) {
+    setReverseExitForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }));
+  }
+
+  function toggleReverseSerial(index, serialNumber) {
+    const item = reverseExitForm.items[index];
+    const selected = new Set(item.serialNumbers || []);
+    if (selected.has(serialNumber)) selected.delete(serialNumber);
+    else selected.add(serialNumber);
+    updateReverseExitItem(index, { serialNumbers: Array.from(selected), quantity: selected.size });
+  }
+
+  function validateReverseExit() {
+    if (!reverseExitWarehouse?.id) return 'Estoque de logística reversa não identificado.';
+    if (!reverseExitForm.supplierName.trim()) return 'Informe a empresa fornecedora que receberá o material.';
+    if (!reverseExitForm.documentNumber.trim()) return 'Informe o número do romaneio, protocolo ou documento de entrega.';
+    if (!reverseExitForm.items.length) return 'Adicione ao menos um material à saída.';
+    if (duplicateItemIds(reverseExitForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
+    const repeatedSerials = duplicateSerials(reverseExitForm.items);
+    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
+    for (const item of reverseExitForm.items) {
+      const inventory = reverseInventoryMaterials.find((row) => Number(row.materialId) === Number(item.materialId));
+      if (!inventory) return 'Selecione um material válido em todos os itens.';
+      const quantity = inventory.requiresSerial ? (item.serialNumbers || []).length : Number(item.quantity || 0);
+      if (quantity <= 0) return `Informe uma quantidade válida para ${inventory.name}.`;
+      if (quantity > Number(inventory.availableQuantity || 0)) return `Quantidade maior que o saldo disponível de ${inventory.name}.`;
+    }
+    return '';
+  }
+
+  function openReverseExitReview() {
+    const error = validateReverseExit();
+    if (error) { setMessage(error); return; }
+    setReverseExitReviewOpen(true);
+  }
+
+  async function submitReverseExit() {
+    if (reverseExitSaving) return;
+    try {
+      const error = validateReverseExit();
+      if (error) throw new Error(error);
+      setReverseExitSaving(true);
+      await api.post(`/warehouses/${reverseExitWarehouse.id}/reverse-exit`, {
+        ...reverseExitForm,
+        items: reverseExitForm.items.map((item) => ({
+          materialId: Number(item.materialId),
+          quantity: Number(item.quantity || 0),
+          serialNumbers: item.serialNumbers || [],
+        })),
+      });
+      setReverseExitReviewOpen(false);
+      setReverseExitModal(false);
+      setReverseExitWarehouse(null);
+      setReverseExitDetails(null);
+      setReverseExitForm(emptyReverseExit());
+      await load();
+      setMessage('Saída de logística reversa registrada com sucesso no histórico e na auditoria.');
+    } catch (error) {
+      setMessage(error.response?.data?.message || error.message || 'Erro ao registrar saída de logística reversa.');
+    } finally {
+      setReverseExitSaving(false);
+    }
+  }
+
+
   async function requestWarehouseDelete(row) {
     const hasItems = Number(row.totalValue || 0) > 0 || Number(row.assetCount || 0) > 0 || Number(row.consumableLines || 0) > 0;
     if (hasItems) {
@@ -348,6 +499,25 @@ export default function Warehouses() {
   const transferReviewQuantity = transferReviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const transferReviewValue = transferReviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
 
+
+  const reverseExitReviewItems = reverseExitForm.items.map((item, index) => {
+    const inventory = reverseInventoryMaterials.find((row) => Number(row.materialId) === Number(item.materialId));
+    const serials = item.serialNumbers || [];
+    const quantity = inventory?.requiresSerial ? serials.length : Number(item.quantity || 0);
+    return {
+      key: `${item.materialId || 'empty'}-${index}`,
+      name: inventory?.name || `Item ${index + 1}`,
+      detail: inventory?.requiresSerial ? 'Equipamento serializado recolhido' : 'Material usado recolhido',
+      quantity,
+      unit: inventory?.unit || 'un',
+      serialCount: serials.length,
+      serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+      totalValue: quantity * Number(inventory?.unitCost || 0),
+    };
+  });
+  const reverseExitReviewQuantity = reverseExitReviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const reverseExitReviewValue = reverseExitReviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
+
   return <div className="page-grid erp-page warehouse-page">
     <section className="toolbar">
       <div>
@@ -365,10 +535,10 @@ export default function Warehouses() {
     {message && <div className={message.includes('sucesso') ? 'alert success' : 'alert danger'}>{message}</div>}
 
     <div className="kpi-grid small">
-      <KpiCard label="Estoques" value={rows.length} />
-      <KpiCard label="Ativos" value={rows.filter((r) => r.status === 'ativo').length} />
+      <KpiCard label="Estoques operacionais" value={operationalRows.length} />
+      <KpiCard label="Ativos operacionais" value={operationalRows.filter((r) => r.status === 'ativo').length} />
       <KpiCard label="Patrimônio autorizado" value={brl(totalValue)} />
-      <KpiCard label="Equipamentos" value={rows.reduce((s, r) => s + Number(r.assetCount || 0), 0)} />
+      <KpiCard label="Logística reversa" value={reverseRows.length} hint="Estoques isolados do BI operacional." />
     </div>
 
     <section className="panel">
@@ -378,14 +548,14 @@ export default function Warehouses() {
       <div className="table-wrap">
         <table>
           <thead><tr><th>Nº estoque</th><th>Estoque</th><th>Cidade/região</th><th>Responsável</th><th>Valor</th><th>Status</th><th>Opções</th></tr></thead>
-          <tbody>{rows.map((r) => <tr key={r.id}>
+          <tbody>{rows.map((r) => <tr key={r.id} className={r.isReverseLogistics ? 'reverse-logistics-row' : ''}>
             <td><strong>{r.code}</strong></td>
-            <td>{r.name}<br /><small>{r.notes || '-'}</small></td>
+            <td>{r.name} {r.isReverseLogistics && <span className="reverse-logistics-badge">Logística reversa</span>}<br /><small>{r.notes || '-'}</small></td>
             <td>{r.city || '-'} {r.state || ''}<br /><small>{r.region || '-'}</small></td>
             <td>{r.responsibleName || '-'}</td>
             <td>{brl(r.totalValue)}</td>
             <td><span className={`badge ${r.status}`}>{r.status === 'ativo' ? 'Ativo' : r.status}</span></td>
-            <td><div className="row-actions"><button className="info" onClick={() => openDetails(r)}>Detalhes/BI</button><button className="ghost" onClick={() => openTransfer(r)}>Receber transferência</button>{canManageStructure && <button className="ghost" onClick={() => { setForm(r); setModal(true); }}>Editar</button>}{canManageStructure && <button className="ghost danger-outline" onClick={() => requestWarehouseDelete(r)}>Solicitar exclusão</button>}</div></td>
+            <td><div className="row-actions"><button className="info" onClick={() => openDetails(r)}>Detalhes/BI</button>{r.isReverseLogistics ? <button className="reverse-action" onClick={() => openReverseExit(r)}>Registrar saída</button> : <button className="ghost" onClick={() => openTransfer(r)}>Receber transferência</button>}{canManageStructure && <button className="ghost" onClick={() => { setForm({ ...empty, ...r }); setModal(true); }}>Editar</button>}{canManageStructure && <button className="ghost danger-outline" onClick={() => requestWarehouseDelete(r)}>Solicitar exclusão</button>}</div></td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -400,20 +570,70 @@ export default function Warehouses() {
           <label>UF<input value={form.state || ''} maxLength="2" onChange={(e) => setForm({ ...form, state: e.target.value.toUpperCase() })} placeholder="RJ" /></label>
           <label>Região<input value={form.region || ''} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="Região dos Lagos" /></label>
           <label>Responsável local<input value={form.responsibleName || ''} onChange={(e) => setForm({ ...form, responsibleName: e.target.value })} /></label>
-          <label>Limite local de aprovação<input type="number" value={form.approvalLimit || 0} onChange={(e) => setForm({ ...form, approvalLimit: e.target.value })} /></label>
+          <label>Limite local de aprovação<input type="number" disabled={form.isReverseLogistics} value={form.isReverseLogistics ? 0 : (form.approvalLimit || 0)} onChange={(e) => setForm({ ...form, approvalLimit: e.target.value })} /></label>
           <label>Estoque ativo?<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="ativo">Sim, ativo</option><option value="inativo">Não, inativo</option><option value="bloqueado">Bloqueado</option></select></label>
         </div>
+        <label className="reverse-logistics-check"><input type="checkbox" disabled={!!form.id} checked={!!form.isReverseLogistics} onChange={(e) => setForm({ ...form, isReverseLogistics: e.target.checked, approvalLimit: e.target.checked ? 0 : form.approvalLimit })} /><span><b>Estoque de logística reversa</b><small>{form.id ? 'O tipo do estoque é definido na criação e não pode ser alterado depois.' : 'Isolado das transferências, solicitações, caixas técnicas e BI geral. Aceita entradas e saídas para fornecedor.'}</small></span></label>
         <label>Endereço<input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
         <label>Observações<textarea rows="3" value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
       </div>
     </Modal>
 
+
+    <Modal open={reverseExitModal} title={`Saída de logística reversa: ${reverseExitWarehouse?.name || ''}`} onClose={() => !reverseExitSaving && setReverseExitModal(false)} footer={<><button className="ghost" disabled={reverseExitSaving} onClick={() => setReverseExitModal(false)}>Cancelar</button><button disabled={reverseExitSaving} onClick={openReverseExitReview}>Revisar saída</button></>}>
+      <div className="form-stack reverse-exit-form">
+        <div className="alert warning">Esta saída baixa somente o saldo deste estoque e registra a entrega do material usado ao fornecedor. Não gera transferência e não afeta o BI operacional.</div>
+        <div className="form-grid">
+          <label>Empresa fornecedora<input value={reverseExitForm.supplierName} onChange={(e) => setReverseExitForm({ ...reverseExitForm, supplierName: e.target.value })} placeholder="Empresa que receberá os itens" /></label>
+          <label>Documento/romaneio<input value={reverseExitForm.documentNumber} onChange={(e) => setReverseExitForm({ ...reverseExitForm, documentNumber: e.target.value })} placeholder="Número do protocolo ou romaneio" /></label>
+          <label>Referência interna<input value={reverseExitForm.reference} onChange={(e) => setReverseExitForm({ ...reverseExitForm, reference: e.target.value })} placeholder="Gerada automaticamente" /></label>
+        </div>
+        <label>Observações<textarea rows="2" value={reverseExitForm.notes} onChange={(e) => setReverseExitForm({ ...reverseExitForm, notes: e.target.value })} /></label>
+        <div className="subtoolbar"><h4>Materiais entregues ao fornecedor</h4><button type="button" className="ghost" onClick={addReverseExitItem}>Adicionar item</button></div>
+        {reverseExitForm.items.length === 0 && <div className="empty-state">Adicione os materiais usados que sairão do estoque de logística reversa.</div>}
+        {reverseExitForm.items.map((item, index) => {
+          const inventory = reverseInventoryMaterials.find((row) => Number(row.materialId) === Number(item.materialId));
+          const availableOptions = optionsWithoutSelected(reverseInventoryMaterials.map((row) => ({ ...row, id: row.materialId })), reverseExitForm.items, index);
+          const selectedElsewhere = selectedSerialsExcept(reverseExitForm.items, index);
+          const availableAssets = (inventory?.assets || []).filter((asset) => !selectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
+          return <div className="item-card" key={index}>
+            <div className="item-head"><strong>Item {index + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeReverseExitItem(index)}>Remover</button></div>
+            <div className="form-grid">
+              <label>Material<select value={item.materialId} onChange={(e) => updateReverseExitItem(index, { materialId: e.target.value, quantity: 1, serialNumbers: [] })}><option value="">Selecione</option>{availableOptions.map((row) => <option key={row.materialId} value={row.materialId}>{row.name} • saldo {formatQuantity(row.availableQuantity, row.unit)}</option>)}</select></label>
+              {!inventory?.requiresSerial && <label>Quantidade<input type="number" min="1" max={inventory?.availableQuantity || 0} step="1" value={item.quantity} onChange={(e) => updateReverseExitItem(index, { quantity: e.target.value })} /><small>Disponível: {formatQuantity(inventory?.availableQuantity || 0, inventory?.unit)}</small></label>}
+            </div>
+            {inventory?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><strong>Seriais disponíveis</strong><small>{(item.serialNumbers || []).length} selecionado(s)</small></div><div className="serial-list">{availableAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleReverseSerial(index, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{inventory.name} • {brl(asset.acquisitionCost || inventory.unitCost)}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div></div>}
+          </div>;
+        })}
+      </div>
+    </Modal>
+
+    <OperationReviewModal
+      open={reverseExitReviewOpen}
+      title="Confirmar saída de logística reversa"
+      description="Confira os materiais recolhidos que serão baixados e entregues à empresa fornecedora."
+      metadata={[
+        { label: 'Estoque', value: reverseExitWarehouse?.name, hint: reverseExitWarehouse?.code },
+        { label: 'Fornecedor', value: reverseExitForm.supplierName },
+        { label: 'Documento', value: reverseExitForm.documentNumber },
+        { label: 'Referência', value: reverseExitForm.reference || 'Gerada automaticamente' },
+      ]}
+      items={reverseExitReviewItems}
+      totalQuantity={reverseExitReviewQuantity}
+      totalValue={reverseExitReviewValue}
+      warning="Ao confirmar, o saldo será baixado somente deste estoque e a operação ficará registrada no histórico e na auditoria."
+      loading={reverseExitSaving}
+      confirmLabel="Confirmar saída para fornecedor"
+      onCancel={() => setReverseExitReviewOpen(false)}
+      onConfirm={submitReverseExit}
+    />
+
     <Modal open={transferModal} title="Solicitar transferência entre estoques" onClose={() => !transferSaving && setTransferModal(false)} footer={<><button className="ghost" disabled={transferSaving} onClick={() => setTransferModal(false)}>Cancelar</button><button disabled={transferSaving} onClick={openWarehouseTransferReview}>Revisar transferência</button></>}>
       <div className="form-stack warehouse-transfer-form">
         <div className="alert warning">A transferência entre estoques ficará pendente na Central de aprovações. Somente o admin executa a movimentação do saldo.</div>
         <div className="form-grid">
-          <label>Estoque de origem<select value={transferForm.fromWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, fromWarehouseId: e.target.value, items: transferForm.items.map((item) => ({ ...item, serialNumbers: [] })) })}><option value="">Selecione</option>{rows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
-          <label>Estoque de destino<select value={transferForm.toWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, toWarehouseId: e.target.value })}><option value="">Selecione</option>{rows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
+          <label>Estoque de origem<select value={transferForm.fromWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, fromWarehouseId: e.target.value, items: transferForm.items.map((item) => ({ ...item, serialNumbers: [] })) })}><option value="">Selecione</option>{operationalRows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
+          <label>Estoque de destino<select value={transferForm.toWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, toWarehouseId: e.target.value })}><option value="">Selecione</option>{operationalRows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
           <label>Referência<input value={transferForm.reference} onChange={(e) => setTransferForm({ ...transferForm, reference: e.target.value })} placeholder="TE-SPA-001" /></label>
           <label>Buscar serial<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Serial, MAC, modelo..." /></label>
         </div>
@@ -468,10 +688,10 @@ export default function Warehouses() {
 
     <DetailsModal open={!!details} title={`Estoque ${details?.warehouse?.name || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <button onClick={() => downloadWarehouseExcel(details)}>Baixar Excel</button>}</>}>
       <DetailGrid fields={details ? [
-        ['Número/código', details.warehouse.code], ['Nome', details.warehouse.name], ['Cidade', `${details.warehouse.city || '-'} ${details.warehouse.state || ''}`], ['Região', details.warehouse.region], ['Responsável', details.warehouse.responsibleName], ['Estoque ativo?', details.warehouse.status === 'ativo' ? 'Sim' : details.warehouse.status], ['Valor total', brl(details.bi?.totalValue)], ['Última movimentação', dt(details.bi?.lastMovementAt)],
+        ['Número/código', details.warehouse.code], ['Nome', details.warehouse.name], ['Tipo', details.warehouse.isReverseLogistics ? 'Logística reversa' : 'Estoque operacional'], ['Cidade', `${details.warehouse.city || '-'} ${details.warehouse.state || ''}`], ['Região', details.warehouse.region], ['Responsável', details.warehouse.responsibleName], ['Estoque ativo?', details.warehouse.status === 'ativo' ? 'Sim' : details.warehouse.status], ['Valor total', brl(details.bi?.totalValue)], ['Última movimentação', dt(details.bi?.lastMovementAt)],
       ] : []} />
       {details && <>
-        <div className="kpi-grid small"><KpiCard label="Valor em materiais" value={brl(details.bi?.totalValue)} /><KpiCard label="Equipamentos" value={details.bi?.assetCount || 0} /><KpiCard label="Linhas consumíveis" value={details.bi?.consumableLines || 0} /><KpiCard label="Transferências p/ técnico" value={details.bi?.technicianTransfers || 0} /></div>
+        <div className="kpi-grid small"><KpiCard label={details.warehouse.isReverseLogistics ? "Valor isolado recolhido" : "Valor em materiais"} value={brl(details.bi?.totalValue)} /><KpiCard label="Equipamentos" value={details.bi?.assetCount || 0} /><KpiCard label="Linhas consumíveis" value={details.bi?.consumableLines || 0} /><KpiCard label={details.warehouse.isReverseLogistics ? "Saídas p/ fornecedor" : "Transferências p/ técnico"} value={details.warehouse.isReverseLogistics ? (details.bi?.reverseOutgoingMovements || 0) : (details.bi?.technicianTransfers || 0)} /></div>
         <DetailList title="Estoquistas/usuários vinculados" items={details.users || []} render={(u) => <><b>{u.name}</b><span>{u.email} • {u.role} • {u.status}</span><small>Limite de aprovação: {brl(u.approvalLimit)}</small></>} />
         <DetailList title="Técnicos com estoque padrão vinculado" items={details.technicians || []} render={(t) => <><b>{t.name}</b><span>{t.email || '-'} • {t.status}</span><small>{(t.serviceCities || []).join(', ')}</small></>} />
         <DetailList title="Equipamentos serializados no estoque" items={details.assets || []} render={(a) => <><b>{a.serialNumber}</b><span>{a.Material?.name} • {a.status} • {brl(a.acquisitionCost || a.Material?.unitCost)}</span></>} />

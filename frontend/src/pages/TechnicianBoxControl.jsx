@@ -44,7 +44,7 @@ export default function TechnicianBoxControl() {
   async function loadTechs() {
     const [techRes, whRes] = await Promise.all([
       api.get('/technicians'),
-      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+      api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
     const list = techRes.data.data || [];
     const warehouseList = whRes.data.data || [];

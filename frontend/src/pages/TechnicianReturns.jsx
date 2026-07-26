@@ -27,7 +27,7 @@ export default function TechnicianReturns() {
   async function loadInitial() {
     const [techRes, whRes] = await Promise.all([
       api.get('/technicians'),
-      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
+      api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
     const techList = techRes.data.data || [];
     const whList = whRes.data.data || [];
