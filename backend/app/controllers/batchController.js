@@ -8,6 +8,7 @@ const { adjustBalance } = require('../services/stockService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
 const { writeAudit } = require('../services/auditService');
 const { isTrue } = require('../utils/booleans');
+const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 
 exports.list = asyncHandler(async (req, res) => {
   const where = stockWhereForUser(req.user, req.query.warehouseId);
@@ -46,6 +47,7 @@ exports.create = asyncHandler(async (req, res) => {
   } = req.body;
 
   if (!receiptNumber || !receivedAt || !items.length) return fail(res, 400, 'Número de recebimento, data e itens são obrigatórios.');
+  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   if (!proofAttachmentName || !proofAttachmentData) return fail(res, 400, 'Anexe um comprovante da entrada, como nota fiscal, termo de entrega, romaneio ou recibo.');
   if (!fiscalDocumentNumber && !invoiceAccessKey) return fail(res, 400, 'Informe o número do documento fiscal/termo ou a chave de acesso da nota.');
   let targetWarehouseId = warehouseId || null;

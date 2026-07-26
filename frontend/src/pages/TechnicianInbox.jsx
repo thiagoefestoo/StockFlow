@@ -6,8 +6,10 @@ import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import OperationReviewModal from '../components/OperationReviewModal';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial } from '../utils/serviceOrderRules';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 
 const osEmpty = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', addressChangeType: '', notes: '', materials: [] };
 const reqEmpty = { priority: 'media', requesterNotes: '', items: [] };
@@ -35,6 +37,8 @@ export default function TechnicianInbox() {
   const [details, setDetails] = useState(null);
   const [requestConfirmOpen, setRequestConfirmOpen] = useState(false);
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [osReviewOpen, setOsReviewOpen] = useState(false);
+  const [submittingOs, setSubmittingOs] = useState(false);
 
   async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []); }
   async function loadStock(id = selectedTech) {
@@ -177,6 +181,8 @@ export default function TechnicianInbox() {
     if (!String(osForm.customerCpf || '').trim()) return 'Informe o número do contrato.';
     if (osForm.serviceType === 'outro' && !osForm.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!osForm.materials.length) return 'Adicione ao menos um material usado na OS.';
+    if (duplicateItemIds(osForm.materials).length) return 'O mesmo material não pode aparecer mais de uma vez na OS.';
+    if (duplicateSerials(osForm.materials).length) return 'O mesmo serial não pode aparecer mais de uma vez na OS.';
 
     let serialCount = 0;
     for (const item of osForm.materials) {
@@ -196,7 +202,7 @@ export default function TechnicianInbox() {
     return null;
   }
 
-  async function saveOs() {
+  function reviewOs() {
     const validation = validateOs();
     if (validation) {
       setMessage(validation);
@@ -204,16 +210,34 @@ export default function TechnicianInbox() {
       setActiveMobileSection('baixa');
       return;
     }
+    setMessage('');
+    setOsReviewOpen(true);
+  }
+
+  async function saveOs() {
+    if (submittingOs) return;
+    const validation = validateOs();
+    if (validation) {
+      setOsReviewOpen(false);
+      setMessage(validation);
+      setOsFieldsOpen(true);
+      setActiveMobileSection('baixa');
+      return;
+    }
+    setSubmittingOs(true);
     try {
       const payload = { ...osForm, notes: osForm.notes, technicianId: selectedTech, materials: osForm.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
       await api.post('/service-orders', payload);
       setMessage('OS baixada com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
+      setOsReviewOpen(false);
       setOsForm(osEmpty);
       setOsFieldsOpen(false);
       setActiveMobileSection('resumo');
       loadStock(selectedTech);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao baixar OS.');
+    } finally {
+      setSubmittingOs(false);
     }
   }
 
@@ -230,6 +254,7 @@ export default function TechnicianInbox() {
       if (!String(requestForm.requesterNotes || '').trim()) throw new Error('Informe a justificativa da solicitação.');
       const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
       if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
+      if (duplicateItemIds(cleanItems).length) throw new Error('O mesmo material não pode aparecer mais de uma vez na solicitação.');
       setRequestModal(false);
       setRequestConfirmOpen(true);
     } catch (error) {
@@ -243,6 +268,7 @@ export default function TechnicianInbox() {
     try {
       const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
       if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
+      if (duplicateItemIds(cleanItems).length) throw new Error('O mesmo material não pode aparecer mais de uma vez na solicitação.');
       const response = await api.post('/material-requests', { ...requestForm, items: cleanItems, technicianId: selectedTech });
       setMessage(response.data?.message || 'Solicitação registrada.');
       setRequestConfirmOpen(false);
@@ -327,11 +353,12 @@ export default function TechnicianInbox() {
           <div className="subtoolbar"><h4>Material usado</h4><div className="row-actions"><button className="ghost desktop-action" onClick={addStandardKit}>Usar kit padrão</button><button className="ghost" onClick={addOsMaterial}>Adicionar item</button></div></div>
           {osForm.materials.map((m, i) => {
             const material = stockMaterials.find((x) => Number(x.id) === Number(m.materialId));
-            const serials = serialByMaterial(m.materialId);
+            const usedSerials = selectedSerialsExcept(osForm.materials, i);
+            const serials = serialByMaterial(m.materialId).filter((asset) => !usedSerials.has(String(asset.serialNumber || '').trim().toUpperCase()));
             const availableBalance = technicianMaterialBalance(m.materialId);
             return <div className="item-card technician-os-item" key={i}>
               <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeOsMaterial(i)}>Remover</button></div>
-              <label>Material<select value={m.materialId} onChange={(e) => updateOsMaterial(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{stockMaterials.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+              <label>Material<select value={m.materialId} onChange={(e) => updateOsMaterial(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{optionsWithoutSelected(stockMaterials, osForm.materials, i).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
               {material && <div className={`technician-box-balance ${availableBalance <= 0 ? 'empty' : ''}`}>
                 <span>Saldo na caixa do técnico</span>
                 <strong>{formatQuantity(availableBalance, material.unit)}</strong>
@@ -341,7 +368,7 @@ export default function TechnicianInbox() {
             </div>;
           })}
           {!osForm.materials.length && <div className="empty-state small">Clique em “Adicionar item” para informar o material usado na OS.</div>}
-          <button onClick={saveOs} className="wide">Baixar OS e atualizar minha caixa</button>
+          <button onClick={reviewOs} className="wide">Revisar baixa da OS</button>
         </article>
 
         <article className={`panel technician-box-card ${mobileSectionClass('caixa')}`}>
@@ -372,6 +399,38 @@ export default function TechnicianInbox() {
         {!recentRequests.length && <div className="empty-state small">Nenhuma solicitação registrada.</div>}
       </section>
 
+      <OperationReviewModal
+        open={osReviewOpen}
+        title="Revisar baixa da ordem de serviço"
+        description="Confira os dados do cliente, o serviço e todos os materiais antes de atualizar a caixa do técnico."
+        onCancel={() => { if (!submittingOs) setOsReviewOpen(false); }}
+        onConfirm={saveOs}
+        confirmLabel={submittingOs ? 'Confirmando...' : 'Confirmar baixa da OS'}
+        loading={submittingOs}
+        metadata={[
+          { label: 'OS', value: osForm.osNumber || '-' },
+          { label: 'Cliente', value: osForm.customerName || '-' },
+          { label: 'Contrato', value: osForm.customerCpf || '-' },
+          { label: 'Serviço', value: SERVICE_TYPE_OPTIONS.find((option) => option.value === osForm.serviceType)?.label || osForm.serviceType },
+          { label: 'Cidade', value: osForm.city || '-' },
+          { label: 'Técnico', value: technicians.find((t) => String(t.id) === String(selectedTech))?.name || user?.name || '-' },
+        ]}
+        items={osForm.materials.map((item) => {
+          const material = stockMaterials.find((entry) => Number(entry.id) === Number(item.materialId));
+          const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.filter(Boolean) : [];
+          const quantity = material?.requiresSerial ? serials.length : Number(item.quantity || 0);
+          return {
+            name: material?.name || 'Material não identificado',
+            detail: material?.requiresSerial ? 'Equipamento controlado por serial' : `Unidade: ${material?.unit || 'un'}`,
+            quantity,
+            serialCount: serials.length,
+            serialPreview: serials.join(', '),
+            totalValue: quantity * Number(material?.unitCost || 0),
+          };
+        })}
+        warning="Após a confirmação, os materiais serão baixados da caixa do técnico e vinculados à ordem de serviço."
+      />
+
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["Categoria", details.item.Material?.category], ["Status", details.item.status], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Último movimento", details.item.lastMovementAt]]} />}
         {details?.type === 'group' && <><DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity, details.item.unit)], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não']]} />{details.item.requiresSerial && <div className="table-wrap compact"><table><thead><tr><th>Serial</th></tr></thead><tbody>{(details.item.serials || []).map((serial) => <tr key={serial}><td>{serial}</td></tr>)}</tbody></table></div>}</>}
@@ -384,7 +443,7 @@ export default function TechnicianInbox() {
           <label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
           <label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label>
           <div className="subtoolbar"><h4>Itens</h4><button className="ghost" onClick={addRequestItem}>Adicionar</button></div>
-          {requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeRequestItem(i)}>Remover</button></div><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecionar item</option>{materialsCatalog.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" min="1" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}
+          {requestForm.items.map((item, i) => <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeRequestItem(i)}>Remover</button></div><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateRequestItem(i, { materialId: e.target.value })}><option value="">Selecionar item</option>{optionsWithoutSelected(materialsCatalog, requestForm.items, i).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Quantidade<input type="number" min="1" value={item.quantity} onChange={(e) => updateRequestItem(i, { quantity: e.target.value })} /></label></div></div>)}
           {!requestForm.items.length && <div className="empty-state small">Adicione ao menos um item para solicitar material.</div>}
         </div>
       </Modal>

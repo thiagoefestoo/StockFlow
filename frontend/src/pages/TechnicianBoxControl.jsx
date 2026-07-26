@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
+import OperationReviewModal from '../components/OperationReviewModal';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial, serviceTypeLabel } from '../utils/serviceOrderRules';
@@ -36,6 +38,8 @@ export default function TechnicianBoxControl() {
   const [returnForm, setReturnForm] = useState(emptyReturnForm);
   const [message, setMessage] = useState('');
   const [details, setDetails] = useState(null);
+  const [reviewType, setReviewType] = useState('');
+  const [saving, setSaving] = useState(false);
 
   async function loadTechs() {
     const [techRes, whRes] = await Promise.all([
@@ -181,24 +185,64 @@ export default function TechnicianBoxControl() {
     else updateReturnItem(index, { serialNumbersText, quantity: selected.size });
   }
 
-  async function moveToClient() {
-    try {
-      if (clientForm.serviceType === 'outro' && !clientForm.addressChangeType) throw new Error('Informe se a mudança de endereço terá troca de equipamento.');
-      if (!clientForm.items.length) throw new Error('Adicione ao menos um material usado no cliente.');
-      let serialCount = 0;
-      for (const item of clientForm.items) {
-        const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
-        if (!material) throw new Error('Selecione o material em todos os itens adicionados.');
-        const serials = splitSerials(item.serialNumbersText);
-        if (material.requiresSerial) {
-          if (!serials.length) throw new Error(`Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`);
-          serialCount += serials.length;
-        } else if (Number(item.quantity || 0) <= 0) {
-          throw new Error(`Informe uma quantidade válida para ${material.name}.`);
-        }
+  function validateClientOperation() {
+    if (clientForm.serviceType === 'outro' && !clientForm.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
+    if (!clientForm.items.length) return 'Adicione ao menos um material usado no cliente.';
+    if (duplicateItemIds(clientForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
+    const repeatedSerials = duplicateSerials(clientForm.items, (item) => splitSerials(item.serialNumbersText));
+    if (repeatedSerials.length) return `O mesmo serial não pode ser usado mais de uma vez: ${repeatedSerials.join(', ')}.`;
+    let serialCount = 0;
+    for (const item of clientForm.items) {
+      const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
+      if (!material) return 'Selecione o material em todos os itens adicionados.';
+      const serials = splitSerials(item.serialNumbersText);
+      if (material.requiresSerial) {
+        if (!serials.length) return `Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`;
+        serialCount += serials.length;
+      } else if (Number(item.quantity || 0) <= 0) {
+        return `Informe uma quantidade válida para ${material.name}.`;
       }
-      if (clientSerialRequired && serialCount !== 1) throw new Error('Este tipo de serviço exige exatamente 1 serial de equipamento.');
-      if (!clientSerialRequired && serialCount > 1) throw new Error('Selecione no máximo 1 serial por OS.');
+    }
+    if (clientSerialRequired && serialCount !== 1) return 'Este tipo de serviço exige exatamente 1 serial de equipamento.';
+    if (!clientSerialRequired && serialCount > 1) return 'Selecione no máximo 1 serial por OS.';
+    return '';
+  }
+
+  function validateReturnOperation() {
+    if (!selectedTech) return 'Selecione o técnico.';
+    if (!returnForm.warehouseId) return 'Selecione o estoque de destino.';
+    if (!returnForm.items.length) return 'Adicione ao menos um item para devolver ao estoque.';
+    if (duplicateItemIds(returnForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
+    const repeatedSerials = duplicateSerials(returnForm.items, (item) => splitSerials(item.serialNumbersText));
+    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
+    for (const item of returnForm.items) {
+      const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
+      if (!material) return 'Selecione o material em todos os itens adicionados.';
+      const serials = splitSerials(item.serialNumbersText);
+      if (material.requiresSerial && !serials.length) return `Selecione ao menos um serial de ${material.name}.`;
+      if (!material.requiresSerial && Number(item.quantity || 0) <= 0) return `Informe uma quantidade válida para ${material.name}.`;
+    }
+    return '';
+  }
+
+  function openClientReview() {
+    const error = validateClientOperation();
+    if (error) { setMessage(`❌ ${error}`); return; }
+    setReviewType('client');
+  }
+
+  function openReturnReview() {
+    const error = validateReturnOperation();
+    if (error) { setMessage(`❌ ${error}`); return; }
+    setReviewType('return');
+  }
+
+  async function moveToClient() {
+    if (saving) return;
+    try {
+      const error = validateClientOperation();
+      if (error) throw new Error(error);
+      setSaving(true);
       const payload = {
         ...clientForm,
         notes: clientForm.notes,
@@ -207,15 +251,22 @@ export default function TechnicianBoxControl() {
       };
       await api.post('/stock/technician-box/move-to-client', payload);
       setMessage('✅ Movimentação para cliente registrada. Caixa, OS, histórico, auditoria e BI foram atualizados.');
+      setReviewType('');
       setClientForm(emptyClientForm);
       loadBox(selectedTech);
     } catch (error) {
       setMessage(`❌ ${error.response?.data?.message || error.message || 'Erro ao movimentar para cliente.'}`);
+    } finally {
+      setSaving(false);
     }
   }
 
   async function returnToStock() {
+    if (saving) return;
     try {
+      const error = validateReturnOperation();
+      if (error) throw new Error(error);
+      setSaving(true);
       const payload = {
         ...returnForm,
         technicianId: selectedTech,
@@ -223,14 +274,43 @@ export default function TechnicianBoxControl() {
       };
       await api.post('/stock/technician-box/return-to-stock', payload);
       setMessage('✅ Material devolvido ao estoque. Caixa, histórico, auditoria e BI foram atualizados.');
+      setReviewType('');
       setReturnForm(emptyReturnForm);
       loadBox(selectedTech);
     } catch (error) {
       setMessage(`❌ ${error.response?.data?.message || error.message || 'Erro ao devolver ao estoque.'}`);
+    } finally {
+      setSaving(false);
     }
   }
 
   const selected = technicians.find((t) => String(t.id) === String(selectedTech));
+  const selectedReturnWarehouse = warehouses.find((warehouse) => String(warehouse.id) === String(returnForm.warehouseId));
+  function buildReviewItems(operationForm) {
+    return operationForm.items.map((item, index) => {
+      const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
+      const serials = splitSerials(item.serialNumbersText);
+      const quantity = material?.requiresSerial ? serials.length : Number(item.quantity || 0);
+      const totalValue = material?.requiresSerial
+        ? serials.reduce((sum, serial) => sum + Number((box?.assets || []).find((asset) => asset.serialNumber === serial)?.acquisitionCost || material?.unitCost || 0), 0)
+        : quantity * Number(material?.unitCost || 0);
+      return {
+        key: `${item.materialId || 'empty'}-${index}`,
+        name: material?.name || `Item ${index + 1}`,
+        detail: material?.requiresSerial ? 'Equipamento serializado' : 'Material controlado por quantidade',
+        quantity,
+        unit: material?.unit || 'un',
+        serialCount: serials.length,
+        serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+        totalValue,
+      };
+    });
+  }
+  const clientReviewItems = buildReviewItems(clientForm);
+  const returnReviewItems = buildReviewItems(returnForm);
+  const reviewItems = reviewType === 'client' ? clientReviewItems : returnReviewItems;
+  const reviewQuantity = reviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const reviewValue = reviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
 
   return (
     <div className="page-grid technician-box-admin-page">
@@ -371,8 +451,8 @@ export default function TechnicianBoxControl() {
               </div>
               <label>Observação da baixa<textarea rows="3" value={clientForm.notes} onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })} placeholder="Motivo, atendimento, autorização, observações do supervisor..." /></label>
               <div className="subtoolbar"><h4>Itens usados no cliente</h4><button className="ghost" onClick={addClientItem}>➕ Adicionar item</button></div>
-              {clientForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateClientItem} remove={removeClientItem} toggleSerial={(serial) => toggleSerial('client', i, serial)} />)}
-              <button className="wide" onClick={moveToClient}>✅ Confirmar baixa/movimentação para cliente</button>
+              {clientForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={clientForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateClientItem} remove={removeClientItem} toggleSerial={(serial) => toggleSerial('client', i, serial)} />)}
+              <button className="wide" disabled={saving} onClick={openClientReview}>✅ Revisar baixa/movimentação para cliente</button>
             </div>
             <PreviewBox title="Impacto desta operação" form={clientForm} materials={materialsInBox} box={box} target="cliente" />
           </div>
@@ -385,8 +465,8 @@ export default function TechnicianBoxControl() {
               <p className="muted">Use para recolhimento, conferência, ajuste operacional, troca de equipe ou material não utilizado.</p>
               <div className="form-grid"><label>Estoque de destino<select value={returnForm.warehouseId || ''} onChange={(e) => setReturnForm({ ...returnForm, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code || 'sem código'}</option>)}</select></label><label>Referência<input list="box-return-reference-options" value={returnForm.reference} onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })} placeholder="Selecione ou digite uma referência" /><datalist id="box-return-reference-options">{RETURN_REFERENCE_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label><label>Motivo<input list="box-return-reason-options" value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Selecione ou digite o motivo do retorno" /><datalist id="box-return-reason-options">{RETURN_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label></div>
               <div className="subtoolbar"><h4>Itens para retornar ao estoque</h4><button className="ghost" onClick={addReturnItem}>➕ Adicionar item</button></div>
-              {returnForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateReturnItem} remove={removeReturnItem} toggleSerial={(serial) => toggleSerial('return', i, serial)} />)}
-              <button className="wide" onClick={returnToStock}>↩️ Confirmar devolução ao estoque</button>
+              {returnForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={returnForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateReturnItem} remove={removeReturnItem} toggleSerial={(serial) => toggleSerial('return', i, serial)} />)}
+              <button className="wide" disabled={saving} onClick={openReturnReview}>↩️ Revisar devolução ao estoque</button>
             </div>
             <PreviewBox title="Impacto da devolução" form={returnForm} materials={materialsInBox} box={box} target="estoque" />
           </div>
@@ -405,6 +485,31 @@ export default function TechnicianBoxControl() {
         <div className="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Tipo</th><th>Status</th><th>Data</th><th>Itens</th><th>Opções</th></tr></thead><tbody>{(box?.orders || []).map((order) => <tr key={order.id}><td>{order.osNumber}</td><td>{order.customerName}<br /><small>{order.customerCpf}</small></td><td>{serviceTypeLabel(order.serviceType)}</td><td><span className={`badge ${order.status}`}>{order.status}</span></td><td>{dt(order.completedAt || order.createdAt)}</td><td>{order.ServiceOrderMaterials?.length || 0}</td><td><button className="info" onClick={() => setDetails({ type: 'order', item: order })}>Detalhes</button></td></tr>)}</tbody></table></div>
       </section>
 
+      <OperationReviewModal
+        open={Boolean(reviewType)}
+        title={reviewType === 'client' ? 'Revisar baixa para cliente/OS' : 'Revisar devolução ao estoque'}
+        description={reviewType === 'client' ? 'Confira cliente, serviço, OS, itens e seriais antes de registrar a baixa.' : 'Confira técnico, estoque de destino, itens e seriais antes de registrar a devolução.'}
+        metadata={reviewType === 'client' ? [
+          { label: 'Técnico', value: selected?.name },
+          { label: 'Cliente', value: clientForm.customerName || 'Não informado', hint: clientForm.customerCpf || clientForm.customerAddress },
+          { label: 'OS', value: clientForm.osNumber || 'Sem número de OS' },
+          { label: 'Tipo de serviço', value: serviceTypeLabel(clientForm.serviceType) },
+        ] : [
+          { label: 'Técnico de origem', value: selected?.name },
+          { label: 'Estoque de destino', value: selectedReturnWarehouse?.name, hint: selectedReturnWarehouse?.code },
+          { label: 'Referência', value: returnForm.reference || 'Gerada automaticamente' },
+          { label: 'Motivo', value: returnForm.notes || 'Não informado' },
+        ]}
+        items={reviewItems}
+        totalQuantity={reviewQuantity}
+        totalValue={reviewValue}
+        warning={reviewType === 'client' ? 'Ao confirmar, os itens sairão da caixa do técnico e serão vinculados ao cliente/OS.' : 'Ao confirmar, os itens sairão da caixa do técnico e retornarão ao estoque selecionado.'}
+        loading={saving}
+        confirmLabel={reviewType === 'client' ? 'Confirmar baixa para cliente' : 'Confirmar devolução ao estoque'}
+        onCancel={() => setReviewType('')}
+        onConfirm={reviewType === 'client' ? moveToClient : returnToStock}
+      />
+
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>
         {details?.type === 'asset' && <DetailGrid fields={[["Serial", details.item.serialNumber], ["Material", details.item.Material?.name], ["MAC", details.item.mac], ["Marca/modelo", `${details.item.brand || '-'} ${details.item.model || ''}`], ["Valor", brl(details.item.acquisitionCost || details.item.Material?.unitCost)], ["Custódia desde", details.item.custodyStartedAt], ["Dias", details.item.custodyDays], ["Status", details.item.status]]} />}
         {details?.type === 'group' && <DetailGrid fields={[["Material", details.item.material], ["Categoria", details.item.category], ["Quantidade", formatQuantity(details.item.quantity) + ' ' + (details.item.unit || 'un')], ["Valor", brl(details.item.value)], ["Serializado", details.item.requiresSerial ? 'Sim' : 'Não'], ["Seriais", details.item.serials?.join(', ') || '-']]} />}
@@ -415,9 +520,11 @@ export default function TechnicianBoxControl() {
   );
 }
 
-function MovementItem({ item, index, materials, assetsByMaterial, balanceFor, update, remove, toggleSerial }) {
+function MovementItem({ item, index, items, materials, assetsByMaterial, balanceFor, update, remove, toggleSerial }) {
   const material = materials.find((m) => Number(m.id) === Number(item.materialId));
-  const assets = assetsByMaterial(item.materialId);
+  const availableMaterials = optionsWithoutSelected(materials, items, index);
+  const serialsSelectedElsewhere = selectedSerialsExcept(items, index, (row) => splitSerials(row.serialNumbersText));
+  const assets = assetsByMaterial(item.materialId).filter((asset) => !serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
   const selectedSerials = splitSerials(item.serialNumbersText);
   const balance = balanceFor(item.materialId);
   return (
@@ -426,7 +533,7 @@ function MovementItem({ item, index, materials, assetsByMaterial, balanceFor, up
       <div className="form-grid">
         <label>Material
           <select value={item.materialId} onChange={(e) => update(index, { materialId: e.target.value, quantity: 1, serialNumbersText: '' })}>
-            <option value="">Selecione o material</option>{materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
+            <option value="">Selecione o material</option>{availableMaterials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
           </select>
         </label>
         {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity) + ' ' + (material?.unit || 'un')}<input type="number" min="0" step="1" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}

@@ -21,6 +21,7 @@ const { ok, created, fail } = require('../utils/response');
 const { daysBetween, qty, money, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
+const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
 
 function parseSerials(value) {
@@ -187,6 +188,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
   if (!targetWarehouseId) return fail(res, 400, 'Selecione o estoque de destino para retorno do material.');
   if (!items.length) return fail(res, 400, 'Selecione pelo menos um item da caixa do técnico para retornar ao estoque.');
+  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   const targetWarehouse = await Warehouse.findByPk(targetWarehouseId);
@@ -302,6 +304,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
     items = defaults.filter((row) => ['drop', 'cabo', 'conector', 'esticador'].includes(String(row.Material?.category || '').toLowerCase())).map((row) => ({ materialId: row.materialId, quantity: Math.min(Number(row.quantity || 0), row.Material?.category === 'drop' || row.Material?.category === 'cabo' ? 50 : 2) })).filter((item) => item.quantity > 0);
     if (!items.length) return fail(res, 400, 'Informe itens ou mantenha materiais padrão disponíveis na caixa do técnico.');
   }
+  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   if (!customerName || !customerCpf) return fail(res, 400, 'Nome do cliente e número do contrato são obrigatórios.');
   if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   const technician = await Technician.findByPk(technicianId);
@@ -443,6 +446,9 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
   if (!String(reason || '').trim()) return fail(res, 400, 'Informe o motivo da perda/desconto.');
   if (lossType === 'material' && (!Array.isArray(items) || !items.length)) {
     return fail(res, 400, 'Adicione ao menos um material perdido.');
+  }
+  if (lossType === 'material') {
+    try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   }
   if (lossType === 'ferramenta' && (!Array.isArray(toolIds) || !toolIds.length)) {
     return fail(res, 400, 'Selecione ao menos uma ferramenta da ficha do técnico.');

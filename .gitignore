@@ -7,3 +7,7 @@ dist/
 coverage/
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/.env
+frontend/.env
+*.log
+backup-remocao-*.json

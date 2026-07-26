@@ -39,6 +39,7 @@ export const LOSS_REASON_OPTIONS = [
 
 export const MATERIAL_REQUEST_JUSTIFICATION_OPTIONS = {
   reposicao_carga: [
+    'Recarga Padrão para atividades',
     'Reposição para instalações programadas',
     'Reposição para reparos e manutenções',
     'Reposição para upgrades',
@@ -48,6 +49,7 @@ export const MATERIAL_REQUEST_JUSTIFICATION_OPTIONS = {
     'Substituição de material avariado ou extraviado',
   ],
   recarga_estoque: [
+    'Recarga Padrão para atividades',
     'Reposição do estoque regional',
     'Reposição por estoque mínimo',
     'Atendimento de demanda programada',

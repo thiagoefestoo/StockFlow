@@ -13,6 +13,7 @@ const {
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
+const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { adjustBalance } = require('../services/stockService');
 const { money } = require('../utils/number');
 const { buildWarehouseTransferPlan } = require('../services/warehouseTransferService');
@@ -240,6 +241,8 @@ exports.requestDelete = asyncHandler(async (req, res) => {
 
 exports.transferStock = asyncHandler(async (req, res) => {
   const { fromWarehouseId, toWarehouseId, reference, notes, items = [] } = req.body;
+
+  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
 
   try {
     // Administrador e supervisor podem solicitar entre quaisquer estoques ativos.

@@ -9,6 +9,7 @@ import KpiCard from '../components/KpiCard';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 import { MATERIAL_REQUEST_JUSTIFICATION_OPTIONS } from '../constants/operationOptions';
 import FloatingAlert from '../components/FloatingAlert';
+import { duplicateItemIds, optionsWithoutSelected } from '../utils/operationSelections';
 
 const baseForm = { requestType: 'reposicao_carga', technicianId: '', warehouseId: '', priority: 'media', neededBy: '', requesterNotes: '', items: [] };
 
@@ -153,6 +154,11 @@ export default function MaterialRequests() {
   async function save(e) {
     e.preventDefault();
     const invalidItem = form.items.find((item) => !item.materialId || Number(item.quantity || 0) <= 0);
+    const repeatedMaterials = duplicateItemIds(form.items);
+    if (repeatedMaterials.length) {
+      setMessage({ text: 'O mesmo material não pode ser selecionado mais de uma vez na solicitação.', type: 'danger' });
+      return;
+    }
     if (!form.items.length || invalidItem) {
       setMessage({ text: 'Adicione materiais, selecione o item na lista e informe uma quantidade válida.', type: 'danger' });
       return;
@@ -294,7 +300,8 @@ export default function MaterialRequests() {
           <label>Justificativa<select value={form.requesterNotes} onChange={(e) => setForm({ ...form, requesterNotes: e.target.value })} required><option value="">Selecione uma justificativa</option>{justificationOptions(form.requestType).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
           <div className="subtoolbar"><h4>Itens solicitados</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
           {form.items.map((item, i) => {
-            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecionar item</option>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
+            const availableMaterials = optionsWithoutSelected(materials, form.items, i);
+            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecionar item</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
           })}
           {form.items.length === 0 && <div className="empty-state">Adicione materiais para enviar a solicitação.</div>}
         </form>

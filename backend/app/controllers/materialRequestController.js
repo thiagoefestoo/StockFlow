@@ -18,6 +18,7 @@ const { ok, created, fail } = require('../utils/response');
 const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
+const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { userWarehouseIds, assertWarehouseAccess } = require('../utils/warehouseAccess');
 const { approveMaterialRequest, validateApprover } = require('../services/materialRequestApprovalService');
 const { Op } = require('sequelize');
@@ -173,6 +174,7 @@ exports.create = asyncHandler(async (req, res) => {
 
   if (!requesterNotes) return fail(res, 400, 'Selecione uma justificativa para a solicitação.');
   if (!Array.isArray(items) || !items.length) return fail(res, 400, 'Inclua ao menos um item solicitado.');
+  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
 
   let technician = null;
   if (!isStockRecharge(requestType)) {

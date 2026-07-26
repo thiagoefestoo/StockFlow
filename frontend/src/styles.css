@@ -2681,3 +2681,25 @@ input[readonly], textarea[readonly] {
   .loss-tool-list { grid-template-columns: 1fr; }
   .loss-tool-search { min-width: 0; width: 100%; }
 }
+
+/* Revisão operacional e legendas de indicadores */
+.kpi-card-label { display: flex; align-items: center; gap: 7px; }
+.kpi-card-label em { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-style: normal; font-size: .72rem; font-weight: 950; cursor: help; }
+.kpi-card-hint { display: block; margin-top: 8px; line-height: 1.35; font-weight: 650; }
+.operation-review { display: grid; gap: 18px; }
+.operation-review-intro { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid #bfdbfe; border-radius: 18px; background: linear-gradient(135deg, #eff6ff, #ecfdf5); }
+.operation-review-intro p { margin: 5px 0 0; color: #475569; }
+.operation-review-icon { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 14px; background: #16a34a; color: white; font-size: 1.25rem; font-weight: 950; }
+.operation-review-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.operation-review-meta article, .operation-review-totals article { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: #f8fafc; }
+.operation-review-meta small, .operation-review-totals small { color: #64748b; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
+.operation-review-meta strong, .operation-review-totals strong { color: #0f172a; font-size: 1.15rem; overflow-wrap: anywhere; }
+.operation-review-meta span, .operation-review-totals span { color: #64748b; font-size: .84rem; }
+.operation-review-table { border: 1px solid var(--line); border-radius: 18px; padding: 14px; background: white; }
+.operation-review-table .subtoolbar { margin-top: 0; }
+.operation-review-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.operation-review-totals article { background: linear-gradient(135deg, #eff6ff, #f8fafc); border-color: #bfdbfe; }
+.operation-review-totals strong { font-size: 1.5rem; color: #0f3f8f; }
+.operation-review-warning { margin: 0; }
+.option-used-note { color: #64748b; font-size: .82rem; font-weight: 750; }
+@media (max-width: 720px) { .operation-review-totals { grid-template-columns: 1fr; } }

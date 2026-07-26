@@ -8,6 +8,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityWithUnit } from '../utils/formatQuantity';
 import { TRANSFER_REASON_OPTIONS } from '../constants/operationOptions';
 import FloatingAlert from '../components/FloatingAlert';
+import OperationReviewModal from '../components/OperationReviewModal';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -101,6 +103,7 @@ export default function Transfers() {
   const [requestTechnicianFilter, setRequestTechnicianFilter] = useState('');
   const [notice, setNotice] = useState({ text: '', type: 'danger' });
   const [saving, setSaving] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   function showNotice(text, type = 'danger') {
     setNotice({ text, type });
@@ -350,6 +353,11 @@ export default function Transfers() {
     if (!form.technicianId) return 'Selecione o técnico de destino.';
     if (!form.items.length && !requestLinked) return 'Adicione pelo menos um item à transferência.';
 
+    const repeatedMaterials = duplicateItemIds(form.items);
+    if (repeatedMaterials.length) return 'O mesmo material não pode ser selecionado mais de uma vez. Remova o item repetido antes de continuar.';
+    const repeatedSerials = duplicateSerials(form.items);
+    if (repeatedSerials.length) return `O mesmo serial não pode ser usado mais de uma vez na transferência: ${repeatedSerials.join(', ')}.`;
+
     for (const item of form.items) {
       const material = materialForItem(item);
       if (!material) return 'Existe item selecionado que não está disponível no estoque de origem.';
@@ -375,6 +383,15 @@ export default function Transfers() {
       }
     }
     return null;
+  }
+
+  function openReview() {
+    const validationError = validateBeforeSave();
+    if (validationError) {
+      showNotice(validationError);
+      return;
+    }
+    setReviewOpen(true);
   }
 
   async function save() {
@@ -409,6 +426,7 @@ export default function Transfers() {
         };
         const response = await api.post('/material-requests', requestPayload);
         showNotice(response.data?.message || 'Carga enviada para aprovação por exceder o limite individual do técnico.', 'warning');
+        setReviewOpen(false);
         setModal(false);
         setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
         setAssetSearch('');
@@ -423,6 +441,7 @@ export default function Transfers() {
         window.dispatchEvent(new Event('superinfra:technician-box-refresh'));
       } catch (_) {}
       if (form.warehouseId) await loadWarehouseStock(form.warehouseId);
+      setReviewOpen(false);
       setModal(false);
       setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
       setAssetSearch('');
@@ -507,6 +526,33 @@ export default function Transfers() {
     return sum + toQuantityNumber(item.quantity) * Number(material.unitCost || 0);
   }, 0);
   const zeroStockRelease = requestLinked && form.items.length > 0 && form.items.every((item) => toQuantityNumber(item.quantity) === 0);
+  const reviewItems = form.items
+    .map((item, index) => {
+      const material = materialForItem(item);
+      if (!material) return null;
+      const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers : [];
+      const quantity = toQuantityNumber(item.quantity);
+      const totalValue = material.requiresSerial
+        ? serials.reduce((sum, serial) => sum + Number(availableAssets.find((asset) => asset.serialNumber === serial)?.acquisitionCost || material.unitCost || 0), 0)
+        : quantity * Number(material.unitCost || 0);
+      return {
+        key: `${item.materialId}-${index}`,
+        name: material.name,
+        detail: material.requiresSerial ? 'Equipamento controlado por serial' : `Material sem serial • saldo disponível ${qtyLabel(material.mainStock, material.unit)}`,
+        quantity,
+        unit: material.unit,
+        serialCount: serials.length,
+        serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+        totalValue,
+      };
+    })
+    .filter(Boolean);
+  const reviewQuantity = reviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const reviewWarning = selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500)
+    ? `O valor ultrapassa o limite individual de ${brl(selectedTechnician.transferApprovalLimit ?? 500)}. Ao confirmar, a carga será enviada para aprovação antes de movimentar o estoque.`
+    : zeroStockRelease
+      ? 'Todos os itens estão com quantidade zero. A solicitação será liberada sem movimentação de material.'
+      : 'Ao confirmar, o saldo do estoque será movimentado e a guia será gerada para a caixa do técnico.';
 
   return (
     <div className="page-grid transfer-page">
@@ -542,7 +588,7 @@ export default function Transfers() {
 
       <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{tr.Warehouse?.name || '-'}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <AttachmentPreview compact name={tr.attachmentName} data={tr.attachmentData} />}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
 
-      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={save}>{saving ? 'Processando...' : zeroStockRelease ? 'Liberar solicitação sem material' : form.materialRequestId ? 'Transferir material' : 'Gerar guia e enviar para caixa'}</button></>}>
+      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>{zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
         <div className="transfer-wizard">
           <section className="transfer-summary-card">
             <div><small>Estoque de origem</small><strong>{selectedWarehouse?.name || 'Selecione um estoque'}</strong><span>{selectedWarehouse ? `${selectedWarehouse.city || '-'} • ${selectedWarehouse.code || 'sem código'}` : 'Materiais serão filtrados pelo estoque'}</span></div>
@@ -564,17 +610,20 @@ export default function Transfers() {
           {form.items.map((item, i) => {
             const material = materialForItem(item);
             const allSerialAssets = stockByMaterial[item.materialId] || [];
+            const serialsSelectedElsewhere = selectedSerialsExcept(form.items, i);
             const serialAssets = allSerialAssets.filter((asset) => {
+              if (serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase())) return false;
               const terms = parseSerialTerms(item.assetSearchApplied || '');
               if (!terms.length) return true;
               const text = assetSearchText(asset);
               return terms.some((term) => text.includes(normalizeSerialText(term)));
             });
+            const availableMaterialOptions = optionsWithoutSelected(materialOptions, form.items, i);
             return (
               <div className="item-card transfer-item-card" key={i}>
                 <div className="item-head"><strong>📦 Item {i + 1}</strong>{!requestLinked && <button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button>}</div>
                 <div className="form-grid">
-                  <label>Material<select disabled={requestLinked} value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{material && !materialOptions.some((option) => Number(option.id) === Number(material.id)) && <option value={material.id}>{material.name}</option>}{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
+                  <label>Material<select disabled={requestLinked} value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{material && !materialOptions.some((option) => Number(option.id) === Number(material.id)) && <option value={material.id}>{material.name}</option>}{availableMaterialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
                   <label>Quantidade a transferir<input type="number" min={requestLinked ? 0 : 1} max={material ? Math.min(availableQuantityForMaterial(material, allSerialAssets), requestLinked ? toQuantityNumber(item.requestedQuantity) || Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY) : undefined} step="1" value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value, serialNumbers: material?.requiresSerial ? [] : item.serialNumbers })} placeholder={material ? 'Informe o que será realmente entregue' : 'Selecione o material primeiro'} />
                     {(() => {
                       if (!material) return <small>Escolha o material e informe a quantidade que será transferida.</small>;
@@ -637,6 +686,26 @@ export default function Transfers() {
           })}
         </div>
       </Modal>
+
+      <OperationReviewModal
+        open={reviewOpen}
+        title={zeroStockRelease ? 'Revisar liberação da solicitação' : 'Revisar transferência para o técnico'}
+        description="Confira estoque, técnico, quantidades, seriais e valores. A transferência só será executada depois da confirmação abaixo."
+        metadata={[
+          { label: 'Estoque de origem', value: selectedWarehouse?.name, hint: selectedWarehouse?.code || selectedWarehouse?.city },
+          { label: 'Técnico de destino', value: selectedTechnician?.name, hint: selectedTechnician?.ContractorCompany?.name || 'Carga individual' },
+          { label: 'Motivo', value: form.notes || 'Não informado' },
+          { label: 'Tipo de fluxo', value: form.materialRequestId ? 'Entrega de solicitação aprovada' : 'Transferência direta' },
+        ]}
+        items={reviewItems}
+        totalQuantity={reviewQuantity}
+        totalValue={totalPreview}
+        warning={reviewWarning}
+        loading={saving}
+        confirmLabel={selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500) ? 'Confirmar e enviar para aprovação' : zeroStockRelease ? 'Confirmar liberação sem material' : 'Confirmar transferência'}
+        onCancel={() => setReviewOpen(false)}
+        onConfirm={save}
+      />
 
       <Modal open={edit.open} title={`✏️ Editar guia ${edit.item?.transferNumber || ''}`} onClose={() => setEdit({ open: false, item: null, form: {} })} footer={<><button className="ghost" onClick={() => setEdit({ open: false, item: null, form: {} })}>Cancelar</button><button onClick={saveEdit}>Salvar alteração</button></>}>
         <div className="form-grid"><label>Status<select value={edit.form.status || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, status: e.target.value } })}><option value="pendente_assinatura">Pendente de assinatura</option><option value="assinado">Assinado</option><option value="cancelado">Cancelado</option></select></label><label>Data de entrega<input type="datetime-local" value={edit.form.deliveredAt || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, deliveredAt: e.target.value } })} /></label><label>Responsável pela assinatura<input value={edit.form.signatureResponsible || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, signatureResponsible: e.target.value } })} /></label></div><label>Observações<textarea rows="4" value={edit.form.notes || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, notes: e.target.value } })} /></label><div className="viz-callout">🛡️ Alterações administrativas gravam histórico de auditoria.</div>

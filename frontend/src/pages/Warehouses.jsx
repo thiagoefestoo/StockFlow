@@ -3,6 +3,8 @@ import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import OperationReviewModal from '../components/OperationReviewModal';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
@@ -167,6 +169,8 @@ export default function Warehouses() {
   const [transferForm, setTransferForm] = useState(emptyTransfer());
   const [assetSearch, setAssetSearch] = useState('');
   const [message, setMessage] = useState('');
+  const [transferReviewOpen, setTransferReviewOpen] = useState(false);
+  const [transferSaving, setTransferSaving] = useState(false);
 
   const canManageStructure = isAdmin || user?.role === 'supervisor';
 
@@ -252,9 +256,36 @@ export default function Warehouses() {
     updateTransferItem(index, { serialNumbers: Array.from(selected), quantity: selected.size });
   }
 
+  function validateWarehouseTransfer() {
+    if (!transferForm.fromWarehouseId) return 'Selecione o estoque de origem.';
+    if (!transferForm.toWarehouseId) return 'Selecione o estoque de destino.';
+    if (String(transferForm.fromWarehouseId) === String(transferForm.toWarehouseId)) return 'O estoque de origem e o destino precisam ser diferentes.';
+    if (!transferForm.items.length) return 'Adicione pelo menos um item à transferência.';
+    if (duplicateItemIds(transferForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
+    const repeatedSerials = duplicateSerials(transferForm.items);
+    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
+    for (const item of transferForm.items) {
+      const material = materials.find((row) => Number(row.id) === Number(item.materialId));
+      if (!material) return 'Selecione o material em todos os itens.';
+      const quantity = material.requiresSerial ? (item.serialNumbers || []).length : Number(item.quantity || 0);
+      if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
+    }
+    return '';
+  }
+
+  function openWarehouseTransferReview() {
+    const error = validateWarehouseTransfer();
+    if (error) { setMessage(error); return; }
+    setTransferReviewOpen(true);
+  }
+
   async function submitWarehouseTransfer() {
+    if (transferSaving) return;
     try {
       setMessage('');
+      const error = validateWarehouseTransfer();
+      if (error) throw new Error(error);
+      setTransferSaving(true);
       const payload = {
         ...transferForm,
         items: transferForm.items.map((item) => {
@@ -263,12 +294,15 @@ export default function Warehouses() {
         }),
       };
       await api.post('/warehouses/transfer-stock', payload);
+      setTransferReviewOpen(false);
       setTransferModal(false);
       setTransferForm(emptyTransfer());
       await load();
       setMessage('Solicitação enviada para aprovação do administrador. O saldo será movimentado somente após aprovação.');
     } catch (e) {
       setMessage(e.response?.data?.message || e.message || 'Erro ao transferir entre estoques.');
+    } finally {
+      setTransferSaving(false);
     }
   }
 
@@ -290,6 +324,29 @@ export default function Warehouses() {
       setMessage(e.response?.data?.message || 'Não foi possível solicitar exclusão do estoque. Transfira os itens para outro estoque e tente novamente.');
     }
   }
+
+  const transferSourceWarehouse = rows.find((row) => String(row.id) === String(transferForm.fromWarehouseId));
+  const transferTargetWarehouse = rows.find((row) => String(row.id) === String(transferForm.toWarehouseId));
+  const transferReviewItems = transferForm.items.map((item, index) => {
+    const material = materials.find((row) => Number(row.id) === Number(item.materialId));
+    const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers : splitSerials(item.serialNumbersText);
+    const quantity = material?.requiresSerial ? serials.length : Number(item.quantity || 0);
+    const totalValue = material?.requiresSerial
+      ? serials.reduce((sum, serial) => sum + Number(availableAssets.find((asset) => asset.serialNumber === serial)?.acquisitionCost || material?.unitCost || 0), 0)
+      : quantity * Number(material?.unitCost || 0);
+    return {
+      key: `${item.materialId || 'empty'}-${index}`,
+      name: material?.name || `Item ${index + 1}`,
+      detail: material?.requiresSerial ? 'Equipamento serializado' : 'Material controlado por quantidade',
+      quantity,
+      unit: material?.unit || 'un',
+      serialCount: serials.length,
+      serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+      totalValue,
+    };
+  });
+  const transferReviewQuantity = transferReviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const transferReviewValue = transferReviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
 
   return <div className="page-grid erp-page warehouse-page">
     <section className="toolbar">
@@ -351,7 +408,7 @@ export default function Warehouses() {
       </div>
     </Modal>
 
-    <Modal open={transferModal} title="Solicitar transferência entre estoques" onClose={() => setTransferModal(false)} footer={<><button className="ghost" onClick={() => setTransferModal(false)}>Cancelar</button><button onClick={submitWarehouseTransfer}>Solicitar aprovação do admin</button></>}>
+    <Modal open={transferModal} title="Solicitar transferência entre estoques" onClose={() => !transferSaving && setTransferModal(false)} footer={<><button className="ghost" disabled={transferSaving} onClick={() => setTransferModal(false)}>Cancelar</button><button disabled={transferSaving} onClick={openWarehouseTransferReview}>Revisar transferência</button></>}>
       <div className="form-stack warehouse-transfer-form">
         <div className="alert warning">A transferência entre estoques ficará pendente na Central de aprovações. Somente o admin executa a movimentação do saldo.</div>
         <div className="form-grid">
@@ -365,7 +422,10 @@ export default function Warehouses() {
         {transferForm.items.length === 0 && <div className="empty-state">Adicione materiais para montar a transferência do estoque central para a unidade escolhida.</div>}
         {transferForm.items.map((item, index) => {
           const material = materials.find((m) => Number(m.id) === Number(item.materialId));
+          const availableMaterials = optionsWithoutSelected(materials, transferForm.items, index);
+          const serialsSelectedElsewhere = selectedSerialsExcept(transferForm.items, index);
           const serialAssets = (assetsByMaterial[item.materialId] || []).filter((asset) => {
+            if (serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase())) return false;
             const q = assetSearch.trim().toLowerCase();
             if (!q) return true;
             return [asset.serialNumber, asset.mac, asset.brand, asset.model].filter(Boolean).join(' ').toLowerCase().includes(q);
@@ -373,7 +433,7 @@ export default function Warehouses() {
           return <div className="item-card" key={index}>
             <div className="item-head"><strong>Item {index + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeTransferItem(index)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}>{materials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {formatQuantity(m.mainStock, m.unit)}</option>)}</select></label>
+              <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {formatQuantity(m.mainStock, m.unit)}</option>)}</select></label>
               {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateTransferItem(index, { quantity: e.target.value })} /></label>}
             </div>
             {material?.requiresSerial && <div className="serial-picker">
@@ -385,6 +445,26 @@ export default function Warehouses() {
         })}
       </div>
     </Modal>
+
+    <OperationReviewModal
+      open={transferReviewOpen}
+      title="Revisar transferência entre estoques"
+      description="Confira origem, destino, itens, quantidades e seriais. A solicitação só será enviada para aprovação depois da confirmação."
+      metadata={[
+        { label: 'Estoque de origem', value: transferSourceWarehouse?.name, hint: transferSourceWarehouse?.code },
+        { label: 'Estoque de destino', value: transferTargetWarehouse?.name, hint: transferTargetWarehouse?.code },
+        { label: 'Referência', value: transferForm.reference || 'Gerada automaticamente' },
+        { label: 'Observação', value: transferForm.notes || 'Não informada' },
+      ]}
+      items={transferReviewItems}
+      totalQuantity={transferReviewQuantity}
+      totalValue={transferReviewValue}
+      warning="A confirmação não movimenta o saldo imediatamente: a operação será enviada à Central de aprovações e só será executada após aprovação do administrador."
+      loading={transferSaving}
+      confirmLabel="Confirmar e solicitar aprovação"
+      onCancel={() => setTransferReviewOpen(false)}
+      onConfirm={submitWarehouseTransfer}
+    />
 
     <DetailsModal open={!!details} title={`Estoque ${details?.warehouse?.name || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <button onClick={() => downloadWarehouseExcel(details)}>Baixar Excel</button>}</>}>
       <DetailGrid fields={details ? [

@@ -8,6 +8,7 @@ const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
 const { hasModuleAccess } = require('../config/modulePermissions');
+const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 
 
 async function estimateTransferValue(items = [], sourceWarehouseId) {
@@ -52,6 +53,7 @@ exports.create = asyncHandler(async (req, res) => {
   let items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!technicianId) return fail(res, 400, 'Selecione o técnico de destino.');
   if (!items.length && !materialRequestId) return fail(res, 400, 'Adicione pelo menos um item à transferência.');
+  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   const technician = await Technician.findByPk(technicianId);
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   const sourceWarehouseId = warehouseId || technician.defaultWarehouseId || null;

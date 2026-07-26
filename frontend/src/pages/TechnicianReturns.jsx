@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
+import OperationReviewModal from '../components/OperationReviewModal';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
 import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/operationOptions';
 
@@ -20,6 +22,7 @@ export default function TechnicianReturns() {
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   async function loadInitial() {
     const [techRes, whRes] = await Promise.all([
@@ -97,6 +100,10 @@ export default function TechnicianReturns() {
     if (!selectedTech) return 'Selecione o técnico.';
     if (!form.warehouseId) return 'Selecione o estoque de destino.';
     if (!form.items.length) return 'Adicione ao menos um item para retornar ao estoque.';
+    const repeatedMaterials = duplicateItemIds(form.items);
+    if (repeatedMaterials.length) return 'O mesmo material não pode ser selecionado mais de uma vez no retorno.';
+    const repeatedSerials = duplicateSerials(form.items);
+    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
     for (const item of form.items) {
       const material = materialsInBox.find((m) => Number(m.id) === Number(item.materialId));
       if (!material) return 'Selecione o material em todos os itens adicionados.';
@@ -110,6 +117,12 @@ export default function TechnicianReturns() {
       }
     }
     return null;
+  }
+
+  function openReview() {
+    const error = validate();
+    if (error) { setMessage(`❌ ${error}`); return; }
+    setReviewOpen(true);
   }
 
   async function save() {
@@ -130,6 +143,7 @@ export default function TechnicianReturns() {
       });
       const transfer = response.data?.data;
       setMessage(`✅ Material retornado para o estoque e guia ${transfer?.transferNumber || transfer?.reference || ''} gerada em Transferências para anexar documento.`);
+      setReviewOpen(false);
       setForm({ ...emptyForm, warehouseId: form.warehouseId });
       await loadBox(selectedTech);
     } catch (error) {
@@ -142,6 +156,25 @@ export default function TechnicianReturns() {
   const selectedTechnician = technicians.find((tech) => String(tech.id) === String(selectedTech));
   const selectedWarehouse = warehouses.find((warehouse) => String(warehouse.id) === String(form.warehouseId));
   const totalQty = form.items.reduce((sum, item) => sum + quantityNumber(item.quantity || (item.serialNumbers || []).length || 0), 0);
+  const reviewItems = form.items.map((item, index) => {
+    const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
+    const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers : [];
+    const quantity = material?.requiresSerial ? serials.length : quantityNumber(item.quantity);
+    const totalValue = material?.requiresSerial
+      ? serials.reduce((sum, serial) => sum + Number((box?.assets || []).find((asset) => asset.serialNumber === serial)?.acquisitionCost || material?.unitCost || 0), 0)
+      : quantity * Number(material?.unitCost || 0);
+    return {
+      key: `${item.materialId || 'empty'}-${index}`,
+      name: material?.name || `Item ${index + 1}`,
+      detail: material?.requiresSerial ? 'Equipamento serializado' : 'Material controlado por quantidade',
+      quantity,
+      unit: material?.unit || 'un',
+      serialCount: serials.length,
+      serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+      totalValue,
+    };
+  });
+  const reviewValue = reviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
 
   return (
     <div className="page-grid technician-return-page">
@@ -190,7 +223,10 @@ export default function TechnicianReturns() {
         {form.items.length === 0 && <div className="empty-state">Clique em “Adicionar item” e escolha o material que será retirado da caixa do técnico.</div>}
         {form.items.map((item, index) => {
           const material = materialsInBox.find((m) => Number(m.id) === Number(item.materialId));
-          const visibleAssets = assetsByMaterial(item.materialId, item.search);
+          const availableMaterials = optionsWithoutSelected(materialsInBox, form.items, index);
+          const serialsSelectedElsewhere = selectedSerialsExcept(form.items, index);
+          const visibleAssets = assetsByMaterial(item.materialId, item.search)
+            .filter((asset) => !serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
           return (
             <div className="item-card movement-item-card" key={index}>
               <div className="item-head"><strong>📦 Item {index + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(index)}>Remover</button></div>
@@ -198,7 +234,7 @@ export default function TechnicianReturns() {
                 <label>Material
                   <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '1', serialNumbers: [], search: '' })}>
                     <option value="">Selecione o material</option>
-                    {materialsInBox.map((mat) => <option key={mat.id} value={mat.id}>{mat.name} — disponível {qtyLabel(mat.availableQty, mat.unit)}</option>)}
+                    {availableMaterials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name} — disponível {qtyLabel(mat.availableQty, mat.unit)}</option>)}
                   </select>
                 </label>
                 {!material?.requiresSerial && <label>Quantidade
@@ -223,8 +259,28 @@ export default function TechnicianReturns() {
             </div>
           );
         })}
-        <div className="submit-bar"><span>Destino: <strong>{selectedWarehouse?.name || 'não selecionado'}</strong></span><button disabled={loading} onClick={save}>↩️ Confirmar retorno para estoque</button></div>
+        <div className="submit-bar"><span>Destino: <strong>{selectedWarehouse?.name || 'não selecionado'}</strong></span><button disabled={loading} onClick={openReview}>↩️ Revisar retorno para estoque</button></div>
       </section>
+
+      <OperationReviewModal
+        open={reviewOpen}
+        title="Revisar retorno do técnico para o estoque"
+        description="Confira técnico, estoque de destino, itens, quantidades e seriais. O retorno só será executado depois da confirmação."
+        metadata={[
+          { label: 'Técnico de origem', value: selectedTechnician?.name },
+          { label: 'Estoque de destino', value: selectedWarehouse?.name, hint: selectedWarehouse?.code || selectedWarehouse?.city },
+          { label: 'Referência', value: form.reference || 'Gerada automaticamente' },
+          { label: 'Motivo/observação', value: form.notes || 'Não informado' },
+        ]}
+        items={reviewItems}
+        totalQuantity={totalQty}
+        totalValue={reviewValue}
+        warning="Ao confirmar, os itens sairão da caixa do técnico, entrarão no estoque selecionado e uma guia de retorno será gerada."
+        loading={loading}
+        confirmLabel="Confirmar retorno ao estoque"
+        onCancel={() => setReviewOpen(false)}
+        onConfirm={save}
+      />
     </div>
   );
 }

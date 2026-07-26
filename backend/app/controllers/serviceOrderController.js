@@ -6,6 +6,7 @@ const { ok, created, fail } = require('../utils/response');
 const { money, qty, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
+const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 
 function serviceRequiresSerial(serviceType, addressChangeType) {
   return serviceType === 'instalacao'
@@ -38,6 +39,7 @@ exports.create = asyncHandler(async (req, res) => {
   if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome do cliente e número do contrato são obrigatórios.');
   if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   if (!Array.isArray(materials) || !materials.length) return fail(res, 400, 'Adicione ao menos um material usado na OS.');
+  try { assertUniqueOperationItems(materials); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
 
   const serialRequired = serviceRequiresSerial(serviceType, addressChangeType);
   let totalSerials = 0;

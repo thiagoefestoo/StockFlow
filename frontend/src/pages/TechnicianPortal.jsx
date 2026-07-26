@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import KpiCard from '../components/KpiCard';
+import OperationReviewModal from '../components/OperationReviewModal';
 import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial } from '../utils/serviceOrderRules';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 
 const emptyForm = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', addressChangeType: '', notes: '', materials: [] };
 
@@ -20,6 +22,8 @@ export default function TechnicianPortal() {
   const [form, setForm] = useState(emptyForm);
   const [osFieldsOpen, setOsFieldsOpen] = useState(false);
   const [message, setMessage] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data); }
   async function loadStock(id = selectedTech) {
@@ -58,6 +62,8 @@ export default function TechnicianPortal() {
     if (!String(form.customerCpf || '').trim()) return 'Informe o número do contrato.';
     if (form.serviceType === 'outro' && !form.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!form.materials.length) return 'Adicione ao menos um material usado na OS.';
+    if (duplicateItemIds(form.materials).length) return 'O mesmo material não pode aparecer mais de uma vez na OS.';
+    if (duplicateSerials(form.materials).length) return 'O mesmo serial não pode aparecer mais de uma vez na OS.';
     let serialCount = 0;
     for (const item of form.materials) {
       const material = materials.find((m) => Number(m.id) === Number(item.materialId));
@@ -76,22 +82,39 @@ export default function TechnicianPortal() {
     return null;
   }
 
-  async function save() {
+  function review() {
     const error = validate();
     if (error) {
       setMessage(error);
       setOsFieldsOpen(true);
       return;
     }
+    setMessage('');
+    setReviewOpen(true);
+  }
+
+  async function save() {
+    if (saving) return;
+    const error = validate();
+    if (error) {
+      setReviewOpen(false);
+      setMessage(error);
+      setOsFieldsOpen(true);
+      return;
+    }
     const payload = { ...form, notes: form.notes, technicianId: selectedTech, materials: form.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
+    setSaving(true);
     try {
       await api.post('/service-orders', payload);
+      setReviewOpen(false);
       setForm(emptyForm);
       setOsFieldsOpen(false);
       setMessage('OS baixada com sucesso. O estoque do técnico foi atualizado.');
       loadStock(selectedTech);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao baixar OS.');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -116,11 +139,44 @@ export default function TechnicianPortal() {
         <div className="subtoolbar"><h4>Material usado</h4><button className="ghost" onClick={addMaterial}>Adicionar</button></div>
         {form.materials.map((item, i) => {
           const material = materials.find((x) => Number(x.id) === Number(item.materialId));
-          const serials = serialByMaterial(item.materialId);
-          return <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeMaterial(i)}>Remover</button></div><label>Material<select value={item.materialId} onChange={(e) => updateMat(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materials.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>{material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><div className="serial-list">{serials.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {asset.status || 'com_tecnico'}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" value={item.quantity} onChange={(e) => updateMat(i, { quantity: e.target.value })} /></label>}</div>;
+          const usedSerials = selectedSerialsExcept(form.materials, i);
+          const serials = serialByMaterial(item.materialId).filter((asset) => !usedSerials.has(String(asset.serialNumber || '').trim().toUpperCase()));
+          return <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeMaterial(i)}>Remover</button></div><label>Material<select value={item.materialId} onChange={(e) => updateMat(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{optionsWithoutSelected(materials, form.materials, i).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>{material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><div className="serial-list">{serials.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {asset.status || 'com_tecnico'}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" value={item.quantity} onChange={(e) => updateMat(i, { quantity: e.target.value })} /></label>}</div>;
         })}
-        <button onClick={save} className="wide">Baixar OS e consumir material</button>
+        <button onClick={review} className="wide">Revisar baixa da OS</button>
       </section>
+      <OperationReviewModal
+        open={reviewOpen}
+        title="Revisar baixa da ordem de serviço"
+        description="Confira os dados e os materiais antes de consumir a carga do técnico."
+        onCancel={() => { if (!saving) setReviewOpen(false); }}
+        onConfirm={save}
+        confirmLabel={saving ? 'Confirmando...' : 'Confirmar baixa da OS'}
+        loading={saving}
+        metadata={[
+          { label: 'OS', value: form.osNumber || '-' },
+          { label: 'Cliente', value: form.customerName || '-' },
+          { label: 'Contrato', value: form.customerCpf || '-' },
+          { label: 'Serviço', value: SERVICE_TYPE_OPTIONS.find((option) => option.value === form.serviceType)?.label || form.serviceType },
+          { label: 'Cidade', value: form.city || '-' },
+          { label: 'Técnico', value: technicians.find((t) => String(t.id) === String(selectedTech))?.name || user?.name || '-' },
+        ]}
+        items={form.materials.map((item) => {
+          const material = materials.find((entry) => Number(entry.id) === Number(item.materialId));
+          const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.filter(Boolean) : [];
+          const quantity = material?.requiresSerial ? serials.length : Number(item.quantity || 0);
+          return {
+            name: material?.name || 'Material não identificado',
+            detail: material?.requiresSerial ? 'Equipamento controlado por serial' : `Unidade: ${material?.unit || 'un'}`,
+            quantity,
+            serialCount: serials.length,
+            serialPreview: serials.join(', '),
+            totalValue: quantity * Number(material?.unitCost || 0),
+          };
+        })}
+        warning="Após confirmar, os itens serão retirados da carga do técnico e vinculados à OS."
+      />
+
       <section className="panel"><h3>Minha carga atual</h3><div className="asset-grid">{stock?.assets?.map((a) => <div className="asset-card" key={a.id}><b>{a.serialNumber}</b><span>{a.Material?.name}</span><small>{a.Material?.category}</small></div>)}</div></section>
     </div>
   );

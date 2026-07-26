@@ -4,6 +4,9 @@ import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import AttachmentPreview from '../components/AttachmentPreview';
+import KpiCard from '../components/KpiCard';
+import OperationReviewModal from '../components/OperationReviewModal';
+import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
 import { LOSS_REASON_OPTIONS } from '../constants/operationOptions';
 
@@ -41,6 +44,8 @@ export default function TechnicianLosses() {
   const [message, setMessage] = useState('');
   const [serialSearch, setSerialSearch] = useState('');
   const [toolSearch, setToolSearch] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     const [techRes, lossRes] = await Promise.all([
@@ -169,6 +174,9 @@ export default function TechnicianLosses() {
     }
 
     if (!form.items.length) return 'Adicione ao menos um material perdido.';
+    if (duplicateItemIds(form.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
+    const repeatedSerials = duplicateSerials(form.items);
+    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
     for (const item of form.items) {
       const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
       if (!material) return 'Selecione o material em todos os itens adicionados.';
@@ -184,13 +192,21 @@ export default function TechnicianLosses() {
     return null;
   }
 
+  function openReview() {
+    const validationError = validate();
+    if (validationError) { setMessage(validationError); return; }
+    setReviewOpen(true);
+  }
+
   async function save() {
+    if (saving) return;
     const validationError = validate();
     if (validationError) {
       setMessage(validationError);
       return;
     }
     try {
+      setSaving(true);
       await api.post('/stock/technician-box/loss', {
         ...form,
         items: form.lossType === 'material' ? form.items.map((item) => ({
@@ -203,6 +219,7 @@ export default function TechnicianLosses() {
       setMessage(form.lossType === 'ferramenta'
         ? 'Perda registrada. A ferramenta saiu da ficha do técnico e a guia entrou na fila de assinatura.'
         : 'Perda registrada. O material saiu da caixa do técnico e a guia entrou na fila de assinatura.');
+      setReviewOpen(false);
       setModal(false);
       setForm(emptyForm);
       setStock(null);
@@ -210,6 +227,8 @@ export default function TechnicianLosses() {
       await load();
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao registrar perda.');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -250,6 +269,36 @@ export default function TechnicianLosses() {
     }, 0);
 
   const itemCount = form.lossType === 'ferramenta' ? form.toolIds.length : form.items.length;
+  const reviewItems = form.lossType === 'ferramenta'
+    ? selectedTools.map((tool) => ({
+      key: `tool-${tool.id}`,
+      name: tool.name,
+      detail: `${tool.brand || 'Sem marca'} • patrimônio/série ${tool.serialNumber || '-'}`,
+      quantity: 1,
+      unit: 'un',
+      serialCount: tool.serialNumber ? 1 : 0,
+      serialPreview: tool.serialNumber || '',
+      totalValue: Number(tool.referenceValue || 0),
+    }))
+    : form.items.map((item, index) => {
+      const material = materialOptions.find((row) => Number(row.id) === Number(item.materialId));
+      const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers : [];
+      const quantity = material?.requiresSerial ? serials.length : Number(item.quantity || 0);
+      const totalValue = material?.requiresSerial
+        ? serials.reduce((sum, serial) => sum + Number((stock?.assets || []).find((asset) => asset.serialNumber === serial)?.acquisitionCost || material?.unitCost || 0), 0)
+        : quantity * Number(material?.unitCost || 0);
+      return {
+        key: `${item.materialId || 'empty'}-${index}`,
+        name: material?.name || `Item ${index + 1}`,
+        detail: material?.requiresSerial ? 'Equipamento serializado' : 'Material controlado por quantidade',
+        quantity,
+        unit: material?.unit || 'un',
+        serialCount: serials.length,
+        serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+        totalValue,
+      };
+    });
+  const reviewQuantity = reviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 
   return (
     <div className="page-grid technician-loss-page">
@@ -264,9 +313,9 @@ export default function TechnicianLosses() {
       {message && <div className="alert danger">{message}</div>}
 
       <section className="kpi-grid small">
-        <article><small>Perdas registradas</small><strong>{losses.length}</strong></article>
-        <article><small>Valor em desconto/perda</small><strong>{brl(losses.reduce((s, l) => s + Number(l.totalValue || 0), 0))}</strong></article>
-        <article><small>Guias pendentes</small><strong>{losses.filter((l) => l.status === 'pendente_assinatura').length}</strong></article>
+        <KpiCard label="Perdas registradas" value={losses.length} hint="Quantidade de ocorrências de perda ou desconto já registradas." />
+        <KpiCard label="Valor em desconto/perda" value={brl(losses.reduce((s, l) => s + Number(l.totalValue || 0), 0))} hint="Soma financeira dos itens baixados por perda ou desconto." tone="warning" />
+        <KpiCard label="Guias pendentes" value={losses.filter((l) => l.status === 'pendente_assinatura').length} hint="Guias de perda que ainda aguardam documento ou assinatura." />
       </section>
 
       <section className="panel">
@@ -291,7 +340,7 @@ export default function TechnicianLosses() {
         </div>
       </section>
 
-      <Modal open={modal} title="Registrar perda/desconto" onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Registrar perda e gerar guia</button></>}>
+      <Modal open={modal} title="Registrar perda/desconto" onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>Revisar perda/desconto</button></>}>
         <div className="loss-summary-card">
           <article><small>Técnico</small><strong>{selectedTechnician()?.name || 'Selecione'}</strong></article>
           <article><small>Itens selecionados</small><strong>{itemCount}</strong></article>
@@ -313,11 +362,14 @@ export default function TechnicianLosses() {
           {form.technicianId && !materialOptions.length && <div className="empty-state small">Este técnico não possui material em caixa.</div>}
           {form.items.map((item, i) => {
             const material = materialOptions.find((m) => Number(m.id) === Number(item.materialId));
-            const serialAssets = assetsByMaterial(item.materialId);
+            const availableMaterials = optionsWithoutSelected(materialOptions, form.items, i);
+            const serialsSelectedElsewhere = selectedSerialsExcept(form.items, i);
+            const serialAssets = assetsByMaterial(item.materialId)
+              .filter((asset) => !serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
             return <div className="item-card loss-item-card" key={i}>
               <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
               <div className="form-grid">
-                <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{materialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.availableQty, m.unit)}</option>)}</select></label>
+                <label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.availableQty, m.unit)}</option>)}</select></label>
                 {!material?.requiresSerial && <label>Quantidade perdida<input type="number" min="1" max={Number(material?.availableQty || 0)} step="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível: {qtyLabel(material?.availableQty, material?.unit)}</small></label>}
               </div>
               {material?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><div><strong>Selecione o(s) serial(is) perdido(s)</strong><span>{serialAssets.length} disponível(is) na caixa do técnico</span></div><input value={serialSearch} onChange={(e) => setSerialSearch(e.target.value)} placeholder="Buscar serial..." /></div><div className="serial-list">{serialAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id} onClick={() => toggleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {brl(asset.acquisitionCost || material.unitCost)}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serialAssets.length && <div className="empty-state small">Nenhum serial disponível para este material na caixa do técnico.</div>}</div>}
@@ -342,6 +394,26 @@ export default function TechnicianLosses() {
 
         <div className="viz-callout">Ao registrar, o item sai da responsabilidade do técnico, entra no histórico de perda/desconto e a guia fica na fila para anexar o documento assinado.</div>
       </Modal>
+
+      <OperationReviewModal
+        open={reviewOpen}
+        title="Revisar perda ou desconto"
+        description="Confira técnico, motivo, itens e valores. A baixa só será registrada após a confirmação."
+        metadata={[
+          { label: 'Técnico responsável', value: selectedTechnician()?.name },
+          { label: 'Tipo de baixa', value: form.lossType === 'ferramenta' ? 'Ferramenta da ficha' : 'Material da caixa' },
+          { label: 'Motivo', value: form.reason },
+          { label: 'Documento', value: form.attachmentName || 'Será anexado posteriormente' },
+        ]}
+        items={reviewItems}
+        totalQuantity={reviewQuantity}
+        totalValue={totalPreview}
+        warning="Ao confirmar, os itens sairão da responsabilidade do técnico e uma guia de perda/desconto será criada."
+        loading={saving}
+        confirmLabel="Confirmar perda e gerar guia"
+        onCancel={() => setReviewOpen(false)}
+        onConfirm={save}
+      />
 
       <DetailsModal open={!!details} title={`Detalhes da perda ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/perdas-tecnico/${details.id}`}>Abrir guia</Link>}</>}>
         {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", lossNature(details)], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Documento de reconhecimento" />}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{lossItemName(item)}</b><span>{item.itemType === 'ferramenta' ? 'Ferramenta' : 'Material'} • Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
