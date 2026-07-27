@@ -28,11 +28,11 @@ services:
       - key: SETUP_ADMIN_KEY
         sync: false
       - key: CORS_ORIGIN
-        sync: false
+        value: https://estoque-superinfra.vercel.app
       - key: FRONTEND_URL
-        sync: false
+        value: https://estoque-superinfra.vercel.app
       - key: CORS_ALLOW_VERCEL_PREVIEWS
-        value: false
+        value: true
       - key: TELECOMSTOCK_AUTO_INTELLIGENCE_MINUTES
         value: 60
       - key: UPLOAD_PUBLIC_BASE_URL

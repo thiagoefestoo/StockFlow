@@ -2,11 +2,35 @@ import axios from 'axios';
 import { AUTH_SESSION_EXPIRED_EVENT, clearAuthSession, getAuthToken } from '../utils/authSession';
 
 function normalizeApiUrl(value) {
-  const fallback = process.env.NODE_ENV === 'production' ? 'https://stockflow-backend-6gxl.onrender.com/api' : 'http://localhost:3000/api';
-  const raw = (value || fallback || '/api').trim();
+  const isProduction = process.env.NODE_ENV === 'production';
+  const useDirectApi = String(process.env.REACT_APP_API_MODE || '').toLowerCase() === 'direct';
+
+  // Em produção, o navegador usa /api no mesmo domínio da Vercel. A Vercel encaminha
+  // a requisição ao Render, eliminando dependência de CORS e melhorando a estabilidade.
+  if (isProduction && !useDirectApi) return '/api';
+
+  const fallback = isProduction
+    ? 'https://stockflow-backend-6gxl.onrender.com/api'
+    : 'http://localhost:3000/api';
+  const raw = String(value || fallback || '/api').trim();
   return raw.replace(/\/$/, '');
 }
 
+
+function normalizeDirectApiUrl(value) {
+  const raw = String(value || 'https://stockflow-backend-6gxl.onrender.com/api').trim();
+  return raw.replace(/\/$/, '');
+}
+
+function estimatedPayloadBytes(payload) {
+  if (payload === undefined || payload === null) return 0;
+  try {
+    if (typeof payload === 'string') return new Blob([payload]).size;
+    return new Blob([JSON.stringify(payload)]).size;
+  } catch (_) {
+    return 0;
+  }
+}
 
 function isQuantityField(key) {
   const normalized = String(key || '').toLowerCase();
@@ -53,10 +77,15 @@ function normalizeQuantityPayload(payload) {
 }
 
 const baseURL = normalizeApiUrl(process.env.REACT_APP_API_URL);
+const directApiURL = normalizeDirectApiUrl(process.env.REACT_APP_API_URL);
 
-if (process.env.NODE_ENV === 'production' && !process.env.REACT_APP_API_URL) {
+if (
+  process.env.NODE_ENV === 'production' &&
+  String(process.env.REACT_APP_API_MODE || '').toLowerCase() === 'direct' &&
+  !process.env.REACT_APP_API_URL
+) {
   // eslint-disable-next-line no-console
-  console.warn('REACT_APP_API_URL não foi configurada. Configure a URL do backend do Render na Vercel.');
+  console.warn('REACT_APP_API_MODE=direct exige REACT_APP_API_URL com a URL do backend.');
 }
 
 const api = axios.create({
@@ -108,9 +137,22 @@ api.clearGetCache = function clearGetCache(prefix = '') {
 
 api.interceptors.request.use((config) => {
   const token = getAuthToken();
+  const method = String(config.method || 'get').toLowerCase();
   config.__hadAuthToken = !!token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  if (String(config.method || 'get').toLowerCase() !== 'get') api.clearGetCache();
+
+  // Requisições comuns usam o proxy /api da Vercel, evitando CORS. Documentos grandes
+  // seguem diretamente ao Render para não depender do limite de corpo do proxy.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    baseURL === '/api' &&
+    method !== 'get' &&
+    estimatedPayloadBytes(config.data) > 3 * 1024 * 1024
+  ) {
+    config.baseURL = directApiURL;
+  }
+
+  if (method !== 'get') api.clearGetCache();
   return config;
 });
 
@@ -134,4 +176,4 @@ api.interceptors.response.use(
 );
 
 export default api;
-export { baseURL as API_BASE_URL };
+export { baseURL as API_BASE_URL, directApiURL as DIRECT_API_BASE_URL };

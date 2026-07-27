@@ -57,7 +57,7 @@ module.exports = {
   defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL || 'admin@local.com',
   defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
   corsOrigins,
-  corsAllowVercelPreviews: bool(process.env.CORS_ALLOW_VERCEL_PREVIEWS, false),
+  corsAllowVercelPreviews: bool(process.env.CORS_ALLOW_VERCEL_PREVIEWS, isProduction),
   autoIntelligenceMinutes: Number(process.env.TELECOMSTOCK_AUTO_INTELLIGENCE_MINUTES || 0),
   uploadPublicBaseUrl: process.env.UPLOAD_PUBLIC_BASE_URL || '',
   approvalAdminMinAmount: Number(process.env.APPROVAL_ADMIN_MIN_AMOUNT || 500),

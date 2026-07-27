@@ -7,22 +7,17 @@ function brl(value) {
 }
 
 export default function WarehouseValueOverview() {
-  const [materials, setMaterials] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
+  const [data, setData] = useState({ rows: [], totalQuantity: 0, totalValue: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([
-      api.get('/materials'),
-      api.get('/warehouses?operationalOnly=true'),
-    ])
-      .then(([materialsResponse, warehousesResponse]) => {
+    api.getCached('/bi/warehouse-values', {}, 60000)
+      .then((response) => {
         if (!active) return;
-        setMaterials(materialsResponse.data.data || []);
-        setWarehouses(warehousesResponse.data.data || []);
+        setData(response.data.data || { rows: [], totalQuantity: 0, totalValue: 0 });
         setError('');
       })
       .catch((requestError) => {
@@ -36,35 +31,12 @@ export default function WarehouseValueOverview() {
   }, []);
 
   const summary = useMemo(() => {
-    const rows = warehouses.map((warehouse) => {
-      let quantity = 0;
-      let value = 0;
-      let activeMaterials = 0;
-
-      materials.forEach((material) => {
-        const stock = (material.warehouseStocks || []).find((item) => Number(item.warehouseId) === Number(warehouse.id));
-        const stockQuantity = Number(stock?.quantity || 0);
-        quantity += stockQuantity;
-        value += stockQuantity * Number(material.unitCost || 0);
-        if (stockQuantity > 0) activeMaterials += 1;
-      });
-
-      return {
-        id: warehouse.id,
-        name: warehouse.name,
-        city: warehouse.city || warehouse.region || warehouse.code || '',
-        quantity,
-        value,
-        activeMaterials,
-      };
-    });
-
-    const totalQuantity = rows.reduce((sum, row) => sum + row.quantity, 0);
-    const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
-    const maxValue = Math.max(...rows.map((row) => row.value), 1);
-
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const totalQuantity = Number(data.totalQuantity || 0);
+    const totalValue = Number(data.totalValue || 0);
+    const maxValue = Math.max(...rows.map((row) => Number(row.value || 0)), 1);
     return { rows, totalQuantity, totalValue, maxValue };
-  }, [materials, warehouses]);
+  }, [data]);
 
   if (loading) {
     return <section className="panel warehouse-bi-overview"><div className="warehouse-bi-loading">Calculando posição financeira por estoque...</div></section>;
@@ -80,7 +52,7 @@ export default function WarehouseValueOverview() {
         <div>
           <span className="eyebrow">Posição atual por estoque</span>
           <h3>Quantidade e valor separados por unidade</h3>
-          <p>Os números consideram somente os estoques liberados para o usuário conectado.</p>
+          <p>Os números consideram somente os estoques operacionais liberados para o usuário conectado.</p>
         </div>
         <div className="warehouse-bi-total">
           <small>Total consolidado</small>
@@ -91,8 +63,8 @@ export default function WarehouseValueOverview() {
 
       <div className="warehouse-bi-grid">
         {summary.rows.map((warehouse) => {
-          const share = summary.totalValue > 0 ? (warehouse.value / summary.totalValue) * 100 : 0;
-          const width = summary.maxValue > 0 ? (warehouse.value / summary.maxValue) * 100 : 0;
+          const share = summary.totalValue > 0 ? (Number(warehouse.value || 0) / summary.totalValue) * 100 : 0;
+          const width = summary.maxValue > 0 ? (Number(warehouse.value || 0) / summary.maxValue) * 100 : 0;
           return (
             <article className="warehouse-bi-card" key={warehouse.id}>
               <div className="warehouse-bi-card-title">
@@ -108,7 +80,7 @@ export default function WarehouseValueOverview() {
                 <div><small>Quantidade</small><strong>{formatQuantity(warehouse.quantity)}</strong></div>
                 <div><small>Materiais com saldo</small><strong>{formatQuantity(warehouse.activeMaterials)}</strong></div>
               </div>
-              <div className="warehouse-bi-progress"><span style={{ width: `${Math.max(width, warehouse.value > 0 ? 4 : 0)}%` }} /></div>
+              <div className="warehouse-bi-progress"><span style={{ width: `${Math.max(width, Number(warehouse.value || 0) > 0 ? 4 : 0)}%` }} /></div>
             </article>
           );
         })}

@@ -12,36 +12,44 @@ const { ensureRuntimeSchema } = require('./app/services/runtimeSchemaService');
 
 const app = express();
 
-app.use(quantityResponseMiddleware);
 app.set('trust proxy', 1);
 
 function normalizeOrigin(origin) {
   return String(origin || '').trim().replace(/\/+$/, '');
 }
 
+function isVercelOrigin(origin) {
+  return /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+}
+
 function isAllowedOrigin(origin) {
   if (!origin) return true;
   const normalized = normalizeOrigin(origin);
   if (env.corsOrigins.includes('*') || env.corsOrigins.includes(normalized)) return true;
-
-  // Permite previews da Vercel somente quando a variável correspondente estiver habilitada.
-  if (
-    env.corsAllowVercelPreviews &&
-    /^https:\/\/estoque-superinfra(?:-[a-z0-9-]+)*\.vercel\.app$/i.test(normalized)
-  ) return true;
-
+  if (env.corsAllowVercelPreviews && isVercelOrigin(normalized)) return true;
   return false;
 }
 
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
+    // Requisições sem Origin incluem health checks, aplicativos nativos e o proxy da Vercel.
     if (isAllowedOrigin(origin)) return callback(null, true);
-    return callback(new Error(`Origem não permitida pelo CORS: ${origin}`));
+    const error = new Error(`Origem não permitida pelo CORS: ${origin}`);
+    error.statusCode = 403;
+    return callback(error);
   },
-  credentials: true,
+  credentials: false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+  allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control'],
+  exposedHeaders: ['Content-Disposition', 'Content-Length'],
+  maxAge: 86400,
+  optionsSuccessStatus: 204,
+};
+
+// CORS precisa ser o primeiro middleware para que respostas OPTIONS e erros posteriores
+// também recebam os cabeçalhos necessários.
+app.use(cors(corsOptions));
+app.use(quantityResponseMiddleware);
 
 app.use(express.json({ limit: '20mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -50,7 +58,18 @@ app.get('/', (req, res) => res.json({ success: true, message: 'Super Infra API o
 app.get('/api/health', async (req, res) => {
   try {
     await sequelize.authenticate();
-    return res.json({ success: true, status: 'online', database: 'connected', environment: env.nodeEnv, timestamp: new Date().toISOString() });
+    return res.json({
+      success: true,
+      status: 'online',
+      database: 'connected',
+      environment: env.nodeEnv,
+      cors: {
+        requestOrigin: normalizeOrigin(req.headers.origin || ''),
+        requestOriginAllowed: isAllowedOrigin(req.headers.origin),
+        vercelPreviewsAllowed: env.corsAllowVercelPreviews,
+      },
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     return res.status(500).json({ success: false, status: 'offline', error: error.message });
   }
@@ -98,4 +117,8 @@ async function start() {
   }
 }
 
-start();
+if (require.main === module) {
+  start();
+}
+
+module.exports = { app, start, isAllowedOrigin, normalizeOrigin };

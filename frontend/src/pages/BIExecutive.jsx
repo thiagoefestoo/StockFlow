@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import api from '../services/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import ChartPanel from '../components/ChartPanel';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
 import WarehouseValueOverview from '../components/WarehouseValueOverview';
+import { biErrorMessage, requestBi } from '../utils/biRequest';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function countBy(rows = [], key) { return rows.reduce((acc, row) => { const value = row[key] || 'sem_informacao'; acc[value] = (acc[value] || 0) + 1; return acc; }, {}); }
@@ -17,15 +17,22 @@ export default function BIExecutive() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  function load(nextFilters = appliedFilters) {
+  const load = useCallback(async (nextFilters, force = false) => {
     setLoading(true);
-    api.get('/bi/executive', { params: toParams(nextFilters) })
-      .then((r) => setData(r.data.data))
-      .finally(() => setLoading(false));
-  }
+    setLoadError('');
+    try {
+      const response = await requestBi('/bi/executive', toParams(nextFilters), { force });
+      setData(response.data.data);
+    } catch (error) {
+      setLoadError(biErrorMessage(error, 'Não foi possível carregar o BI Executivo.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => { load(appliedFilters); }, []);
+  useEffect(() => { load(EMPTY_FILTERS); }, [load]);
 
   function applyFilters() {
     setAppliedFilters(filters);
@@ -61,13 +68,17 @@ export default function BIExecutive() {
     };
   }, [data]);
 
-  if (!data || !charts) return <div className="panel">Carregando BI...</div>;
-  const c = data.cards;
-  const maxMat = Math.max(...data.materials.map((m) => Number(m.tecnico || 0)), 1);
+  if (loading && !data) return <div className="panel">Carregando BI...</div>;
+  if (!data || !charts) return <div className="panel danger-panel"><strong>Não foi possível carregar o BI Executivo.</strong><p>{loadError || 'Tente novamente em alguns instantes.'}</p><button type="button" onClick={() => load(appliedFilters, true)}>Tentar novamente</button></div>;
+  const c = data.cards || {};
+  const materials = data.materials || [];
+  const topTechnicians = data.topTechnicians || [];
+  const maxMat = Math.max(...materials.map((m) => Number(m.tecnico || 0)), 1);
   return (
     <div className="page-grid bi-page">
-      <div className="toolbar"><div><h2>BI Executivo</h2><p>Visão consolidada do estoque, patrimônio, OS, transferências, assinaturas e carga em campo.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
+      <div className="toolbar"><div><h2>BI Executivo</h2><p>Visão consolidada do estoque, patrimônio, OS, transferências, assinaturas e carga em campo.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters, true)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
+      {loadError && <section className="panel danger-panel"><strong>Falha ao atualizar o BI.</strong><p>{loadError}</p></section>}
       <div className="kpi-grid"><KpiCard label="Patrimônio total" value={brl(c.patrimonyTotal)} /><KpiCard label="Valor com técnicos" value={brl(c.patrimonyInTechnicians)} tone="warning" /><KpiCard label="Equip. em estoque" value={c.assetsInStock} /><KpiCard label="Equip. instalados" value={c.installedAssets} /><KpiCard label="Equip. perdidos" value={c.lostAssets || 0} tone="danger" /><KpiCard label="Valor perdido" value={brl(c.lostValue)} tone="danger" /><KpiCard label="Guias pendentes" value={c.pendingSignatures} tone="danger" /><KpiCard label="Custódia +60 dias" value={c.custody60} tone="danger" /></div>
       <WarehouseValueOverview />
       <section className="bi-charts-grid">
@@ -78,7 +89,7 @@ export default function BIExecutive() {
         <ChartPanel title="Status das OS" subtitle="Ordens abertas, pendentes e concluídas." data={charts.osStatus} />
         <ChartPanel title="Evolução das movimentações" subtitle="Entradas, transferências e baixas registradas por mês." type="line" data={charts.movementTrend} />
       </section>
-      <section className="panel two-col"><div><h3>Materiais em carga de técnicos</h3>{data.materials.map((m) => <SimpleBar key={m.id} label={m.name} value={m.tecnico} max={maxMat} />)}</div><div><h3>Top técnicos por valor</h3>{data.topTechnicians.map((t) => <SimpleBar key={t.id} label={t.name} value={t.assetValue} max={data.topTechnicians[0]?.assetValue || 1} money />)}</div></section>
+      <section className="panel two-col"><div><h3>Materiais em carga de técnicos</h3>{materials.map((m) => <SimpleBar key={m.id} label={m.name} value={m.tecnico} max={maxMat} />)}</div><div><h3>Top técnicos por valor</h3>{topTechnicians.map((t) => <SimpleBar key={t.id} label={t.name} value={t.custodyValue || t.assetValue} max={topTechnicians[0]?.custodyValue || topTechnicians[0]?.assetValue || 1} money />)}</div></section>
     </div>
   );
 }

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import api from '../services/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import ChartPanel from '../components/ChartPanel';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
 import WarehouseValueOverview from '../components/WarehouseValueOverview';
+import { biErrorMessage, requestBi } from '../utils/biRequest';
 
 function objChartFromRows(rows = [], labelKey, valueKey = 'total') { return { labels: rows.map((r) => r[labelKey]), datasets: [{ label: 'Total', data: rows.map((r) => Number(r[valueKey] || 0)) }] }; }
 function countBy(rows = [], key) { return rows.reduce((acc, row) => { const value = row[key] || 'sem_informacao'; acc[value] = (acc[value] || 0) + 1; return acc; }, {}); }
@@ -16,15 +16,22 @@ export default function BIAudit() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  function load(nextFilters = appliedFilters) {
+  const load = useCallback(async (nextFilters, force = false) => {
     setLoading(true);
-    api.get('/bi/audit', { params: toParams(nextFilters) })
-      .then((r) => setData(r.data.data))
-      .finally(() => setLoading(false));
-  }
+    setLoadError('');
+    try {
+      const response = await requestBi('/bi/audit', toParams(nextFilters), { force });
+      setData(response.data.data);
+    } catch (error) {
+      setLoadError(biErrorMessage(error, 'Não foi possível carregar o BI de auditoria.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => { load(appliedFilters); }, []);
+  useEffect(() => { load(EMPTY_FILTERS); }, [load]);
 
   function applyFilters() {
     setAppliedFilters(filters);
@@ -51,13 +58,16 @@ export default function BIAudit() {
     };
   }, [data]);
 
-  if (!data || !charts) return <div className="panel">Carregando BI de auditoria...</div>;
-  const maxMove = Math.max(...data.movementsByType.map((m) => Number(m.total)), 1);
+  if (loading && !data) return <div className="panel">Carregando BI de auditoria...</div>;
+  if (!data || !charts) return <div className="panel danger-panel"><strong>Não foi possível carregar o BI de auditoria.</strong><p>{loadError || 'Tente novamente em alguns instantes.'}</p><button type="button" onClick={() => load(appliedFilters, true)}>Tentar novamente</button></div>;
+  const movementsByType = data.movementsByType || [];
+  const maxMove = Math.max(...movementsByType.map((m) => Number(m.total)), 1);
   return (
     <div className="page-grid bi-page">
-      <div className="toolbar"><div><h2>BI Auditoria e Patrimônio</h2><p>Controle de risco: movimentações, guias, auditoria, assinaturas e equipamentos antigos na carga.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
+      <div className="toolbar"><div><h2>BI Auditoria e Patrimônio</h2><p>Controle de risco: movimentações, guias, auditoria, assinaturas e equipamentos antigos na carga.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters, true)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
-      <div className="kpi-grid"><KpiCard label="Tipos de movimento" value={data.movementsByType.length} /><KpiCard label="Eventos de auditoria" value={data.auditByAction.reduce((s, a) => s + Number(a.total), 0)} /><KpiCard label="Guias recentes" value={data.recentTransfers.length} /><KpiCard label="Custódias críticas" value={data.oldestCustody.filter((a) => a.custodyDays >= 60).length} tone="danger" /></div>
+      {loadError && <section className="panel danger-panel"><strong>Falha ao atualizar o BI.</strong><p>{loadError}</p></section>}
+      <div className="kpi-grid"><KpiCard label="Tipos de movimento" value={movementsByType.length} /><KpiCard label="Eventos de auditoria" value={data.auditByAction.reduce((s, a) => s + Number(a.total), 0)} /><KpiCard label="Guias recentes" value={data.recentTransfers.length} /><KpiCard label="Custódias críticas" value={data.oldestCustody.filter((a) => a.custodyDays >= 60).length} tone="danger" /></div>
       <WarehouseValueOverview />
       <section className="bi-charts-grid">
         <ChartPanel title="Movimentações por tipo" subtitle="Entradas, transferências, baixas e ajustes." data={charts.movementsByType} />
@@ -67,7 +77,7 @@ export default function BIAudit() {
         <ChartPanel title="Status patrimonial" subtitle="Situação atual dos equipamentos serializados." type="doughnut" data={charts.assetsByStatus} />
         <ChartPanel title="Valor das guias recentes" subtitle="Últimas guias e seu valor movimentado." data={charts.transferValues} />
       </section>
-      <section className="panel two-col"><div><h3>Movimentações por tipo</h3>{data.movementsByType.map((m) => <SimpleBar key={m.type} label={m.type} value={m.total} max={maxMove} />)}</div><div><h3>Equipamentos mais antigos em campo</h3>{data.oldestCustody.slice(0, 30).map((a) => <div className="event compact" key={a.id}><strong>{a.serialNumber}</strong><span>{a.Material?.name} • {a.Technician?.name}</span><small>{a.custodyDays} dias em custódia</small></div>)}</div></section>
+      <section className="panel two-col"><div><h3>Movimentações por tipo</h3>{movementsByType.map((m) => <SimpleBar key={m.type} label={m.type} value={m.total} max={maxMove} />)}</div><div><h3>Equipamentos mais antigos em campo</h3>{data.oldestCustody.slice(0, 30).map((a) => <div className="event compact" key={a.id}><strong>{a.serialNumber}</strong><span>{a.Material?.name} • {a.Technician?.name}</span><small>{a.custodyDays} dias em custódia</small></div>)}</div></section>
     </div>
   );
 }

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import api from '../services/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import KpiCard from '../components/KpiCard';
 import SimpleBar from '../components/SimpleBar';
 import ChartPanel from '../components/ChartPanel';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
 import WarehouseValueOverview from '../components/WarehouseValueOverview';
+import { biErrorMessage, requestBi } from '../utils/biRequest';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function objChart(obj) { return { labels: Object.keys(obj || {}), datasets: [{ label: 'Total', data: Object.values(obj || {}) }] }; }
@@ -15,15 +15,22 @@ export default function BITechnicians() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  function load(nextFilters = appliedFilters) {
+  const load = useCallback(async (nextFilters, force = false) => {
     setLoading(true);
-    api.get('/bi/technicians', { params: toParams(nextFilters) })
-      .then((r) => setData(r.data.data))
-      .finally(() => setLoading(false));
-  }
+    setLoadError('');
+    try {
+      const response = await requestBi('/bi/technicians', toParams(nextFilters), { force });
+      setData(response.data.data);
+    } catch (error) {
+      setLoadError(biErrorMessage(error, 'Não foi possível carregar o BI de técnicos.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => { load(appliedFilters); }, []);
+  useEffect(() => { load(EMPTY_FILTERS); }, [load]);
 
   function applyFilters() {
     setAppliedFilters(filters);
@@ -53,13 +60,15 @@ export default function BITechnicians() {
     };
   }, [data]);
 
-  if (!data || !charts) return <div className="panel">Carregando BI de técnicos...</div>;
-  const rows = data.technicians;
+  if (loading && !data) return <div className="panel">Carregando BI de técnicos...</div>;
+  if (!data || !charts) return <div className="panel danger-panel"><strong>Não foi possível carregar o BI de técnicos.</strong><p>{loadError || 'Tente novamente em alguns instantes.'}</p><button type="button" onClick={() => load(appliedFilters, true)}>Tentar novamente</button></div>;
+  const rows = data.technicians || [];
   const maxScore = Math.max(...rows.map((r) => r.score), 1);
   return (
     <div className="page-grid bi-page">
-      <div className="toolbar"><div><h2>BI por Técnico</h2><p>Produtividade, patrimônio, carga individual, equipamentos parados e ranking operacional.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
+      <div className="toolbar"><div><h2>BI por Técnico</h2><p>Produtividade, patrimônio, carga individual, equipamentos parados e ranking operacional.</p></div><div className="row-actions"><button className="ghost" onClick={() => load(appliedFilters, true)}>🔄 Atualizar</button><button onClick={() => window.print()}>🖨️ Imprimir</button></div></div>
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
+      {loadError && <section className="panel danger-panel"><strong>Falha ao atualizar o BI.</strong><p>{loadError}</p></section>}
       <div className="kpi-grid"><KpiCard label="Técnicos analisados" value={rows.length} /><KpiCard label="Média patrimonial" value={brl(data.averageValue)} /><KpiCard label="OS no mês" value={rows.reduce((s, r) => s + r.osMonth, 0)} /><KpiCard label="Ferramentas em custódia" value={rows.reduce((sum, row) => sum + Number(row.toolCount || 0), 0)} /><KpiCard label="Equip. +60 dias" value={rows.reduce((s, r) => s + r.oldAssets, 0)} tone="danger" /></div>
       <WarehouseValueOverview />
       <section className="bi-charts-grid">

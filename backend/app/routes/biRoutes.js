@@ -3,6 +3,7 @@ const controller = require('../controllers/biController');
 const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate);
 router.get('/filter-options', requireModule('biExecutive', 'biFinancial', 'biTechnicians', 'biAudit'), controller.filterOptions);
+router.get('/warehouse-values', requireModule('biExecutive', 'biFinancial', 'biTechnicians', 'biAudit'), controller.warehouseValues);
 router.get('/executive', requireModule('biExecutive'), controller.executive);
 router.get('/technicians', requireModule('biTechnicians'), controller.technicians);
 router.get('/audit', requireModule('biAudit'), controller.audit);

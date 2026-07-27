@@ -107,11 +107,14 @@ export { EMPTY_FILTERS, toParams };
 
 export default function BIFilters({ value, onChange, onApply, onReset, loading, compact = false }) {
   const [options, setOptions] = useState(null);
+  const [optionsError, setOptionsError] = useState('');
   const [collapsed, setCollapsed] = useState(readInitialCollapsed);
-  const filters = { ...EMPTY_FILTERS, ...(value || {}) };
+  const filters = useMemo(() => ({ ...EMPTY_FILTERS, ...(value || {}) }), [value]);
 
   useEffect(() => {
-    api.get('/bi/filter-options').then((response) => setOptions(response.data.data)).catch(() => setOptions({}));
+    api.getCached('/bi/filter-options', {}, 300000)
+      .then((response) => { setOptions(response.data.data); setOptionsError(''); })
+      .catch(() => { setOptions({}); setOptionsError('Alguns filtros auxiliares não puderam ser carregados. O relatório principal continua disponível.'); });
   }, []);
 
   const lists = useMemo(() => {
@@ -202,6 +205,8 @@ export default function BIFilters({ value, onChange, onApply, onReset, loading, 
           <button type="button" onClick={onApply} disabled={loading}>{loading ? 'Calculando...' : '🔎 Aplicar filtros'}</button>
         </div>
       </div>
+
+      {optionsError && <div className="alert warning">{optionsError}</div>}
 
       <div className="bi-filter-summary" aria-live="polite">
         <span className="bi-filter-chip primary">{activeFilters.length ? `${activeFilters.length} filtros ativos` : 'Filtro padrão: últimos 90 dias'}</span>

@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import api from '../services/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import KpiCard from '../components/KpiCard';
 import ChartPanel from '../components/ChartPanel';
 import SimpleBar from '../components/SimpleBar';
 import BIFilters, { EMPTY_FILTERS, toParams } from '../components/BIFilters';
 import WarehouseValueOverview from '../components/WarehouseValueOverview';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { formatQuantity } from '../utils/formatQuantity';
+import { biErrorMessage, requestBi } from '../utils/biRequest';
 
 function brl(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -61,23 +61,20 @@ export default function BIFinancial() {
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
   const [loadError, setLoadError] = useState('');
 
-  async function load(nextFilters = appliedFilters) {
+  const load = useCallback(async (nextFilters, force = false) => {
     setLoading(true);
     setLoadError('');
     try {
-      const response = await api.get('/bi/financial', {
-        params: toParams(nextFilters),
-        timeout: 60000,
-      });
+      const response = await requestBi('/bi/financial', toParams(nextFilters), { force, timeout: 90000, ttlMs: 15000 });
       setData(response.data.data);
     } catch (error) {
-      setLoadError(error.response?.data?.message || error.message || 'Não foi possível carregar o BI financeiro.');
+      setLoadError(biErrorMessage(error, 'Não foi possível carregar o BI financeiro.'));
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { load(appliedFilters); }, []);
+  useEffect(() => { load(EMPTY_FILTERS); }, [load]);
 
   function applyFilters() {
     setAppliedFilters(filters);
@@ -161,7 +158,7 @@ export default function BIFinancial() {
       <div className="panel">
         <strong>Não foi possível carregar o BI financeiro.</strong>
         <p>{loadError || 'Tente novamente em alguns instantes.'}</p>
-        <button type="button" onClick={() => load(appliedFilters)}>Tentar novamente</button>
+        <button type="button" onClick={() => load(appliedFilters, true)}>Tentar novamente</button>
       </div>
     );
   }
@@ -202,7 +199,7 @@ export default function BIFinancial() {
           <p>Entradas, saídas, transferências, baixas por OS, capital em campo, risco financeiro, reposição sugerida e rastreabilidade de valor por técnico, material e categoria.</p>
         </div>
         <div className="row-actions">
-          <button className="ghost" onClick={() => load(appliedFilters)}>🔄 Atualizar</button>
+          <button className="ghost" onClick={() => load(appliedFilters, true)}>🔄 Atualizar</button>
           <button className="ghost" onClick={exportCsv}>⬇️ CSV</button>
           <button onClick={exportExcel}>📗 Excel</button>
           <button onClick={() => window.print()}>🖨️ Imprimir</button>
@@ -215,7 +212,7 @@ export default function BIFinancial() {
         <section className="panel danger-panel">
           <strong>Falha ao atualizar o BI.</strong>
           <p>{loadError}</p>
-          <button type="button" onClick={() => load(appliedFilters)}>Tentar novamente</button>
+          <button type="button" onClick={() => load(appliedFilters, true)}>Tentar novamente</button>
         </section>
       )}
 
