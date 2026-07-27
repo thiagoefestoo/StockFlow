@@ -2784,3 +2784,15 @@ input[readonly], textarea[readonly] {
   color: #7c421f;
   border-color: #dfc2aa;
 }
+
+/* Atualização 49: feedback de falha no carregamento de anexos e BI */
+.danger-text {
+  color: #b42318;
+  font-weight: 800;
+}
+
+.danger-panel {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #7f1d1d;
+}

@@ -131,9 +131,38 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id, { include: transferInclude });
+  const transfer = await Transfer.findByPk(req.params.id, {
+    attributes: { exclude: ['attachmentData'] },
+    include: transferInclude,
+  });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
-  return ok(res, transferWithAttachments(transfer, true));
+
+  const payload = transfer.toJSON();
+  const summary = String(payload.attachmentName || '').trim();
+  const multipleMatch = summary.match(/^(\d+)\s+arquivos?\s+anexados?$/i);
+  payload.attachmentCount = multipleMatch
+    ? Number(multipleMatch[1])
+    : (summary ? 1 : 0);
+  payload.attachmentNames = summary && !multipleMatch ? [summary] : [];
+  delete payload.attachmentData;
+
+  return ok(res, payload);
+});
+
+exports.getAttachment = asyncHandler(async (req, res) => {
+  const transfer = await Transfer.findByPk(req.params.id, {
+    attributes: ['id', 'transferNumber', 'attachmentName', 'attachmentData', 'signedAt', 'createdAt', 'updatedAt'],
+  });
+  if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
+
+  const attachments = readTransferAttachments(transfer);
+  const index = Number(req.params.index);
+
+  if (!Number.isInteger(index) || index < 0 || index >= attachments.length) {
+    return fail(res, 404, 'Anexo não encontrado nesta guia.');
+  }
+
+  return ok(res, attachments[index]);
 });
 
 exports.create = asyncHandler(async (req, res) => {

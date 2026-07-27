@@ -24,12 +24,18 @@ const defaultCorsOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:5173',
+  'https://estoque-superinfra.vercel.app',
 ];
 
-const corsOrigins = [
-  ...list(process.env.CORS_ORIGIN, defaultCorsOrigins),
+function normalizeOrigin(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+const corsOrigins = [...new Set([
+  ...defaultCorsOrigins,
+  ...list(process.env.CORS_ORIGIN, []),
   ...list(process.env.FRONTEND_URL, []),
-];
+].map(normalizeOrigin).filter(Boolean))];
 
 module.exports = {
   nodeEnv,

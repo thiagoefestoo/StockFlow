@@ -2,10 +2,25 @@ export function getTransferAttachments(transfer) {
   if (Array.isArray(transfer?.attachments)) {
     return transfer.attachments.filter((item) => item?.name || item?.data);
   }
-  if (transfer?.attachmentName || transfer?.attachmentData) {
-    return [{ name: transfer.attachmentName || 'documento-anexado', data: transfer.attachmentData || '' }];
+
+  if (Array.isArray(transfer?.attachmentNames) && transfer.attachmentNames.length) {
+    return transfer.attachmentNames.map((name) => ({ name, data: '' }));
   }
-  return [];
+
+  if (transfer?.attachmentName || transfer?.attachmentData) {
+    const summary = String(transfer.attachmentName || '').trim();
+    const multiple = summary.match(/^(\d+)\s+arquivos?\s+anexados?$/i);
+    if (multiple) {
+      return Array.from({ length: Number(multiple[1]) }, (_, index) => ({
+        name: `Anexo ${index + 1}`,
+        data: '',
+      }));
+    }
+    return [{ name: summary || 'documento-anexado', data: transfer.attachmentData || '' }];
+  }
+
+  const count = Number(transfer?.attachmentCount || 0);
+  return Array.from({ length: count }, (_, index) => ({ name: `Anexo ${index + 1}`, data: '' }));
 }
 
 export function transferAttachmentSummary(transfer) {

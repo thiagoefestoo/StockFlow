@@ -269,10 +269,42 @@ async function calculateStockPosition(materials, filters = {}) {
   const rows = [];
   const totals = { estoque: 0, tecnico: 0, cliente: 0, manutencao: 0, perdido: 0, totalAtual: 0 };
   const reverseIds = await reverseWarehouseIds();
-  const reverseSet = new Set(reverseIds);
+  const reverseSet = new Set(reverseIds.map(Number));
 
-  for (const material of materials) {
-    if (!materialMatches(material, { ...filters, search: '' })) continue;
+  const selectedMaterials = materials.filter((material) =>
+    materialMatches(material, { ...filters, search: '' })
+  );
+  const materialIds = selectedMaterials.map((material) => material.id);
+
+  const [allAssets, allBalances] = materialIds.length
+    ? await Promise.all([
+        SerializedAsset.findAll({
+          where: { materialId: { [Op.in]: materialIds } },
+          include: [Technician],
+        }),
+        StockBalance.findAll({
+          where: { materialId: { [Op.in]: materialIds } },
+          include: [Technician],
+        }),
+      ])
+    : [[], []];
+
+  const assetsByMaterial = new Map();
+  const balancesByMaterial = new Map();
+
+  for (const asset of allAssets) {
+    const key = Number(asset.materialId);
+    if (!assetsByMaterial.has(key)) assetsByMaterial.set(key, []);
+    assetsByMaterial.get(key).push(asset);
+  }
+
+  for (const balance of allBalances) {
+    const key = Number(balance.materialId);
+    if (!balancesByMaterial.has(key)) balancesByMaterial.set(key, []);
+    balancesByMaterial.get(key).push(balance);
+  }
+
+  for (const material of selectedMaterials) {
     const unitCost = Number(material.unitCost || 0);
     let estoqueQty = 0;
     let tecnicoQty = 0;
@@ -286,8 +318,7 @@ async function calculateStockPosition(materials, filters = {}) {
     let perdidoValue = 0;
 
     if (material.requiresSerial) {
-      let assets = await SerializedAsset.findAll({ where: { materialId: material.id }, include: [Technician] });
-      assets = assets.filter((asset) => {
+      const assets = (assetsByMaterial.get(Number(material.id)) || []).filter((asset) => {
         if (asset.ownerType === 'estoque' && reverseSet.has(Number(asset.warehouseId))) return false;
         if (!matchesSelected(asset.ownerType, filters.ownerTypes)) return false;
         if (!matchesSelected(asset.status, filters.assetStatuses)) return false;
@@ -295,6 +326,7 @@ async function calculateStockPosition(materials, filters = {}) {
         if (!textIncludes([asset.serialNumber, asset.mac, asset.brand, asset.model, asset.customerName, asset.customerCpf, material.name], filters.search)) return false;
         return true;
       });
+
       assets.forEach((asset) => {
         const value = Number(asset.acquisitionCost || unitCost || 0);
         if (asset.ownerType === 'estoque') { estoqueQty += 1; estoqueValue += value; }
@@ -304,16 +336,17 @@ async function calculateStockPosition(materials, filters = {}) {
         if (asset.status === 'perdido' || asset.status === 'baixado') { perdidoQty += 1; perdidoValue += value; }
       });
     } else {
-      const balances = await StockBalance.findAll({ where: { materialId: material.id }, include: [Technician] });
-      balances.filter((row) => {
+      const balances = (balancesByMaterial.get(Number(material.id)) || []).filter((row) => {
         if (row.ownerType === 'estoque' && reverseSet.has(Number(row.warehouseId))) return false;
         if (!matchesSelected(row.ownerType, filters.ownerTypes)) return false;
         if ((filters.technicianIds.length || filters.companyIds.length) && !technicianMatches(row.Technician, filters)) return false;
         return true;
-      }).forEach((row) => {
-        const qty = Number(row.quantity || 0);
-        if (row.ownerType === 'estoque') { estoqueQty += qty; estoqueValue += qty * unitCost; }
-        if (row.ownerType === 'tecnico') { tecnicoQty += qty; tecnicoValue += qty * unitCost; }
+      });
+
+      balances.forEach((row) => {
+        const quantity = Number(row.quantity || 0);
+        if (row.ownerType === 'estoque') { estoqueQty += quantity; estoqueValue += quantity * unitCost; }
+        if (row.ownerType === 'tecnico') { tecnicoQty += quantity; tecnicoValue += quantity * unitCost; }
       });
     }
 
@@ -324,6 +357,7 @@ async function calculateStockPosition(materials, filters = {}) {
     totals.manutencao += manutencaoValue;
     totals.perdido += perdidoValue;
     totals.totalAtual += totalValue;
+
     rows.push({
       id: material.id,
       sku: material.sku,
@@ -345,6 +379,7 @@ async function calculateStockPosition(materials, filters = {}) {
       minStock: material.minStock,
     });
   }
+
   Object.keys(totals).forEach((key) => { totals[key] = money(totals[key]); });
   rows.sort((a, b) => b.totalValue - a.totalValue);
   return { rows, totals };
@@ -356,8 +391,8 @@ async function loadBiData(filters) {
   materials = materials.filter((m) => materialMatches(m, { ...filters, search: filters.search && (filters.materialIds.length || filters.categories.length || filters.requiresSerial !== null) ? filters.search : '' }));
   let [batches, transfers, orders, movements, technicians, materialRequests, approvalRequests] = await Promise.all([
     StockBatch.findAll({ where: warehouseOutsideReverse(reverseIds), include: [{ model: StockBatchItem, include: [Material] }, { association: 'createdBy' }], order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']], limit: 2000 }),
-    Transfer.findAll({ include: [Technician, { model: TransferItem, include: [Material, SerializedAsset] }], order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC']], limit: 2000 }),
-    ServiceOrder.findAll({ include: [Technician, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }], order: [['createdAt', 'DESC']], limit: 2000 }),
+    Transfer.findAll({ include: [Technician, { model: TransferItem, include: [Material] }], order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC']], limit: 2000 }),
+    ServiceOrder.findAll({ include: [Technician, { model: ServiceOrderMaterial, include: [Material] }], order: [['createdAt', 'DESC']], limit: 2000 }),
     StockMovement.findAll({ where: movementOutsideReverse(reverseIds), include: [Material, SerializedAsset, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }, { association: 'createdBy' }], order: [['movementAt', 'DESC']], limit: 3000 }),
     Technician.findAll({ include: [ContractorCompany], order: [['name', 'ASC']] }),
     MaterialRequest.findAll({ include: [Technician], order: [['createdAt', 'DESC']], limit: 1000 }),
@@ -509,7 +544,36 @@ exports.financial = asyncHandler(async (req, res) => {
   const pendingSignatureValue = money(transfers.filter((transfer) => transfer.status === 'pendente_assinatura').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
   const requestPipeline = money(materialRequests.filter((request) => !['cancelado', 'entregue'].includes(request.status)).reduce((sum, request) => sum + Number(request.totalValue || 0), 0));
   const approvalsPendingAmount = money(approvalRequests.filter((approval) => approval.status === 'pendente').reduce((sum, approval) => sum + Number(approval.amount || 0), 0));
-  const custodyRiskAssetsRaw = await SerializedAsset.findAll({ where: { ownerType: 'tecnico', custodyStartedAt: { [Op.lte]: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) } }, include: [Material, Technician], order: [['custodyStartedAt', 'ASC']] });
+  const technicianIds = technicians.map((technician) => technician.id);
+  const [technicianAssets, technicianBalances, technicianTools] = technicianIds.length
+    ? await Promise.all([
+        SerializedAsset.findAll({
+          where: {
+            ownerType: 'tecnico',
+            technicianId: { [Op.in]: technicianIds },
+          },
+          include: [Material, Technician],
+        }),
+        StockBalance.findAll({
+          where: {
+            ownerType: 'tecnico',
+            technicianId: { [Op.in]: technicianIds },
+          },
+          include: [Material],
+        }),
+        TechnicianTool.findAll({
+          where: {
+            technicianId: { [Op.in]: technicianIds },
+            status: 'com_tecnico',
+          },
+        }).catch(() => []),
+      ])
+    : [[], [], []];
+
+  const custodyLimit = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  const custodyRiskAssetsRaw = technicianAssets
+    .filter((asset) => asset.custodyStartedAt && new Date(asset.custodyStartedAt) <= custodyLimit)
+    .sort((a, b) => new Date(a.custodyStartedAt || 0) - new Date(b.custodyStartedAt || 0));
   const custodyRiskAssets = custodyRiskAssetsRaw.filter((asset) => materialMatches(asset.Material, { ...filters, search: '' }) && technicianMatches(asset.Technician, filters) && matchesSelected(asset.status, filters.assetStatuses) && textIncludes([asset.serialNumber, asset.mac, asset.Material?.name, asset.Technician?.name], filters.search));
   const custodyRiskValue = money(custodyRiskAssets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0));
   const lostValue = money(stockPosition.totals.perdido || 0);
@@ -538,19 +602,39 @@ exports.financial = asyncHandler(async (req, res) => {
   }));
   const byCategory = Object.values(categoryMap).sort((a, b) => Number(b.total || 0) - Number(a.total || 0));
 
+  const assetsByTechnician = new Map();
+  const balancesByTechnician = new Map();
+  const toolsByTechnician = new Map();
+
+  technicianAssets.forEach((asset) => {
+    const key = Number(asset.technicianId);
+    if (!assetsByTechnician.has(key)) assetsByTechnician.set(key, []);
+    assetsByTechnician.get(key).push(asset);
+  });
+  technicianBalances.forEach((balance) => {
+    const key = Number(balance.technicianId);
+    if (!balancesByTechnician.has(key)) balancesByTechnician.set(key, []);
+    balancesByTechnician.get(key).push(balance);
+  });
+  technicianTools.forEach((tool) => {
+    const key = Number(tool.technicianId);
+    if (!toolsByTechnician.has(key)) toolsByTechnician.set(key, []);
+    toolsByTechnician.get(key).push(tool);
+  });
+
   const technicianFinance = [];
   for (const tech of technicians) {
-    const assets = await SerializedAsset.findAll({ where: { ownerType: 'tecnico', technicianId: tech.id }, include: [Material] });
+    const assets = assetsByTechnician.get(Number(tech.id)) || [];
     const filteredAssets = assets.filter((asset) => materialMatches(asset.Material, { ...filters, search: '' }) && matchesSelected(asset.status, filters.assetStatuses));
     const assetValue = money(filteredAssets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0));
-    const balanceRows = await StockBalance.findAll({ where: { ownerType: 'tecnico', technicianId: tech.id }, include: [Material] });
+    const balanceRows = balancesByTechnician.get(Number(tech.id)) || [];
     const consumableValue = money(balanceRows.filter((row) => materialMatches(row.Material, { ...filters, search: '' })).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0));
-    const activeTools = await TechnicianTool.findAll({ where: { technicianId: tech.id, status: 'com_tecnico' } }).catch(() => []);
+    const activeTools = toolsByTechnician.get(Number(tech.id)) || [];
     const toolValue = money(activeTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0));
     const transferValue = money(transfers.filter((transfer) => transfer.technicianId === tech.id && transfer.status !== 'cancelado').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
     const consumedValue = money(orders.filter((order) => order.technicianId === tech.id).reduce((sum, order) => sum + orderValue(order), 0));
     const pendingValue = money(transfers.filter((transfer) => transfer.technicianId === tech.id && transfer.status === 'pendente_assinatura').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
-    const oldValue = money(custodyRiskAssets.filter((asset) => asset.technicianId === tech.id).reduce((sum, asset) => sum + Number(asset.acquisitionCost || 0), 0));
+    const oldValue = money(custodyRiskAssets.filter((asset) => asset.technicianId === tech.id).reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0));
     technicianFinance.push({ id: tech.id, name: tech.name, company: tech.ContractorCompany?.name || '-', status: tech.status, assetValue, consumableValue, toolCount: activeTools.length, toolValue, custodyValue: money(assetValue + consumableValue + toolValue), transferValue, consumedValue, pendingSignatureValue: pendingValue, oldCustodyValue: oldValue, openFinancialRisk: money(pendingValue + oldValue) });
   }
   technicianFinance.sort((a, b) => b.custodyValue - a.custodyValue);

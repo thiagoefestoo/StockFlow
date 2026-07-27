@@ -59,12 +59,22 @@ export default function BIFinancial() {
   const [tab, setTab] = useState('visao');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
+  const [loadError, setLoadError] = useState('');
 
-  function load(nextFilters = appliedFilters) {
+  async function load(nextFilters = appliedFilters) {
     setLoading(true);
-    api.get('/bi/financial', { params: toParams(nextFilters) })
-      .then((response) => setData(response.data.data))
-      .finally(() => setLoading(false));
+    setLoadError('');
+    try {
+      const response = await api.get('/bi/financial', {
+        params: toParams(nextFilters),
+        timeout: 60000,
+      });
+      setData(response.data.data);
+    } catch (error) {
+      setLoadError(error.response?.data?.message || error.message || 'Não foi possível carregar o BI financeiro.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(appliedFilters); }, []);
@@ -146,7 +156,15 @@ export default function BIFinancial() {
   }, [data]);
 
   if (loading && !data) return <div className="panel">Carregando BI financeiro...</div>;
-  if (!data || !charts) return <div className="panel">Não foi possível carregar o BI financeiro.</div>;
+  if (!data || !charts) {
+    return (
+      <div className="panel">
+        <strong>Não foi possível carregar o BI financeiro.</strong>
+        <p>{loadError || 'Tente novamente em alguns instantes.'}</p>
+        <button type="button" onClick={() => load(appliedFilters)}>Tentar novamente</button>
+      </div>
+    );
+  }
 
   const cards = data.cards || {};
   const maxTech = Math.max(...(data.technicianFinance || []).map((item) => Number(item.custodyValue || 0)), 1);
@@ -192,6 +210,14 @@ export default function BIFinancial() {
       </section>
 
       <BIFilters value={filters} onChange={setFilters} onApply={applyFilters} onReset={resetFilters} loading={loading} />
+
+      {loadError && (
+        <section className="panel danger-panel">
+          <strong>Falha ao atualizar o BI.</strong>
+          <p>{loadError}</p>
+          <button type="button" onClick={() => load(appliedFilters)}>Tentar novamente</button>
+        </section>
+      )}
 
       <section className="kpi-grid finance-kpis">
         <KpiCard label="Entradas fiscais" value={brl(cards.totalEntries)} hint="Tudo que entrou via recebimento." />

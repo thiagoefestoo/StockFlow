@@ -15,10 +15,21 @@ const app = express();
 app.use(quantityResponseMiddleware);
 app.set('trust proxy', 1);
 
+function normalizeOrigin(origin) {
+  return String(origin || '').trim().replace(/\/+$/, '');
+}
+
 function isAllowedOrigin(origin) {
   if (!origin) return true;
-  if (env.corsOrigins.includes('*') || env.corsOrigins.includes(origin)) return true;
-  if (env.corsAllowVercelPreviews && /^https:\/\/[a-z0-9-]+(-[a-z0-9-]+)?\.vercel\.app$/i.test(origin)) return true;
+  const normalized = normalizeOrigin(origin);
+  if (env.corsOrigins.includes('*') || env.corsOrigins.includes(normalized)) return true;
+
+  // Permite previews da Vercel somente quando a variável correspondente estiver habilitada.
+  if (
+    env.corsAllowVercelPreviews &&
+    /^https:\/\/estoque-superinfra(?:-[a-z0-9-]+)*\.vercel\.app$/i.test(normalized)
+  ) return true;
+
   return false;
 }
 

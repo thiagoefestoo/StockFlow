@@ -3,6 +3,7 @@ const controller = require('../controllers/transferController');
 const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate, requireModule('transfers'));
 router.get('/', controller.list);
+router.get('/:id/attachments/:index', controller.getAttachment);
 router.get('/:id', controller.get);
 router.put('/:id', controller.update);
 router.post('/tools', controller.transferTools);

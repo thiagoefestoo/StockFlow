@@ -8,7 +8,16 @@ import { formatQuantity } from '../utils/formatQuantity';
 export default function TransferPrint() {
   const { id } = useParams();
   const [transfer, setTransfer] = useState(null);
-  useEffect(() => { api.get(`/transfers/${id}`).then((r) => setTransfer(r.data.data)); }, [id]);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    setLoadError('');
+    api.get(`/transfers/${id}`)
+      .then((r) => setTransfer(r.data.data))
+      .catch((error) => setLoadError(error.response?.data?.message || error.message || 'Não foi possível carregar a guia.'));
+  }, [id]);
+
+  if (loadError) return <div className="panel"><strong>Não foi possível carregar a guia.</strong><p>{loadError}</p></div>;
   if (!transfer) return <div className="panel">Carregando guia...</div>;
 
   const number = String(transfer.transferNumber || '').toUpperCase();
@@ -56,7 +65,7 @@ export default function TransferPrint() {
         <div className="signature-area"><div><span></span><p>{isToolTransfer ? 'Técnico de origem' : 'Assinatura do Técnico'}</p></div><div><span></span><p>{isToolTransfer ? 'Técnico de destino' : 'Responsável pelo Estoque'}</p></div></div>
         <p className="paper-note no-print">{isToolTransfer ? 'Declaro que as ferramentas acima foram conferidas e que a responsabilidade passou do técnico de origem para o técnico de destino.' : isReturn ? 'Declaro que os materiais listados acima foram devolvidos pelo técnico e conferidos para retorno ao estoque.' : 'Declaro que recebi os materiais listados acima, com os números de série discriminados, ficando responsável pela guarda, utilização em OS ou devolução formal ao estoque.'}</p>
       </section>
-      {getTransferAttachments(transfer).length > 0 && <section className="panel no-print"><h3>Anexos assinados</h3>{getTransferAttachments(transfer).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} label={`Anexo ${index + 1}`} />)}</section>}
+      {getTransferAttachments(transfer).length > 0 && <section className="panel no-print"><h3>Anexos assinados</h3>{getTransferAttachments(transfer).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} loadData={async () => { const response = await api.get(`/transfers/${transfer.id}/attachments/${index}`); return response.data?.data?.data || ''; }} label={`Anexo ${index + 1}`} />)}</section>}
     </div>
   );
 }

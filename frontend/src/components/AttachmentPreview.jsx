@@ -45,30 +45,65 @@ function downloadAttachment(dataUrl, name) {
   if (String(url).startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-export default function AttachmentPreview({ name, data, label = 'Documento anexado', compact = false, showInline = true }) {
+export default function AttachmentPreview({ name, data, loadData, label = 'Documento anexado', compact = false, showInline = true }) {
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [loadedData, setLoadedData] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   if (!name && !data) return <span className="muted">Sem anexo</span>;
 
   const fileName = name || 'documento-anexo';
-  const hasData = Boolean(data);
-  const isPdf = isPdfFile(fileName, data);
-  const isImage = isImageFile(fileName, data);
-  const canPreview = hasData && (isPdf || isImage);
+  const resolvedData = data || loadedData;
+  const hasData = Boolean(resolvedData);
+  const canLoad = typeof loadData === 'function';
+  const isPdf = isPdfFile(fileName, resolvedData);
+  const isImage = isImageFile(fileName, resolvedData);
+  const canPreview = (hasData || canLoad) && (isPdf || isImage || canLoad);
+
+  async function ensureData() {
+    if (resolvedData) return resolvedData;
+    if (!canLoad || loading) return '';
+    setLoading(true);
+    setLoadError('');
+    try {
+      const result = await loadData();
+      const nextData = result?.data || result?.attachmentData || result || '';
+      if (!nextData) throw new Error('Arquivo sem conteúdo disponível.');
+      setLoadedData(nextData);
+      return nextData;
+    } catch (error) {
+      setLoadError(error?.response?.data?.message || error?.message || 'Não foi possível carregar o arquivo.');
+      return '';
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openViewer() {
+    const value = await ensureData();
+    if (value) setViewerOpen(true);
+  }
+
+  async function downloadFile() {
+    const value = await ensureData();
+    if (value) downloadAttachment(value, fileName);
+  }
 
   return (
     <div className={`attachment-preview ${compact ? 'compact' : ''}`}>
       {!compact && <small>{label}</small>}
       <div className="attachment-preview-head">
         <span title={fileName}>{isPdf ? '📄' : isImage ? '🖼️' : '📎'} {fileName}</span>
-        {hasData ? <div className="attachment-actions">
-          {canPreview && <button type="button" className="info" onClick={() => setViewerOpen(true)}>Visualizar</button>}
-          <button type="button" className="ghost" onClick={() => downloadAttachment(data, fileName)}>Baixar</button>
+        {(hasData || canLoad) ? <div className="attachment-actions">
+          {canPreview && <button type="button" className="info" disabled={loading} onClick={openViewer}>{loading ? 'Carregando...' : 'Visualizar'}</button>}
+          <button type="button" className="ghost" disabled={loading} onClick={downloadFile}>{loading ? 'Carregando...' : 'Baixar'}</button>
         </div> : <em>Arquivo registrado, sem dados para visualização.</em>}
       </div>
 
-      {hasData && showInline && !compact && isImage && <img className="signed-img" src={data} alt={fileName} />}
-      {hasData && showInline && !compact && isPdf && <div className="pdf-preview-frame"><iframe title={fileName} src={data} /></div>}
+      {hasData && showInline && !compact && isImage && <img className="signed-img" src={resolvedData} alt={fileName} />}
+      {hasData && showInline && !compact && isPdf && <div className="pdf-preview-frame"><iframe title={fileName} src={resolvedData} /></div>}
+      {loadError && <small className="danger-text">{loadError}</small>}
 
       {viewerOpen && canPreview && (
         <div className="attachment-modal-backdrop" role="presentation" onClick={() => setViewerOpen(false)}>
@@ -81,11 +116,11 @@ export default function AttachmentPreview({ name, data, label = 'Documento anexa
               <button type="button" className="ghost" onClick={() => setViewerOpen(false)}>Fechar</button>
             </div>
             <div className="attachment-modal-body">
-              {isPdf && <iframe title={`PDF ${fileName}`} src={data} />}
-              {isImage && <img src={data} alt={fileName} />}
+              {isPdf && <iframe title={`PDF ${fileName}`} src={resolvedData} />}
+              {isImage && <img src={resolvedData} alt={fileName} />}
             </div>
             <div className="attachment-modal-actions">
-              <button type="button" className="primary" onClick={() => downloadAttachment(data, fileName)}>Baixar documento</button>
+              <button type="button" className="primary" onClick={() => downloadAttachment(resolvedData, fileName)}>Baixar documento</button>
             </div>
           </div>
         </div>
