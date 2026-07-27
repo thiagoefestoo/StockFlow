@@ -2,7 +2,8 @@ const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const { ServiceOrder, ServiceOrderMaterial, Material, SerializedAsset, StockMovement, Technician } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { ok, created, fail } = require('../utils/response');
+const { ok, okPaginated, created, fail } = require('../utils/response');
+const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 const { money, qty, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
@@ -28,8 +29,20 @@ exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
   if (req.query.search) where[Op.or] = [{ osNumber: { [Op.iLike]: `%${req.query.search}%` } }, { customerName: { [Op.iLike]: `%${req.query.search}%` } }, { customerCpf: { [Op.iLike]: `%${req.query.search}%` } }];
-  const orders = await ServiceOrder.findAll({ where, include: [Technician, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }], order: [['createdAt', 'DESC']], limit: 400 });
-  return ok(res, orders);
+  const pagination = paginationFromQuery(req.query);
+  const query = {
+    where,
+    include: [Technician, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }],
+    order: [['createdAt', 'DESC']],
+    ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 400 }),
+  };
+  const [orders, total] = await Promise.all([
+    ServiceOrder.findAll(query),
+    pagination.enabled ? ServiceOrder.count({ where }) : Promise.resolve(0),
+  ]);
+  return pagination.enabled
+    ? okPaginated(res, orders, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, orders);
 });
 
 exports.create = asyncHandler(async (req, res) => {

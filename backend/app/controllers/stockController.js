@@ -17,7 +17,8 @@ const {
   TechnicianTool,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { ok, created, fail } = require('../utils/response');
+const { ok, okPaginated, created, fail } = require('../utils/response');
+const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 const { daysBetween, qty, money, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
@@ -83,9 +84,16 @@ exports.assets = asyncHandler(async (req, res) => {
     where[Op.and] = scopes;
   }
   if (req.query.serial) where.serialNumber = { [Op.iLike]: `%${req.query.serial}%` };
-  const limit = Math.min(Number(req.query.limit || 800), 2000);
-  const assets = await SerializedAsset.findAll({ where, include: [Material, Technician, Warehouse], order: [['updatedAt', 'DESC']], limit });
-  return ok(res, assets.map((asset) => ({ ...asset.toJSON(), custodyDays: daysBetween(asset.custodyStartedAt) })));
+  const pagination = paginationFromQuery(req.query);
+  const limit = pagination.enabled ? pagination.limit : Math.min(Number(req.query.limit || 800), 2000);
+  const [assets, total] = await Promise.all([
+    SerializedAsset.findAll({ where, include: [Material, Technician, Warehouse], order: [['updatedAt', 'DESC']], limit, ...(pagination.enabled ? { offset: pagination.offset } : {}) }),
+    pagination.enabled ? SerializedAsset.count({ where }) : Promise.resolve(0),
+  ]);
+  const data = assets.map((asset) => ({ ...asset.toJSON(), custodyDays: daysBetween(asset.custodyStartedAt) }));
+  return pagination.enabled
+    ? okPaginated(res, data, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, data);
 });
 
 exports.movements = asyncHandler(async (req, res) => {
@@ -101,22 +109,29 @@ exports.movements = asyncHandler(async (req, res) => {
     and.push({ [Op.or]: [{ serialNumber: { [Op.iLike]: q } }, { reference: { [Op.iLike]: q } }, { notes: { [Op.iLike]: q } }] });
   }
   if (and.length) where[Op.and] = and;
-  const limit = Math.min(Number(req.query.limit || 1000), 3000);
-  const movements = await StockMovement.findAll({
-    include: [
-      Material,
-      SerializedAsset,
-      { model: Technician, as: 'fromTechnician' },
-      { model: Technician, as: 'toTechnician' },
-      { model: Warehouse, as: 'fromWarehouse' },
-      { model: Warehouse, as: 'toWarehouse' },
-      { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
-    ],
-    where,
-    order: [['movementAt', 'DESC']],
-    limit,
-  });
-  return ok(res, movements);
+  const pagination = paginationFromQuery(req.query);
+  const limit = pagination.enabled ? pagination.limit : Math.min(Number(req.query.limit || 1000), 3000);
+  const [movements, total] = await Promise.all([
+    StockMovement.findAll({
+      include: [
+        Material,
+        SerializedAsset,
+        { model: Technician, as: 'fromTechnician' },
+        { model: Technician, as: 'toTechnician' },
+        { model: Warehouse, as: 'fromWarehouse' },
+        { model: Warehouse, as: 'toWarehouse' },
+        { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
+      ],
+      where,
+      order: [['movementAt', 'DESC']],
+      limit,
+      ...(pagination.enabled ? { offset: pagination.offset } : {}),
+    }),
+    pagination.enabled ? StockMovement.count({ where }) : Promise.resolve(0),
+  ]);
+  return pagination.enabled
+    ? okPaginated(res, movements, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, movements);
 });
 
 exports.technicianBox = asyncHandler(async (req, res) => {

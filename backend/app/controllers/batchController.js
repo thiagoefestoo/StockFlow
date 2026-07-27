@@ -2,7 +2,8 @@ const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const { StockBatch, StockBatchItem, Material, SerializedAsset, StockMovement, User, Warehouse } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { ok, created, fail } = require('../utils/response');
+const { ok, okPaginated, created, fail } = require('../utils/response');
+const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
@@ -12,18 +13,25 @@ const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation
 
 exports.list = asyncHandler(async (req, res) => {
   const where = stockWhereForUser(req.user, req.query.warehouseId);
-  const limit = Math.min(Math.max(Number(req.query.limit || 150), 1), 300);
-  const batches = await StockBatch.findAll({
-    where,
-    attributes: { exclude: ['proofAttachmentData'] },
-    include: [
-      { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
-      Warehouse,
-    ],
-    order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
-    limit,
-  });
-  return ok(res, batches);
+  const pagination = paginationFromQuery(req.query);
+  const limit = pagination.enabled ? pagination.limit : Math.min(Math.max(Number(req.query.limit || 150), 1), 300);
+  const [batches, total] = await Promise.all([
+    StockBatch.findAll({
+      where,
+      attributes: { exclude: ['proofAttachmentData'] },
+      include: [
+        { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
+        Warehouse,
+      ],
+      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
+      limit,
+      ...(pagination.enabled ? { offset: pagination.offset } : {}),
+    }),
+    pagination.enabled ? StockBatch.count({ where }) : Promise.resolve(0),
+  ]);
+  return pagination.enabled
+    ? okPaginated(res, batches, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, batches);
 });
 
 exports.get = asyncHandler(async (req, res) => {

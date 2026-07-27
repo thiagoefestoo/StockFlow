@@ -1,13 +1,15 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import Pagination from '../components/Pagination';
 import AttachmentPreview from '../components/AttachmentPreview';
 import FloatingAlert from '../components/FloatingAlert';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, optionsWithoutSelected } from '../utils/operationSelections';
-import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
+import { formatQuantity } from '../utils/formatQuantity';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function splitSerials(value) { return String(value || '').split(/[\r\n\t,;]+/).map((s) => s.trim()).filter(Boolean); }
@@ -72,18 +74,28 @@ export default function Receiving() {
   const [message, setMessage] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
+  const [loadingList, setLoadingList] = useState(false);
 
-  async function load() {
-    const [m, b, w] = await Promise.all([
-      api.get('/materials'),
-      api.get('/batches'),
-      api.get('/warehouses').catch(() => ({ data: { data: [] } })),
-    ]);
-    setMaterials(m.data.data || []);
-    setBatches(b.data.data || []);
-    setWarehouses(w.data.data || []);
+  async function load(targetPage = page, refreshReferences = false) {
+    setLoadingList(true);
+    try {
+      const requests = [api.get('/batches', { params: { page: targetPage, pageSize: 15 } })];
+      if (refreshReferences || !materials.length || !warehouses.length) {
+        requests.push(api.get('/materials'), api.get('/warehouses').catch(() => ({ data: { data: [] } })));
+      }
+      const [b, m, w] = await Promise.all(requests);
+      setBatches(b.data.data || []);
+      setPagination(b.data.pagination || { page: targetPage, pageSize: 15, total: b.data.data?.length || 0, totalPages: 1 });
+      setPage(targetPage);
+      if (m) setMaterials(m.data.data || []);
+      if (w) setWarehouses(w.data.data || []);
+    } finally {
+      setLoadingList(false);
+    }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(1, true); }, []);
 
   const operationalBatches = useMemo(() => batches.filter((batch) => !batch.Warehouse?.isReverseLogistics), [batches]);
   const totals = useMemo(() => ({
@@ -258,8 +270,8 @@ export default function Receiving() {
   return <div className="page-grid erp-page">
     <section className="toolbar"><div><span className="eyebrow">Entrada fiscal e logística</span><h2>Entrada completa de material</h2><p>Registre materiais diretamente no estoque regional de destino, com documento fiscal, valor obrigatório e seriais conferidos.</p></div><button onClick={() => { setForm({ ...emptyForm(), warehouseId: warehouses[0]?.id || '' }); setModal(true); }}>Nova entrada</button></section>
     <FloatingAlert message={message} type={message.startsWith('Entrada registrada') || message.includes('serial(is) colado(s)') ? 'success' : 'danger'} onClose={() => setMessage('')} />
-    <div className="kpi-grid small"><KpiCard label="Entradas operacionais" value={operationalBatches.length} /><KpiCard label="Itens recebidos" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor recebido" value={brl(totals.totalValue)} /><KpiCard label="Com comprovante" value={totals.withProof} /></div>
-    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td>{formatQuantity(b.totalItems)}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <span className="badge info">Anexo disponível</span> : '-'}</td><td><button className="info" disabled={detailsLoading} onClick={() => openBatchDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div></section>
+    <div className="kpi-grid small"><KpiCard label="Entradas nesta página" value={operationalBatches.length} /><KpiCard label="Itens nesta página" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor desta página" value={brl(totals.totalValue)} /><KpiCard label="Total de entradas" value={pagination.total || 0} /></div>
+    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td>{formatQuantity(b.totalItems)}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <span className="badge info">Anexo disponível</span> : '-'}</td><td><button className="info" disabled={detailsLoading} onClick={() => openBatchDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div><Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
 
     <Modal open={modal} title="Nova entrada com comprovante" onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>Revisar entrada</button></>}>
       <div className="form-stack receiving-form">

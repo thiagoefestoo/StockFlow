@@ -14,7 +14,8 @@ const {
   Warehouse,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { ok, created, fail } = require('../utils/response');
+const { ok, okPaginated, created, fail } = require('../utils/response');
+const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
@@ -135,8 +136,19 @@ exports.list = asyncHandler(async (req, res) => {
   if (req.query.requestType) where.requestType = req.query.requestType;
   if (req.query.technicianId) where.technicianId = req.query.technicianId;
   if (req.query.warehouseId) where.warehouseId = req.query.warehouseId;
-  const requests = await MaterialRequest.findAll({ where, include: includeFull(), order: [['createdAt', 'DESC']], limit: 500 });
-  return ok(res, requests);
+  const pagination = paginationFromQuery(req.query);
+  const [requests, total] = await Promise.all([
+    MaterialRequest.findAll({
+      where,
+      include: includeFull(),
+      order: [['createdAt', 'DESC']],
+      ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 500 }),
+    }),
+    pagination.enabled ? MaterialRequest.count({ where }) : Promise.resolve(0),
+  ]);
+  return pagination.enabled
+    ? okPaginated(res, requests, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, requests);
 });
 
 exports.summary = asyncHandler(async (req, res) => {

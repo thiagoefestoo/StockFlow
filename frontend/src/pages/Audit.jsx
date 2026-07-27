@@ -1,6 +1,8 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
+import Pagination from '../components/Pagination';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -182,6 +184,9 @@ export default function Audit() {
   const [entity, setEntity] = useState('');
   const [details, setDetails] = useState(null);
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(false);
 
   async function openAuditDetails(log) {
     try {
@@ -192,27 +197,28 @@ export default function Audit() {
     }
   }
 
-  async function load() {
+  async function load(targetPage = page) {
+    setLoading(true);
     try {
       setMessage('');
-      const params = new URLSearchParams({ limit: '2000' });
-      if (action) params.set('action', action);
-      if (entity) params.set('entity', entity);
-      if (search.trim()) params.set('search', search.trim());
-      const res = await api.get(`/audit?${params.toString()}`);
-      setLogs(res.data.data);
+      const params = { page: targetPage, pageSize: 15 };
+      if (action) params.action = action;
+      if (entity) params.entity = entity;
+      if (search.trim()) params.search = search.trim();
+      const res = await api.get('/audit', { params });
+      setLogs(res.data.data || []);
+      setPagination(res.data.pagination || { page: targetPage, pageSize: 15, total: res.data.data?.length || 0, totalPages: 1 });
+      setPage(targetPage);
     } catch (error) {
       setMessage(error.response?.data?.message || 'Erro ao carregar auditoria.');
+    } finally {
+      setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(1); }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter((log) => [log.message, log.action, log.entity, log.entityId, log.actor?.name, log.actor?.email].filter(Boolean).join(' ').toLowerCase().includes(q));
-  }, [logs, search]);
+  const filtered = logs;
 
   const stats = useMemo(() => {
     const actions = new Set(filtered.map((l) => l.action)).size;
@@ -248,11 +254,11 @@ export default function Audit() {
     <div className="page-grid audit-page">
       <div className="toolbar">
         <div><span className="eyebrow">Auditoria avançada</span><h2>Auditoria completa da operação</h2><p>Consulta corporativa de alterações, aprovações, transferências, anexos, baixas, edições e eventos do sistema.</p></div>
-        <div className="row-actions"><button className="ghost" onClick={load}>🔄 Atualizar</button><button className="ghost" onClick={exportCsv}>⬇️ CSV</button><button onClick={exportExcel}>📗 Excel</button></div>
+        <div className="row-actions"><button className="ghost" onClick={() => load(page)}>🔄 Atualizar</button><button className="ghost" onClick={exportCsv}>⬇️ CSV</button><button onClick={exportExcel}>📗 Excel</button></div>
       </div>
       {message && <div className="alert danger">{message}</div>}
       <div className="kpi-grid small"><KpiCard label="Registros" value={filtered.length} /><KpiCard label="Tipos de ação" value={stats.actions} /><KpiCard label="Entidades afetadas" value={stats.entities} /><KpiCard label="Ações admin" value={stats.admins} /><KpiCard label="Eventos sistema" value={stats.system} /></div>
-      <section className="panel filters"><div className="form-grid"><label>🔎 Pesquisar<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Mensagem, operador, entidade, ação..." /></label><label>Ação<select value={action} onChange={(e) => setAction(e.target.value)}><option value="">Todas</option>{actionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Entidade<select value={entity} onChange={(e) => setEntity(e.target.value)}><option value="">Todas</option>{entityOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-action"><span>&nbsp;</span><button onClick={load}>Aplicar filtros</button></label></div></section>
+      <section className="panel filters"><div className="form-grid"><label>🔎 Pesquisar<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Mensagem, operador, entidade, ação..." /></label><label>Ação<select value={action} onChange={(e) => setAction(e.target.value)}><option value="">Todas</option>{actionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Entidade<select value={entity} onChange={(e) => setEntity(e.target.value)}><option value="">Todas</option>{entityOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-action"><span>&nbsp;</span><button onClick={() => load(1)} disabled={loading}>{loading ? 'Carregando...' : 'Aplicar filtros'}</button></label></div></section>
       <section className="panel audit-grid">
         <div className="timeline audit-timeline">
           {filtered.map((log) => <button type="button" className="event audit-event" key={log.id} onClick={() => openAuditDetails(log)}><strong>{iconFor(log.action)} {log.message}</strong><span>{log.action} • {log.entity} #{log.entityId || '-'} • {dt(log.createdAt)}</span><small>{log.actor?.name || 'Sistema'} {log.actor?.role ? `• ${log.actor.role}` : ''}</small></button>)}
@@ -268,6 +274,7 @@ export default function Audit() {
             <li>Exportação para análise externa no Excel.</li>
           </ul>
         </aside>
+        <div style={{ gridColumn: '1 / -1' }}><Pagination {...pagination} page={page} loading={loading} onPageChange={load} /></div>
       </section>
       <DetailsModal open={!!details} title="🔎 Detalhes do evento de auditoria" onClose={() => setDetails(null)}>
         {details && <div className="audit-detail-grid"><DetailGrid fields={[["Data", dt(details.createdAt)], ["Ação", details.action], ["Entidade", details.entity], ["ID", details.entityId], ["Mensagem", details.message], ["Operador", details.actor?.name || 'Sistema'], ["E-mail", details.actor?.email], ["Perfil", details.actor?.role], ["IP", details.ip || '-']]} /><AuditChangeView beforeData={details.beforeData} afterData={details.afterData} /></div>}

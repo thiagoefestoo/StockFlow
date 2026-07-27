@@ -1,7 +1,8 @@
 const { Op } = require('sequelize');
 const { AuditLog, User } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { ok } = require('../utils/response');
+const { ok, okPaginated } = require('../utils/response');
+const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 
 exports.list = asyncHandler(async (req, res) => {
   const where = {};
@@ -16,15 +17,22 @@ exports.list = asyncHandler(async (req, res) => {
       { action: { [Op.iLike]: q } },
     ];
   }
-  const limit = Math.min(Number(req.query.limit || 1200), 3000);
-  const logs = await AuditLog.findAll({
-    attributes: { exclude: ['beforeData', 'afterData'] },
-    include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
-    where,
-    order: [['createdAt', 'DESC']],
-    limit,
-  });
-  return ok(res, logs);
+  const pagination = paginationFromQuery(req.query);
+  const limit = pagination.enabled ? pagination.limit : Math.min(Number(req.query.limit || 1200), 3000);
+  const [logs, total] = await Promise.all([
+    AuditLog.findAll({
+      attributes: { exclude: ['beforeData', 'afterData'] },
+      include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
+      where,
+      order: [['createdAt', 'DESC']],
+      limit,
+      ...(pagination.enabled ? { offset: pagination.offset } : {}),
+    }),
+    pagination.enabled ? AuditLog.count({ where }) : Promise.resolve(0),
+  ]);
+  return pagination.enabled
+    ? okPaginated(res, logs, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, logs);
 });
 
 exports.get = asyncHandler(async (req, res) => {

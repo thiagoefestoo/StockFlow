@@ -2,7 +2,8 @@ const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const { Transfer, TransferItem, Technician, Material, SerializedAsset, StockMovement, Warehouse, MaterialRequest, MaterialRequestItem, Notification, TechnicianTool } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { ok, created, fail } = require('../utils/response');
+const { ok, okPaginated, created, fail } = require('../utils/response');
+const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
@@ -120,14 +121,20 @@ exports.list = asyncHandler(async (req, res) => {
       ],
     };
   }
-  const transfers = await Transfer.findAll({
-    where,
-    attributes: { exclude: ['attachmentData'] },
-    include: transferInclude,
-    order: [['deliveredAt', 'DESC']],
-    limit: 300,
-  });
-  return ok(res, transfers);
+  const pagination = paginationFromQuery(req.query);
+  const [transfers, total] = await Promise.all([
+    Transfer.findAll({
+      where,
+      attributes: { exclude: ['attachmentData'] },
+      include: transferInclude,
+      order: [['deliveredAt', 'DESC']],
+      ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 300 }),
+    }),
+    pagination.enabled ? Transfer.count({ where }) : Promise.resolve(0),
+  ]);
+  return pagination.enabled
+    ? okPaginated(res, transfers, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, transfers);
 });
 
 exports.get = asyncHandler(async (req, res) => {

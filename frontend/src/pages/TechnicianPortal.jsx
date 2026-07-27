@@ -4,13 +4,12 @@ import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
-import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
+import { formatQuantity } from '../utils/formatQuantity';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial } from '../utils/serviceOrderRules';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 
 const emptyForm = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', addressChangeType: '', notes: '', materials: [] };
 
-function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function statusLabel(value) { return ({ pendente_aprovacao: 'Pendente aprovação', aprovado: 'Aprovado', entregue: 'Entregue', reprovado: 'Reprovado', cancelado: 'Cancelado' }[value] || value || '-'); }
 
 export default function TechnicianPortal() {
@@ -24,6 +23,7 @@ export default function TechnicianPortal() {
   const [message, setMessage] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [serialSearches, setSerialSearches] = useState({});
 
   async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data); }
   async function loadStock(id = selectedTech) {
@@ -46,7 +46,7 @@ export default function TechnicianPortal() {
 
   function addMaterial() { setForm({ ...form, materials: [...form.materials, { materialId: '', quantity: 1, serialNumbers: [] }] }); }
   function removeMaterial(i) { setForm({ ...form, materials: form.materials.filter((_, index) => index !== i) }); }
-  function updateMat(i, patch) { const next = [...form.materials]; next[i] = { ...next[i], ...patch }; setForm({ ...form, materials: next }); }
+  function updateMat(i, patch) { const next = [...form.materials]; next[i] = { ...next[i], ...patch }; setForm({ ...form, materials: next }); if (Object.prototype.hasOwnProperty.call(patch, 'materialId')) setSerialSearches((current) => ({ ...current, [i]: '' })); }
   function toggleSingleSerial(i, serialNumber) {
     const next = form.materials.map((item, index) => {
       if (index !== i) return { ...item, serialNumbers: [] };
@@ -141,7 +141,9 @@ export default function TechnicianPortal() {
           const material = materials.find((x) => Number(x.id) === Number(item.materialId));
           const usedSerials = selectedSerialsExcept(form.materials, i);
           const serials = serialByMaterial(item.materialId).filter((asset) => !usedSerials.has(String(asset.serialNumber || '').trim().toUpperCase()));
-          return <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeMaterial(i)}>Remover</button></div><label>Material<select value={item.materialId} onChange={(e) => updateMat(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{optionsWithoutSelected(materials, form.materials, i).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>{material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><div className="serial-list">{serials.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{asset.Material?.name || material.name} • {asset.status || 'com_tecnico'}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!serials.length && <div className="empty-state small">Nenhum serial deste material está na sua caixa.</div>}</div> : <label>Quantidade<input type="number" value={item.quantity} onChange={(e) => updateMat(i, { quantity: e.target.value })} /></label>}</div>;
+          const serialSearch = String(serialSearches[i] || '').trim().toLowerCase();
+          const filteredSerials = serials.filter((asset) => !serialSearch || [asset.serialNumber, asset.mac, asset.id, asset.Material?.name].some((value) => String(value || '').toLowerCase().includes(serialSearch)));
+          return <div className="item-card" key={i}><div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeMaterial(i)}>Remover</button></div><label>Material<select value={item.materialId} onChange={(e) => updateMat(i, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{optionsWithoutSelected(materials, form.materials, i).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>{material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><input className="serial-search-input" value={serialSearches[i] || ''} onChange={(e) => setSerialSearches((current) => ({ ...current, [i]: e.target.value }))} placeholder="Buscar por serial, patrimônio ou MAC" /><div className="serial-list">{filteredSerials.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>Patrimônio #{asset.id} • {asset.Material?.name || material.name}{asset.mac ? ` • MAC ${asset.mac}` : ''}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!filteredSerials.length && <div className="empty-state small">{serialSearch ? 'Nenhum serial corresponde à busca.' : 'Nenhum serial deste material está na sua caixa.'}</div>}</div> : <label>Quantidade<input type="number" value={item.quantity} onChange={(e) => updateMat(i, { quantity: e.target.value })} /></label>}</div>;
         })}
         <button onClick={review} className="wide">Revisar baixa da OS</button>
       </section>

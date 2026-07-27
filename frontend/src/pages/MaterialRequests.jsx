@@ -6,7 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import Pagination from '../components/Pagination';
+import { formatQuantity, formatQuantityInput } from '../utils/formatQuantity';
 import { MATERIAL_REQUEST_JUSTIFICATION_OPTIONS } from '../constants/operationOptions';
 import FloatingAlert from '../components/FloatingAlert';
 import { duplicateItemIds, optionsWithoutSelected } from '../utils/operationSelections';
@@ -53,28 +54,35 @@ export default function MaterialRequests() {
   const [statusFilter, setStatusFilter] = useState('');
   const [confirmRequestOpen, setConfirmRequestOpen] = useState(false);
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(false);
 
-  async function load() {
+  async function load(targetPage = page, refreshReferences = false) {
+    setLoading(true);
     try {
       setMessage({ text: '', type: 'danger' });
-      const reqUrl = statusFilter ? `/material-requests?status=${statusFilter}` : '/material-requests';
-      const [reqRes, matRes, sumRes, whRes] = await Promise.all([
-        api.get(reqUrl),
-        api.get('/materials'),
-        api.get('/material-requests/summary'),
-        api.get('/warehouses?operationalOnly=true'),
-      ]);
+      const listRequest = api.get('/material-requests', { params: { status: statusFilter || undefined, page: targetPage, pageSize: 15 } });
+      const requestsToRun = [listRequest, api.get('/material-requests/summary')];
+      if (refreshReferences || !materials.length || !warehouses.length) {
+        requestsToRun.push(api.get('/materials'), api.get('/warehouses?operationalOnly=true'));
+      }
+      const [reqRes, sumRes, matRes, whRes] = await Promise.all(requestsToRun);
       setRequests(reqRes.data.data || []);
-      setMaterials(matRes.data.data || []);
+      setPagination(reqRes.data.pagination || { page: targetPage, pageSize: 15, total: reqRes.data.data?.length || 0, totalPages: 1 });
       setSummary(sumRes.data.data || {});
-      setWarehouses(whRes.data.data || []);
-      if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []);
+      if (matRes) setMaterials(matRes.data.data || []);
+      if (whRes) setWarehouses(whRes.data.data || []);
+      if ((refreshReferences || !technicians.length) && isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []);
+      setPage(targetPage);
     } catch (error) {
       setMessage({ text: error.response?.data?.message || error.message || 'Erro ao carregar solicitações.', type: 'danger' });
+    } finally {
+      setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { load(1, true); }, [statusFilter]);
 
   const totalValue = useMemo(() => requests.reduce((sum, r) => sum + Number(r.totalValue || 0), 0), [requests]);
   const requestReview = useMemo(() => {
@@ -280,12 +288,13 @@ export default function MaterialRequests() {
       <section className="panel">
         <div className="inline filters">
           <label>Status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="">Todos</option><option value="pendente_aprovacao">Pendente aprovação</option><option value="aprovado">Aprovado</option><option value="entregue">Entregue</option><option value="reprovado">Reprovado</option></select></label>
-          <button className="ghost" onClick={load}>Atualizar</button>
+          <button className="ghost" onClick={() => load(page)} disabled={loading}>{loading ? 'Atualizando...' : 'Atualizar'}</button>
         </div>
       </section>
 
       <section className="panel">
         <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <Pagination {...pagination} page={page} loading={loading} onPageChange={load} />
       </section>
 
       <Modal open={modal} title={isTechnician ? 'Solicitar material para minha caixa' : 'Nova solicitação de material'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button onClick={save}>Enviar solicitação</button></>}>

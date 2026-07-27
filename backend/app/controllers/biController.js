@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const { Op, fn, col } = require('sequelize');
 const {
   Material,
   SerializedAsset,
@@ -659,10 +659,40 @@ async function loadBiData(filters, requested = {}) {
   return { materials, batches, transfers, orders, movements, technicians, materialRequests, approvalRequests };
 }
 
+async function installedQuantitiesByMaterial(materials = [], stockPosition = null) {
+  const positionRows = new Map((stockPosition?.rows || []).map((row) => [Number(row.id), Number(row.clienteQty || 0)]));
+  const nonSerializedIds = materials.filter((material) => !material.requiresSerial).map((material) => Number(material.id)).filter(Number.isFinite);
+  const movementTotals = new Map();
+
+  if (nonSerializedIds.length) {
+    const rows = await StockMovement.findAll({
+      attributes: ['materialId', [fn('SUM', col('quantity')), 'installedQuantity']],
+      where: {
+        type: 'baixa_os',
+        toOwnerType: 'cliente',
+        materialId: { [Op.in]: nonSerializedIds },
+      },
+      group: ['materialId'],
+      raw: true,
+    });
+    rows.forEach((row) => movementTotals.set(Number(row.materialId), Number(row.installedQuantity || 0)));
+  }
+
+  const result = new Map();
+  materials.forEach((material) => {
+    const materialId = Number(material.id);
+    result.set(materialId, material.requiresSerial
+      ? Number(positionRows.get(materialId) || 0)
+      : Number(movementTotals.get(materialId) || 0));
+  });
+  return result;
+}
+
 async function summarizeMaterials(filters, materials = null, stockPosition = null) {
   const selectedMaterials = materials || (await Material.findAll({ attributes: materialAttributes(), order: [['name', 'ASC']] }))
     .filter((material) => materialMatches(material, { ...filters, search: '' }));
   const position = stockPosition || await calculateStockPosition(selectedMaterials, filters);
+  const installedByMaterial = await installedQuantitiesByMaterial(selectedMaterials, position);
   return position.rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -671,7 +701,7 @@ async function summarizeMaterials(filters, materials = null, stockPosition = nul
     requiresSerial: row.requiresSerial,
     estoque: row.estoqueQty,
     tecnico: row.tecnicoQty,
-    instalado: row.clienteQty,
+    instalado: money(installedByMaterial.get(Number(row.id)) || 0),
     manutencao: row.manutencaoQty,
     perdido: row.perdidoQty,
     valorTecnico: row.tecnicoValue,

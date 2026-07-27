@@ -1,8 +1,10 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState } from 'react';
 import api from '../services/api';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import Pagination from '../components/Pagination';
 import { formatQuantity } from '../utils/formatQuantity';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -18,33 +20,6 @@ function approvalTypeLabel(type) {
     stock_adjustment: 'Ajuste de estoque',
   };
   return labels[type] || String(type || '-').replace(/_/g, ' ');
-}
-function payloadLabel(key) {
-  const labels = {
-    requestId: 'Código interno',
-    requestNumber: 'Número da solicitação',
-    technicianId: 'ID do técnico',
-    technicianName: 'Técnico responsável',
-    serviceOrderNumber: 'Número da OS',
-    customerName: 'Cliente',
-    customerCpf: 'Número do contrato',
-    transferNumber: 'Guia de transferência',
-    materialName: 'Material',
-    serialNumber: 'Número de série',
-    quantity: 'Quantidade',
-    items: 'Itens solicitados',
-    warehouseName: 'Estoque/região',
-    fromWarehouseName: 'Estoque origem',
-    toWarehouseName: 'Estoque destino',
-    approvalReason: 'Motivo da aprovação',
-  };
-  return labels[key] || String(key || '').replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
-}
-function payloadValue(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  if (Array.isArray(value)) return value.length ? value.join(', ') : '-';
-  if (typeof value === 'object') return Object.entries(value).map(([key, item]) => `${payloadLabel(key)}: ${payloadValue(item)}`).join(' • ');
-  return String(value);
 }
 function OperationalInfo({ payload, requestDetails, operationalSummary }) {
   const summary = operationalSummary || {};
@@ -83,15 +58,24 @@ export default function Approvals() {
   const [decision, setDecision] = useState({ open: false, type: '', item: null, notes: '' });
   const [details, setDetails] = useState(null);
   const [deciding, setDeciding] = useState(false);
-  async function load() {
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(false);
+  async function load(targetPage = page) {
+    setLoading(true);
     try {
       setMessage('');
-      setApprovals((await api.get(status ? `/approvals?status=${status}` : '/approvals')).data.data);
+      const response = await api.get('/approvals', { params: { status: status || undefined, page: targetPage, pageSize: 15 } });
+      setApprovals(response.data.data || []);
+      setPagination(response.data.pagination || { page: targetPage, pageSize: 15, total: response.data.data?.length || 0, totalPages: 1 });
+      setPage(targetPage);
     } catch (error) {
       setMessage(error.response?.data?.message || 'Erro ao carregar aprovações.');
+    } finally {
+      setLoading(false);
     }
   }
-  useEffect(() => { load(); }, [status]);
+  useEffect(() => { load(1); }, [status]);
   function canApprove(item) {
     if (!item) return false;
     if (isAdmin) return true;
@@ -119,7 +103,7 @@ export default function Approvals() {
   const rejected = approvals.filter((a) => a.status === 'reprovado').length;
   return (
     <div className="page-grid erp-page">
-      <section className="toolbar"><div><span className="eyebrow">Governança operacional</span><h2>Central de aprovações</h2><p>Aprovações de solicitação de material, reposição de carga, separação e controle de exceções.</p></div><button onClick={load}>Atualizar</button></section>
+      <section className="toolbar"><div><span className="eyebrow">Governança operacional</span><h2>Central de aprovações</h2><p>Aprovações de solicitação de material, reposição de carga, separação e controle de exceções.</p></div><button onClick={() => load(page)} disabled={loading}>{loading ? 'Atualizando...' : 'Atualizar'}</button></section>
       {message && <div className="alert danger">{message}</div>}
       <div className="kpi-grid small"><KpiCard label="Pendentes" value={pending} tone={pending ? 'warning' : 'success'} /><KpiCard label="Aprovadas na visão" value={approved} tone="success" /><KpiCard label="Reprovadas na visão" value={rejected} /><KpiCard label="Meu limite de aprovação" value={isAdmin ? 'Sem limite' : brl(user?.approvalLimit)} tone={isAdmin || Number(user?.approvalLimit || 0) > 0 ? 'success' : 'warning'} /></div>
       <section className="panel"><label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="pendente">Pendentes</option><option value="aprovado">Aprovadas</option><option value="reprovado">Reprovadas</option><option value="">Todas</option></select></label></section>
@@ -143,6 +127,7 @@ export default function Approvals() {
           ))}
           {approvals.length === 0 && <div className="empty-state">Nenhuma aprovação encontrada nesse filtro.</div>}
         </div>
+        <Pagination {...pagination} page={page} loading={loading} onPageChange={load} />
       </section>
 
       <DetailsModal open={!!details} title={`Detalhes da aprovação ${details?.title || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details?.status === 'pendente' && <button disabled={!canApprove(details)} onClick={() => { setDecision({ open: true, type: 'approve', item: details, notes: '' }); setDetails(null); }}>Aprovar</button>}</>}>

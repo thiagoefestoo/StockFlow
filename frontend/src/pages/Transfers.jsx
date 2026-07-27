@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import api from '../services/api';
@@ -9,6 +10,7 @@ import { formatQuantity, formatQuantityInput, formatQuantityWithUnit } from '../
 import { TRANSFER_REASON_OPTIONS } from '../constants/operationOptions';
 import FloatingAlert from '../components/FloatingAlert';
 import OperationReviewModal from '../components/OperationReviewModal';
+import Pagination from '../components/Pagination';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import { getTransferAttachments, transferAttachmentSummary } from '../utils/transferAttachments';
 
@@ -100,7 +102,6 @@ export default function Transfers() {
   const [details, setDetails] = useState(null);
   const [edit, setEdit] = useState({ open: false, item: null, form: {} });
   const [form, setForm] = useState({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
-  const [assetSearch, setAssetSearch] = useState('');
   const [requestPrefilled, setRequestPrefilled] = useState(false);
   const [transferSearch, setTransferSearch] = useState('');
   const [transferStatusFilter, setTransferStatusFilter] = useState('');
@@ -117,6 +118,9 @@ export default function Transfers() {
   const [sourceTools, setSourceTools] = useState([]);
   const [sourceToolsLoading, setSourceToolsLoading] = useState(false);
   const [toolTransferSaving, setToolTransferSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
+  const [loadingList, setLoadingList] = useState(false);
 
   function showNotice(text, type = 'danger') {
     setNotice({ text, type });
@@ -131,20 +135,30 @@ export default function Transfers() {
     }
   }
 
-  async function load() {
+  async function load(targetPage = page, refreshReferences = false) {
+    setLoadingList(true);
     try {
-      const [t, tec, wh, requests] = await Promise.all([
-        api.get('/transfers'),
-        api.get('/technicians'),
-        api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
+      const calls = [
+        api.get('/transfers', { params: { page: targetPage, pageSize: 15 } }),
         api.get('/material-requests', { params: { status: 'aprovado', requestType: 'reposicao_carga' } }).catch(() => ({ data: { data: [] } })),
-      ]);
+      ];
+      if (refreshReferences || !technicians.length || !warehouses.length) {
+        calls.push(
+          api.get('/technicians'),
+          api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
+        );
+      }
+      const [t, requests, tec, wh] = await Promise.all(calls);
       setTransfers(t.data.data || []);
-      setTechnicians(tec.data.data || []);
-      setWarehouses(wh.data.data || []);
+      setPagination(t.data.pagination || { page: targetPage, pageSize: 15, total: t.data.data?.length || 0, totalPages: 1 });
       setApprovedRequests(requests.data.data || []);
+      if (tec) setTechnicians(tec.data.data || []);
+      if (wh) setWarehouses(wh.data.data || []);
+      setPage(targetPage);
     } catch (error) {
       showNotice(error.response?.data?.message || error.message || 'Não foi possível carregar as transferências.');
+    } finally {
+      setLoadingList(false);
     }
   }
 
@@ -195,7 +209,7 @@ export default function Transfers() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(1, true); }, []);
 
   useEffect(() => {
     const requestId = new URLSearchParams(location.search).get('requestId');
@@ -232,7 +246,6 @@ export default function Transfers() {
             } : null,
           })),
         });
-        setAssetSearch('');
         setModal(true);
         setRequestPrefilled(true);
         navigate('/transferencias', { replace: true });
@@ -281,7 +294,6 @@ export default function Transfers() {
   function openNewTransfer() {
     const firstActive = warehouses.find((warehouse) => warehouse.status === 'ativo') || warehouses[0];
     setForm({ warehouseId: firstActive ? String(firstActive.id) : '', technicianId: '', notes: '', materialRequestId: '', items: [] });
-    setAssetSearch('');
     setModal(true);
   }
 
@@ -451,7 +463,6 @@ export default function Transfers() {
         setReviewOpen(false);
         setModal(false);
         setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
-        setAssetSearch('');
         setWarehouseMaterials([]);
         setAvailableAssets([]);
         return;
@@ -466,8 +477,7 @@ export default function Transfers() {
       setReviewOpen(false);
       setModal(false);
       setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
-      setAssetSearch('');
-      setWarehouseMaterials([]);
+        setWarehouseMaterials([]);
       setAvailableAssets([]);
       showNotice(response.data?.message || 'Material transferido e guia gerada com sucesso.', 'success');
       await load();
@@ -723,7 +733,7 @@ export default function Transfers() {
         </div>
       </section>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}<Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>{zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
         <div className="transfer-wizard">
@@ -735,7 +745,7 @@ export default function Transfers() {
             <div><small>Limite sem aprovação</small><strong>{selectedTechnician ? brl(selectedTechnician.transferApprovalLimit ?? 500) : '-'}</strong><span>{selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500) ? 'Exige aprovação do administrador' : 'Liberação direta permitida'}</span></div>
           </section>
           <div className="form-grid">
-            <label>🏬 Estoque de origem<select disabled={requestLinked} value={form.warehouseId} onChange={(e) => { setForm({ ...form, warehouseId: e.target.value, items: [] }); setAssetSearch(''); }}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code}</option>)}</select></label>
+            <label>🏬 Estoque de origem<select disabled={requestLinked} value={form.warehouseId} onChange={(e) => { setForm({ ...form, warehouseId: e.target.value, items: [] }); }}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code}</option>)}</select></label>
             <label>👷 Técnico<select disabled={requestLinked} value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
             <label className="span-2">📝 Motivo/observação<input disabled={requestLinked} list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           </div>

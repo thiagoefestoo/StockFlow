@@ -4,10 +4,12 @@ import api from '../services/api';
 import KpiCard from '../components/KpiCard';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
+import Pagination from '../components/Pagination';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 
 const EMPTY_SEARCH_FIELDS = Array.from({ length: 10 }, () => '');
+const PAGE_SIZE = 15;
 
 export default function Patrimony() {
   const [assets, setAssets] = useState([]);
@@ -16,12 +18,25 @@ export default function Patrimony() {
   const [searchFields, setSearchFields] = useState(EMPTY_SEARCH_FIELDS);
   const [searching, setSearching] = useState(false);
   const [details, setDetails] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 1 });
+  const [loading, setLoading] = useState(false);
+  const [multiSearchActive, setMultiSearchActive] = useState(false);
 
-  async function load(params = {}) {
-    setAssets((await api.get('/stock/assets', { params })).data.data || []);
+  async function load(targetPage = page) {
+    setLoading(true);
+    try {
+      const response = await api.get('/stock/assets', { params: { page: targetPage, pageSize: PAGE_SIZE } });
+      setAssets(response.data.data || []);
+      setPagination(response.data.pagination || { page: targetPage, pageSize: PAGE_SIZE, total: response.data.data?.length || 0, totalPages: 1 });
+      setPage(targetPage);
+      setMultiSearchActive(false);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(1); }, []);
 
   function updateSearchField(index, value) {
     const next = [...searchFields];
@@ -42,9 +57,9 @@ export default function Patrimony() {
     setSearching(true);
     try {
       if (!terms.length) {
-        await load();
         setSerial('');
         setSearchModal(false);
+        await load(1);
         return;
       }
 
@@ -64,6 +79,9 @@ export default function Patrimony() {
       setSerial(terms.join(', '));
       setDetails(null);
       setSearchModal(false);
+      setMultiSearchActive(true);
+      setPage(1);
+      setPagination({ page: 1, pageSize: Math.max(found.length, 1), total: found.length, totalPages: 1 });
 
       if (!found.length) window.alert('Nenhum patrimônio encontrado para os seriais informados.');
     } finally {
@@ -74,11 +92,13 @@ export default function Patrimony() {
   function clearSearch() {
     setSearchFields(EMPTY_SEARCH_FIELDS);
     setSerial('');
-    load();
+    setDetails(null);
+    load(1);
   }
 
-  const total = assets.reduce((s, a) => s + Number(a.acquisitionCost || 0), 0);
+  const totalValueOnPage = assets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || 0), 0);
   const activeSearchCount = getSearchTerms().length;
+  const listedCount = multiSearchActive ? assets.length : Number(pagination.total || 0);
 
   return (
     <div className="page-grid">
@@ -94,14 +114,31 @@ export default function Patrimony() {
         </div>
       </div>
 
-      <div className="kpi-grid small"><KpiCard label="Equipamentos listados" value={assets.length} /><KpiCard label="Valor patrimonial" value={brl(total)} /><KpiCard label="Com técnicos" value={assets.filter((a) => a.ownerType === 'tecnico').length} /></div>
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Serial</th><th>Material</th><th>MAC</th><th>Status</th><th>Responsável</th><th>Cliente</th><th>Dias carga</th><th>Valor</th><th className="action-cell">Opções</th></tr></thead><tbody>{assets.map((a) => <tr key={a.id}><td>{a.serialNumber}</td><td>{a.Material?.name}</td><td>{a.mac || '-'}</td><td>{a.status}</td><td>{a.Technician?.name || a.Warehouse?.name || a.ownerType}</td><td>{a.customerName || '-'}</td><td>{a.custodyDays}</td><td>{brl(a.acquisitionCost)}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(a)}>Detalhes</button></div></td></tr>)}</tbody></table></div></section>
+      <div className="kpi-grid small">
+        <KpiCard label={multiSearchActive ? 'Equipamentos encontrados' : 'Equipamentos cadastrados'} value={listedCount} />
+        <KpiCard label="Valor da página" value={brl(totalValueOnPage)} />
+        <KpiCard label="Com técnicos na página" value={assets.filter((asset) => asset.ownerType === 'tecnico').length} />
+      </div>
+
+      <section className="panel">
+        {loading && <div className="loading-state">Carregando patrimônios...</div>}
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Serial</th><th>Material</th><th>MAC</th><th>Status</th><th>Responsável</th><th>Cliente</th><th>Dias carga</th><th>Valor</th><th className="action-cell">Opções</th></tr></thead>
+            <tbody>
+              {!loading && !assets.length && <tr><td colSpan="9"><div className="empty-state">Nenhum patrimônio encontrado.</div></td></tr>}
+              {assets.map((asset) => <tr key={asset.id}><td>{asset.serialNumber}</td><td>{asset.Material?.name}</td><td>{asset.mac || '-'}</td><td>{asset.status}</td><td>{asset.Technician?.name || asset.Warehouse?.name || asset.ownerType}</td><td>{asset.customerName || '-'}</td><td>{asset.custodyDays}</td><td>{brl(asset.acquisitionCost)}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(asset)}>Detalhes</button></div></td></tr>)}
+            </tbody>
+          </table>
+        </div>
+        {!multiSearchActive && <Pagination {...pagination} page={page} loading={loading} onPageChange={load} />}
+      </section>
 
       <Modal open={searchModal} title="🔎 Buscar patrimônios" onClose={() => setSearchModal(false)} footer={<><button className="ghost" onClick={() => setSearchModal(false)}>Cancelar</button><button className="ghost" onClick={() => setSearchFields(EMPTY_SEARCH_FIELDS)}>Limpar campos</button><button onClick={runMultiSearch} disabled={searching}>{searching ? 'Buscando...' : `Buscar ${activeSearchCount || ''}`}</button></>}>
         <p className="muted">Digite até 10 seriais para consultar vários patrimônios de uma vez. O sistema ignora campos vazios e não repete resultados.</p>
         <div className="patrimony-search-grid">
           {searchFields.map((value, index) => (
-            <label key={index}>Serial {index + 1}<input value={value} onChange={(e) => updateSearchField(index, e.target.value)} placeholder={`Ex.: ONU-${String(index + 1).padStart(3, '0')}`} /></label>
+            <label key={index}>Serial {index + 1}<input value={value} onChange={(event) => updateSearchField(index, event.target.value)} placeholder={`Ex.: ONU-${String(index + 1).padStart(3, '0')}`} /></label>
           ))}
         </div>
       </Modal>

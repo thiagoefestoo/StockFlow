@@ -163,16 +163,23 @@ exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.query.status) where.status = req.query.status;
   if (req.query.entityType) where.entityType = req.query.entityType;
-  const approvals = await ApprovalRequest.findAll({
-    where,
-    include: [
-      { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
-      { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
-    ],
-    order: [['requestedAt', 'DESC']],
-    limit: 500,
-  });
-  return ok(res, await Promise.all(approvals.map(enrichApproval)));
+  const pagination = paginationFromQuery(req.query);
+  const [approvals, total] = await Promise.all([
+    ApprovalRequest.findAll({
+      where,
+      include: [
+        { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
+        { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
+      ],
+      order: [['requestedAt', 'DESC']],
+      ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 500 }),
+    }),
+    pagination.enabled ? ApprovalRequest.count({ where }) : Promise.resolve(0),
+  ]);
+  const data = await Promise.all(approvals.map(enrichApproval));
+  return pagination.enabled
+    ? okPaginated(res, data, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, data);
 });
 
 exports.get = asyncHandler(async (req, res) => {
