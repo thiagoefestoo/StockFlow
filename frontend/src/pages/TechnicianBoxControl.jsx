@@ -50,7 +50,6 @@ export default function TechnicianBoxControl() {
     const warehouseList = whRes.data.data || [];
     setTechnicians(list);
     setWarehouses(warehouseList);
-    if (!selectedTech && list[0]) setSelectedTech(String(list[0].id));
     if (!returnForm.warehouseId && warehouseList[0]) setReturnForm((current) => ({ ...current, warehouseId: String(warehouseList[0].id) }));
   }
 
@@ -67,7 +66,15 @@ export default function TechnicianBoxControl() {
   }
 
   useEffect(() => { loadTechs(); }, []);
-  useEffect(() => { if (selectedTech) loadBox(selectedTech); }, [selectedTech]);
+  useEffect(() => {
+    if (selectedTech) {
+      loadBox(selectedTech);
+      return;
+    }
+
+    setBox(null);
+    setLastBoxRefresh(null);
+  }, [selectedTech]);
 
   useEffect(() => {
     if (!selectedTech) return undefined;
