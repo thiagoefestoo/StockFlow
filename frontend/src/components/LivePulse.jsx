@@ -10,8 +10,10 @@ export default function LivePulse() {
 
   async function load() {
     try {
-      const notificationReq = api.get('/notifications');
-      const cockpitReq = isSupervisor ? api.get('/operations/cockpit') : Promise.resolve({ data: { data: null } });
+      const notificationReq = api.getCached('/notifications', { params: { limit: 20 } }, 60000);
+      const cockpitReq = isSupervisor
+        ? api.getCached('/operations/cockpit', { params: { summaryOnly: true } }, 60000)
+        : Promise.resolve({ data: { data: null } });
       const [n, c] = await Promise.all([notificationReq, cockpitReq]);
       setNotifications(n.data.data || { unread: 0, notifications: [] });
       setCockpit(c.data.data);
@@ -20,8 +22,11 @@ export default function LivePulse() {
   }
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, 45000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    refreshWhenVisible();
+    const id = setInterval(refreshWhenVisible, 120000);
     return () => clearInterval(id);
   }, [isSupervisor]);
 

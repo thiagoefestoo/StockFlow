@@ -12,17 +12,32 @@ const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation
 
 exports.list = asyncHandler(async (req, res) => {
   const where = stockWhereForUser(req.user, req.query.warehouseId);
+  const limit = Math.min(Math.max(Number(req.query.limit || 150), 1), 300);
   const batches = await StockBatch.findAll({
+    where,
+    attributes: { exclude: ['proofAttachmentData'] },
+    include: [
+      { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
+      Warehouse,
+    ],
+    order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
+    limit,
+  });
+  return ok(res, batches);
+});
+
+exports.get = asyncHandler(async (req, res) => {
+  const where = { ...stockWhereForUser(req.user), id: req.params.id };
+  const batch = await StockBatch.findOne({
     where,
     include: [
       { model: StockBatchItem, include: [Material] },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
       Warehouse,
     ],
-    order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
-    limit: 400,
   });
-  return ok(res, batches);
+  if (!batch) return fail(res, 404, 'Entrada de estoque não encontrada ou sem acesso.');
+  return ok(res, batch);
 });
 
 exports.create = asyncHandler(async (req, res) => {
@@ -183,11 +198,11 @@ exports.create = asyncHandler(async (req, res) => {
       entity: 'StockBatch',
       entityId: batch.id,
       message: `Entrada de estoque ${receiptNumber} confirmada com comprovante ${proofAttachmentName}.`,
-      afterData: batch.toJSON(),
+      afterData: { ...batch.toJSON(), proofAttachmentData: undefined },
       transaction,
     });
     return batch;
   });
 
-  return created(res, result, 'Entrada de estoque registrada com documento comprobatório.');
+  return created(res, { ...result.toJSON(), proofAttachmentData: undefined }, 'Entrada de estoque registrada com documento comprobatório.');
 });

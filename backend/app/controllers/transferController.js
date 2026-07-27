@@ -71,7 +71,13 @@ exports.list = asyncHandler(async (req, res) => {
       ],
     };
   }
-  const transfers = await Transfer.findAll({ where, include: transferInclude, order: [['deliveredAt', 'DESC']], limit: 300 });
+  const transfers = await Transfer.findAll({
+    where,
+    attributes: { exclude: ['attachmentData'] },
+    include: transferInclude,
+    order: [['deliveredAt', 'DESC']],
+    limit: 300,
+  });
   return ok(res, transfers);
 });
 
@@ -425,21 +431,22 @@ exports.transferTools = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id, { include: transferInclude });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
-  const before = transfer.toJSON();
+  const before = { ...transfer.toJSON(), attachmentData: undefined };
   const { notes, status, deliveredAt, signatureResponsible } = req.body;
   if (notes !== undefined) transfer.notes = notes;
   if (status !== undefined) transfer.status = status;
   if (deliveredAt !== undefined) transfer.deliveredAt = deliveredAt;
   if (signatureResponsible !== undefined) transfer.signatureResponsible = signatureResponsible;
   await transfer.save();
-  await writeAudit({ req, action: 'update', entity: 'Transfer', entityId: transfer.id, message: `Guia ${transfer.transferNumber} editada.`, beforeData: before, afterData: transfer.toJSON() });
-  return ok(res, transfer, 'Transferência atualizada.');
+  const safeTransfer = { ...transfer.toJSON(), attachmentData: undefined };
+  await writeAudit({ req, action: 'update', entity: 'Transfer', entityId: transfer.id, message: `Guia ${transfer.transferNumber} editada.`, beforeData: before, afterData: safeTransfer });
+  return ok(res, safeTransfer, 'Transferência atualizada.');
 });
 
 exports.sign = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id);
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
-  const before = transfer.toJSON();
+  const before = { ...transfer.toJSON(), attachmentData: undefined };
   const { attachmentName, attachmentData, signatureResponsible } = req.body;
   transfer.status = 'assinado';
   transfer.signedAt = new Date();
@@ -447,6 +454,7 @@ exports.sign = asyncHandler(async (req, res) => {
   transfer.attachmentData = attachmentData || transfer.attachmentData;
   transfer.signatureResponsible = signatureResponsible || transfer.signatureResponsible;
   await transfer.save();
-  await writeAudit({ req, action: 'sign', entity: 'Transfer', entityId: transfer.id, message: `Guia ${transfer.transferNumber} assinada/anexada.`, beforeData: before, afterData: transfer.toJSON() });
-  return ok(res, transfer, 'Assinatura/anexo registrado.');
+  const safeTransfer = { ...transfer.toJSON(), attachmentData: undefined };
+  await writeAudit({ req, action: 'sign', entity: 'Transfer', entityId: transfer.id, message: `Guia ${transfer.transferNumber} assinada/anexada.`, beforeData: before, afterData: safeTransfer });
+  return ok(res, safeTransfer, 'Assinatura/anexo registrado.');
 });

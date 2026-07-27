@@ -425,6 +425,7 @@ exports.losses = asyncHandler(async (req, res) => {
   if (req.query.technicianId) where.technicianId = req.query.technicianId;
   const rows = await Transfer.findAll({
     where,
+    attributes: { exclude: ['attachmentData'] },
     include: [
       Technician,
       Warehouse,

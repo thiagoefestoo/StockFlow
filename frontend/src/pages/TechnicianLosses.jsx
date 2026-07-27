@@ -47,6 +47,15 @@ export default function TechnicianLosses() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  async function openLossDetails(loss) {
+    try {
+      const response = await api.get(`/transfers/${loss.id}`);
+      setDetails(response.data.data);
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Não foi possível carregar os detalhes da perda.');
+    }
+  }
+
   async function load() {
     const [techRes, lossRes] = await Promise.all([
       api.get('/technicians'),
@@ -332,8 +341,8 @@ export default function TechnicianLosses() {
                 <td>{formatQuantity(loss.totalQuantity)}</td>
                 <td>{brl(loss.totalValue)}</td>
                 <td><span className={`badge ${loss.status}`}>{loss.status}</span></td>
-                <td>{loss.attachmentName ? <AttachmentPreview compact name={loss.attachmentName} data={loss.attachmentData} /> : <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
-                <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(loss)}>Detalhes</button><Link className="ghost" to={`/perdas-tecnico/${loss.id}`}>Guia</Link></div></td>
+                <td>{loss.attachmentName ? <span className="badge success">Anexado</span> : <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
+                <td><div className="action-toolbar"><button className="info" onClick={() => openLossDetails(loss)}>Detalhes</button><Link className="ghost" to={`/perdas-tecnico/${loss.id}`}>Guia</Link></div></td>
               </tr>)}
               {!losses.length && <tr><td colSpan="9"><div className="empty-state">Nenhuma perda registrada.</div></td></tr>}
             </tbody>

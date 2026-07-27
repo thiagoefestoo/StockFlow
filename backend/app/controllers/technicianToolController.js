@@ -27,12 +27,11 @@ function estimatedDataUrlBytes(dataUrl) {
   return Math.ceil(payload.length * 0.75);
 }
 
-function publicDocument(document) {
+function publicDocument(document, includeData = false) {
   if (!document) return null;
-  return {
-    ...document.toJSON(),
-    documentData: document.documentData,
-  };
+  const payload = document.toJSON();
+  if (!includeData) delete payload.documentData;
+  return payload;
 }
 
 async function activeSerialExists(serialNumber, excludeId = null) {
@@ -225,6 +224,7 @@ exports.listDocuments = asyncHandler(async (req, res) => {
 
   const documents = await TechnicianToolDocument.findAll({
     where: { technicianId: technician.id },
+    attributes: { exclude: ['documentData'] },
     include: [{ model: User, as: 'createdBy', attributes: ['id', 'name', 'email'] }],
     order: [['signedAt', 'DESC'], ['createdAt', 'DESC']],
   });
@@ -234,6 +234,21 @@ exports.listDocuments = asyncHandler(async (req, res) => {
     documents: documents.map(publicDocument),
     count: documents.length,
   });
+});
+
+exports.getDocument = asyncHandler(async (req, res) => {
+  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  if (!technician) return;
+  if (req.user?.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
+    return fail(res, 403, 'Você só pode acessar os documentos do próprio cadastro.');
+  }
+
+  const document = await TechnicianToolDocument.findOne({
+    where: { id: req.params.documentId, technicianId: technician.id },
+    include: [{ model: User, as: 'createdBy', attributes: ['id', 'name', 'email'] }],
+  });
+  if (!document) return fail(res, 404, 'Termo assinado não encontrado nesta ficha.');
+  return ok(res, publicDocument(document, true));
 });
 
 exports.uploadDocument = asyncHandler(async (req, res) => {

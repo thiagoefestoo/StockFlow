@@ -33,18 +33,21 @@ export default function Layout() {
 
   async function loadPendingMenu() {
     try {
-      const res = await api.get('/operations/pending-menu');
+      const res = await api.getCached('/operations/pending-menu', {}, 60000);
       setPendingMenu(res.data.data || { total: 0, routes: {} });
     } catch (_) {}
   }
 
   useEffect(() => {
-    loadPendingMenu();
-    const id = setInterval(loadPendingMenu, 30000);
-    window.addEventListener('focus', loadPendingMenu);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') loadPendingMenu();
+    };
+    refreshWhenVisible();
+    const id = setInterval(refreshWhenVisible, 120000);
+    window.addEventListener('focus', refreshWhenVisible);
     return () => {
       clearInterval(id);
-      window.removeEventListener('focus', loadPendingMenu);
+      window.removeEventListener('focus', refreshWhenVisible);
     };
   }, [user?.id, user?.role]);
 

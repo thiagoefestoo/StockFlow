@@ -183,6 +183,15 @@ export default function Audit() {
   const [details, setDetails] = useState(null);
   const [message, setMessage] = useState('');
 
+  async function openAuditDetails(log) {
+    try {
+      const response = await api.get(`/audit/${log.id}`);
+      setDetails(response.data.data);
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Erro ao carregar os detalhes da auditoria.');
+    }
+  }
+
   async function load() {
     try {
       setMessage('');
@@ -246,7 +255,7 @@ export default function Audit() {
       <section className="panel filters"><div className="form-grid"><label>🔎 Pesquisar<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Mensagem, operador, entidade, ação..." /></label><label>Ação<select value={action} onChange={(e) => setAction(e.target.value)}><option value="">Todas</option>{actionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label>Entidade<select value={entity} onChange={(e) => setEntity(e.target.value)}><option value="">Todas</option>{entityOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-action"><span>&nbsp;</span><button onClick={load}>Aplicar filtros</button></label></div></section>
       <section className="panel audit-grid">
         <div className="timeline audit-timeline">
-          {filtered.map((log) => <button type="button" className="event audit-event" key={log.id} onClick={() => setDetails(log)}><strong>{iconFor(log.action)} {log.message}</strong><span>{log.action} • {log.entity} #{log.entityId || '-'} • {dt(log.createdAt)}</span><small>{log.actor?.name || 'Sistema'} {log.actor?.role ? `• ${log.actor.role}` : ''}</small></button>)}
+          {filtered.map((log) => <button type="button" className="event audit-event" key={log.id} onClick={() => openAuditDetails(log)}><strong>{iconFor(log.action)} {log.message}</strong><span>{log.action} • {log.entity} #{log.entityId || '-'} • {dt(log.createdAt)}</span><small>{log.actor?.name || 'Sistema'} {log.actor?.role ? `• ${log.actor.role}` : ''}</small></button>)}
           {filtered.length === 0 && <div className="empty-state">Nenhum evento encontrado para os filtros selecionados.</div>}
         </div>
         <aside className="audit-side panel-soft">

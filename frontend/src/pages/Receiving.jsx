@@ -68,6 +68,7 @@ export default function Receiving() {
   const [form, setForm] = useState(emptyForm());
   const [modal, setModal] = useState(false);
   const [details, setDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -90,6 +91,19 @@ export default function Receiving() {
     totalItems: operationalBatches.reduce((sum, batch) => sum + Number(batch.totalItems || 0), 0),
     withProof: operationalBatches.filter((batch) => batch.proofAttachmentName).length,
   }), [operationalBatches]);
+
+  async function openBatchDetails(batch) {
+    setDetailsLoading(true);
+    setMessage('');
+    try {
+      const response = await api.get(`/batches/${batch.id}`);
+      setDetails(response.data.data);
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Não foi possível carregar os detalhes da entrada.');
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
 
   function addItem() {
     setForm({
@@ -245,7 +259,7 @@ export default function Receiving() {
     <section className="toolbar"><div><span className="eyebrow">Entrada fiscal e logística</span><h2>Entrada completa de material</h2><p>Registre materiais diretamente no estoque regional de destino, com documento fiscal, valor obrigatório e seriais conferidos.</p></div><button onClick={() => { setForm({ ...emptyForm(), warehouseId: warehouses[0]?.id || '' }); setModal(true); }}>Nova entrada</button></section>
     <FloatingAlert message={message} type={message.startsWith('Entrada registrada') || message.includes('serial(is) colado(s)') ? 'success' : 'danger'} onClose={() => setMessage('')} />
     <div className="kpi-grid small"><KpiCard label="Entradas operacionais" value={operationalBatches.length} /><KpiCard label="Itens recebidos" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor recebido" value={brl(totals.totalValue)} /><KpiCard label="Com comprovante" value={totals.withProof} /></div>
-    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td>{formatQuantity(b.totalItems)}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <AttachmentPreview compact name={b.proofAttachmentName} data={b.proofAttachmentData} /> : '-'}</td><td><button className="info" onClick={() => setDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div></section>
+    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td>{formatQuantity(b.totalItems)}</td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <span className="badge info">Anexo disponível</span> : '-'}</td><td><button className="info" disabled={detailsLoading} onClick={() => openBatchDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div></section>
 
     <Modal open={modal} title="Nova entrada com comprovante" onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>Revisar entrada</button></>}>
       <div className="form-stack receiving-form">

@@ -149,6 +149,23 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
 });
 
 exports.cockpit = asyncHandler(async (req, res) => {
+  if (String(req.query.summaryOnly || '').toLowerCase() === 'true') {
+    const [pendingApprovals, pendingSignatures, openOrders, unreadNotifications] = await Promise.all([
+      ApprovalRequest.count({ where: { status: 'pendente' } }),
+      Transfer.count({ where: { status: 'pendente_assinatura' } }),
+      ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
+      Notification.count({ where: { status: 'nao_lida' } }),
+    ]);
+    return ok(res, {
+      kpis: { pendingApprovals, pendingSignatures, openOrders, unreadNotifications },
+      queue: [],
+      custodyRanking: [],
+      recentMovements: [],
+      recentRequests: [],
+      summaryOnly: true,
+    });
+  }
+
   const today = new Date();
   const last30 = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
   const reverseIds = await reverseWarehouseIds();

@@ -48,8 +48,8 @@ export default function NotificationBell() {
     setError('');
     try {
       const [notificationResult, pendingResult] = await Promise.allSettled([
-        api.get('/notifications'),
-        api.get('/operations/pending-menu'),
+        api.getCached('/notifications', { params: { limit: 20 } }, 60000),
+        api.getCached('/operations/pending-menu', {}, 60000),
       ]);
 
       if (notificationResult.status === 'fulfilled') {
@@ -69,12 +69,15 @@ export default function NotificationBell() {
   }
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, 45000);
-    window.addEventListener('focus', load);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    refreshWhenVisible();
+    const id = setInterval(refreshWhenVisible, 120000);
+    window.addEventListener('focus', refreshWhenVisible);
     return () => {
       clearInterval(id);
-      window.removeEventListener('focus', load);
+      window.removeEventListener('focus', refreshWhenVisible);
     };
   }, []);
 

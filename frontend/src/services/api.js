@@ -63,9 +63,52 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// Cache curto e deduplicação de GETs idênticos. Isso evita que componentes globais
+// (menu, sino, pulso e permissões) consultem o banco várias vezes para o mesmo dado.
+const getCache = new Map();
+const getInFlight = new Map();
+
+function stableSerialize(value) {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${key}:${stableSerialize(value[key])}`).join(',')}}`;
+  }
+  return String(value);
+}
+
+function getCacheKey(url, config = {}) {
+  return `${url}|${stableSerialize(config.params || {})}`;
+}
+
+api.getCached = function getCached(url, config = {}, ttlMs = 30000) {
+  const key = getCacheKey(url, config);
+  const now = Date.now();
+  const cached = getCache.get(key);
+  if (cached && cached.expiresAt > now) return Promise.resolve(cached.response);
+  if (getInFlight.has(key)) return getInFlight.get(key);
+
+  const request = api.get(url, config)
+    .then((response) => {
+      getCache.set(key, { response, expiresAt: Date.now() + Math.max(0, Number(ttlMs || 0)) });
+      return response;
+    })
+    .finally(() => getInFlight.delete(key));
+
+  getInFlight.set(key, request);
+  return request;
+};
+
+api.clearGetCache = function clearGetCache(prefix = '') {
+  for (const key of getCache.keys()) {
+    if (!prefix || key.startsWith(prefix)) getCache.delete(key);
+  }
+};
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('telecomstock_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (String(config.method || 'get').toLowerCase() !== 'get') api.clearGetCache();
   return config;
 });
 

@@ -16,8 +16,24 @@ function visibilityWhere(user) {
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const notifications = await Notification.findAll({ where: { ...visibilityWhere(req.user), status: { [Op.ne]: 'arquivada' } }, order: [['createdAt', 'DESC']], limit: 100 });
-  const unread = notifications.filter((n) => n.status === 'nao_lida').length;
+  const where = { ...visibilityWhere(req.user), status: { [Op.ne]: 'arquivada' } };
+  const unreadWhere = { ...visibilityWhere(req.user), status: 'nao_lida' };
+
+  if (String(req.query.summaryOnly || '').toLowerCase() === 'true') {
+    const unread = await Notification.count({ where: unreadWhere });
+    return ok(res, { unread, notifications: [] });
+  }
+
+  const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 50);
+  const [notifications, unread] = await Promise.all([
+    Notification.findAll({
+      where,
+      attributes: ['id', 'type', 'severity', 'title', 'message', 'status', 'route', 'createdAt'],
+      order: [['createdAt', 'DESC']],
+      limit,
+    }),
+    Notification.count({ where: unreadWhere }),
+  ]);
   return ok(res, { unread, notifications });
 });
 

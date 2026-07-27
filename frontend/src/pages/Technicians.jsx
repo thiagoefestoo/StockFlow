@@ -76,6 +76,8 @@ export default function Technicians() {
   const [removeSaving, setRemoveSaving] = useState(false);
   const [removeError, setRemoveError] = useState('');
   const [toolDocuments, setToolDocuments] = useState([]);
+  const [documentPreview, setDocumentPreview] = useState(null);
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentModal, setDocumentModal] = useState(false);
   const [documentForm, setDocumentForm] = useState(emptyToolDocument);
   const [documentSaving, setDocumentSaving] = useState(false);
@@ -307,6 +309,20 @@ export default function Technicians() {
     }
   }
 
+  async function openToolDocument(document) {
+    if (!details.technician) return;
+    setDocumentPreviewLoading(true);
+    setDocumentError('');
+    try {
+      const response = await api.get(`/technicians/${details.technician.id}/tools/documents/${document.id}`);
+      setDocumentPreview(response.data.data);
+    } catch (err) {
+      setDocumentError(err.response?.data?.message || 'Não foi possível abrir o termo assinado.');
+    } finally {
+      setDocumentPreviewLoading(false);
+    }
+  }
+
   async function deleteToolDocument(document) {
     if (!details.technician || !window.confirm(`Remover o termo "${document.documentName}" da ficha?`)) return;
     setDocumentError('');
@@ -478,8 +494,7 @@ export default function Technicians() {
                   <b>{document.documentName}</b>
                   <span>Assinado em {dt(document.signedAt)} • anexado por {document.createdBy?.name || 'usuário'} • {formatQuantity(document.toolCount || 0)} ferramenta(s) • {brl(document.totalValue)}</span>
                   {document.notes && <small>{document.notes}</small>}
-                  <AttachmentPreview compact name={document.documentName} data={document.documentData} label="Termo assinado" />
-                  {canEditTools && <div className="action-toolbar"><button className="ghost danger-outline" onClick={() => deleteToolDocument(document)}>Remover documento</button></div>}
+                  <div className="action-toolbar"><button className="ghost" disabled={documentPreviewLoading} onClick={() => openToolDocument(document)}>Visualizar documento</button>{canEditTools && <button className="ghost danger-outline" onClick={() => deleteToolDocument(document)}>Remover documento</button>}</div>
                 </div>
               ))}
             </section>
@@ -489,6 +504,10 @@ export default function Technicians() {
           <DetailList title="Histórico recente do técnico" items={details.stock?.movements || []} render={(m) => <><b>{m.type} • {m.reference || '-'}</b><span>{m.Material?.name || '-'} • qtd. {formatQuantity(m.quantity)} • {m.serialNumber || 'sem serial'} • {dt(m.movementAt)}</span><small>{m.fromTechnician?.name || m.fromOwnerType || '-'} → {m.toTechnician?.name || m.toOwnerType || '-'}</small></>} />
         </div>}
       </DetailsModal>
+
+      <Modal open={!!documentPreview} title={`Termo assinado: ${documentPreview?.documentName || ''}`} onClose={() => setDocumentPreview(null)} footer={<button className="ghost" onClick={() => setDocumentPreview(null)}>Fechar</button>}>
+        {documentPreview && <AttachmentPreview name={documentPreview.documentName} data={documentPreview.documentData} label="Termo assinado" />}
+      </Modal>
 
       <Modal open={toolModal} title={`Adicionar ferramenta: ${details.technician?.name || ''}`} onClose={() => setToolModal(false)} footer={<><button className="ghost" onClick={() => setToolModal(false)}>Cancelar</button><button disabled={toolSaving} onClick={saveTool}>{toolSaving ? 'Salvando...' : 'Registrar ferramenta'}</button></>}>
         <div className="form-stack">

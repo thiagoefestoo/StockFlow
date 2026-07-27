@@ -62,7 +62,10 @@ export default function TechnicianInbox() {
     if (!selectedTech) return undefined;
 
     const refresh = () => loadStock(selectedTech);
-    const interval = setInterval(refresh, 15000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const interval = setInterval(refreshWhenVisible, 60000);
     const onFocus = () => refresh();
     const onStorage = (event) => {
       if (event.key === 'superinfra:technician-box-refresh') refresh();

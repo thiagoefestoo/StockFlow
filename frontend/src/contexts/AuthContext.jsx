@@ -50,7 +50,7 @@ export function AuthProvider({ children }) {
 
     async function superinfraAutoRefreshPermissions() {
       try {
-        const { data } = await api.get('/auth/me');
+        const { data } = await api.getCached('/auth/me', {}, 120000);
         if (!cancelled && data?.data?.user) {
           updateUser(data.data.user);
         }
@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
     }
 
     superinfraAutoRefreshPermissions();
-    const id = setInterval(superinfraAutoRefreshPermissions, 60000);
+    const id = setInterval(superinfraAutoRefreshPermissions, 300000);
     window.addEventListener('focus', superinfraAutoRefreshPermissions);
 
     return () => {

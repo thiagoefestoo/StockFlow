@@ -18,10 +18,19 @@ exports.list = asyncHandler(async (req, res) => {
   }
   const limit = Math.min(Number(req.query.limit || 1200), 3000);
   const logs = await AuditLog.findAll({
+    attributes: { exclude: ['beforeData', 'afterData'] },
     include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
     where,
     order: [['createdAt', 'DESC']],
     limit,
   });
   return ok(res, logs);
+});
+
+exports.get = asyncHandler(async (req, res) => {
+  const log = await AuditLog.findByPk(req.params.id, {
+    include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
+  });
+  if (!log) return res.status(404).json({ success: false, message: 'Evento de auditoria não encontrado.' });
+  return ok(res, log);
 });
