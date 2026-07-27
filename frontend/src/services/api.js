@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { AUTH_SESSION_EXPIRED_EVENT, clearAuthSession, getAuthToken } from '../utils/authSession';
 
 function normalizeApiUrl(value) {
   const fallback = process.env.NODE_ENV === 'production' ? 'https://stockflow-backend-6gxl.onrender.com/api' : 'http://localhost:3000/api';
@@ -106,7 +107,8 @@ api.clearGetCache = function clearGetCache(prefix = '') {
 };
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('telecomstock_token');
+  const token = getAuthToken();
+  config.__hadAuthToken = !!token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   if (String(config.method || 'get').toLowerCase() !== 'get') api.clearGetCache();
   return config;
@@ -118,9 +120,11 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('telecomstock_token');
-      localStorage.removeItem('telecomstock_user');
+    if (error.response?.status === 401 && error.config?.__hadAuthToken) {
+      clearAuthSession();
+      window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT, {
+        detail: { message: 'Sua sessão expirou. Entre novamente.' },
+      }));
     }
     if (error.response?.status === 403) {
       window.dispatchEvent(new CustomEvent('superinfra:permission-denied', { detail: error.response?.data }));

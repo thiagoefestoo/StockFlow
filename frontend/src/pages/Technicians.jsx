@@ -7,6 +7,7 @@ import KpiCard from '../components/KpiCard';
 import AttachmentPreview from '../components/AttachmentPreview';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { prepareAuthSessionHandoff } from '../utils/authSession';
 
 const empty = {
   name: '',
@@ -457,7 +458,7 @@ export default function Technicians() {
               <div className="toolbar" style={{ marginBottom: '0.5rem' }}>
                 <h4 style={{ margin: 0 }}>Ferramentas sob custódia (fora da caixa técnica)</h4>
                 <div className="action-toolbar">
-                  {details.technician && <Link className="ghost" to={`/ferramentas-tecnico/${details.technician.id}`} target="_blank" rel="noreferrer">Gerar termo (imprimir)</Link>}
+                  {details.technician && <Link className="ghost" to={`/ferramentas-tecnico/${details.technician.id}`} target="_blank" rel="noreferrer" onClick={prepareAuthSessionHandoff}>Gerar termo (imprimir)</Link>}
                   {canEditTools && <button className="ghost" onClick={openDocumentUpload}>Anexar termo assinado</button>}
                   {canEditTools && <button onClick={openAddTool}>Adicionar ferramenta</button>}
                 </div>

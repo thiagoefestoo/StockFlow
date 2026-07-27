@@ -6,7 +6,7 @@ import SuperInfraLogo from '../components/SuperInfraLogo';
 const loginExample = 'usuario@exemplo.com';
 
 export default function Login() {
-  const { user, login, loading } = useAuth();
+  const { user, login, loading, sessionMessage, dismissSessionMessage, sessionIdleMinutes } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -14,6 +14,7 @@ export default function Login() {
 
   async function doLogin(loginEmail = email, loginPassword = password) {
     setError('');
+    dismissSessionMessage();
     try {
       await login(loginEmail, loginPassword);
     } catch (err) {
@@ -38,8 +39,10 @@ export default function Login() {
         <h1>Entrar</h1>
         <label>E-mail ou usuário<input value={email} onChange={(e) => setEmail(e.target.value)} name="superinfra_login_identifier" placeholder={loginExample} autoComplete="off" /></label>
         <label>Senha<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} name="superinfra_login_password" placeholder="Digite sua senha" autoComplete="new-password" /></label>
+        {sessionMessage && <div className="alert info">{sessionMessage}</div>}
         {error && <div className="alert danger">{error}</div>}
         <button disabled={loading}>{loading ? 'Entrando...' : 'Acessar sistema'}</button>
+        <small className="muted">A sessão permanece ativa ao minimizar ou trocar de aplicativo. Ela é encerrada ao fechar a página/app ou após {Math.round(sessionIdleMinutes / 60)} horas sem atividade.</small>
         <a className="android-download-link" href="/SuperInfra-Android.apk" download>
           <span aria-hidden="true">🤖</span> Baixar aplicativo para Android
         </a>
