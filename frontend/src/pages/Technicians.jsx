@@ -247,15 +247,19 @@ export default function Technicians() {
 
   async function saveRemoveTool() {
     if (!details.technician || !removeModal.tool) return;
-    if (!removeForm.removalReason.trim()) {
+    const isNotReceived = removeForm.status === 'nao_recebido';
+    const removalReason = isNotReceived
+      ? (removeForm.removalReason.trim() || 'Material não recebido')
+      : removeForm.removalReason.trim();
+    if (!removalReason) {
       setRemoveError('Descreva o motivo da baixa.');
       return;
     }
     setRemoveSaving(true);
     setRemoveError('');
     try {
-      const payload = { status: removeForm.status, removalReason: removeForm.removalReason };
-      if (removeForm.status === 'substituida' && removeForm.replacementSerial.trim()) {
+      const payload = { status: isNotReceived ? 'devolvida' : removeForm.status, removalReason, reasonCode: isNotReceived ? 'material_nao_recebido' : undefined };
+      if (!isNotReceived && removeForm.status === 'substituida' && removeForm.replacementSerial.trim()) {
         payload.replacement = {
           name: removeForm.replacementName || removeModal.tool.name,
           serialNumber: removeForm.replacementSerial,
@@ -538,13 +542,14 @@ export default function Technicians() {
         <div className="form-stack">
           {removeError && <div className="alert danger">{removeError}</div>}
           <p><small>Série/patrimônio: <b>{removeModal.tool?.serialNumber}</b> • Valor de referência: {brl(removeModal.tool?.referenceValue)}</small></p>
-          <label>Motivo da baixa<select value={removeForm.status} onChange={(e) => setRemoveForm({ ...removeForm, status: e.target.value })}>
+          <label>Motivo da baixa<select value={removeForm.status} onChange={(e) => { const status = e.target.value; setRemoveForm({ ...removeForm, status, removalReason: status === 'nao_recebido' && !removeForm.removalReason.trim() ? 'Material não recebido' : removeForm.removalReason }); }}>
             <option value="devolvida">Devolução</option>
+            <option value="nao_recebido">Material não recebido</option>
             <option value="perdida">Perda/extravio</option>
             <option value="desgaste">Desgaste/quebra</option>
             <option value="substituida">Substituição por outra ferramenta</option>
           </select></label>
-          <label>Descrição do motivo<textarea rows={2} value={removeForm.removalReason} onChange={(e) => setRemoveForm({ ...removeForm, removalReason: e.target.value })} placeholder="Ex.: devolvida na saída de férias, perdida em campo em 12/07, cabo rompido..." /></label>
+          <label>Descrição do motivo<textarea rows={2} value={removeForm.removalReason} onChange={(e) => setRemoveForm({ ...removeForm, removalReason: e.target.value })} placeholder="Ex.: material não recebido, devolvida na saída de férias, perdida em campo em 12/07, cabo rompido..." /></label>
           {removeForm.status === 'substituida' && (
             <section className="panel-soft">
               <h4>Ferramenta nova (opcional)</h4>

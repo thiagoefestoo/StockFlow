@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../services/api';
 import AttachmentPreview from '../components/AttachmentPreview';
+import { getTransferAttachments } from '../utils/transferAttachments';
 import { formatQuantity } from '../utils/formatQuantity';
 
 export default function TransferPrint() {
@@ -55,7 +56,7 @@ export default function TransferPrint() {
         <div className="signature-area"><div><span></span><p>{isToolTransfer ? 'Técnico de origem' : 'Assinatura do Técnico'}</p></div><div><span></span><p>{isToolTransfer ? 'Técnico de destino' : 'Responsável pelo Estoque'}</p></div></div>
         <p className="paper-note no-print">{isToolTransfer ? 'Declaro que as ferramentas acima foram conferidas e que a responsabilidade passou do técnico de origem para o técnico de destino.' : isReturn ? 'Declaro que os materiais listados acima foram devolvidos pelo técnico e conferidos para retorno ao estoque.' : 'Declaro que recebi os materiais listados acima, com os números de série discriminados, ficando responsável pela guarda, utilização em OS ou devolução formal ao estoque.'}</p>
       </section>
-      {transfer.attachmentData && <section className="panel no-print"><h3>Anexo assinado</h3><AttachmentPreview name={transfer.attachmentName} data={transfer.attachmentData} label="Guia assinada" /></section>}
+      {getTransferAttachments(transfer).length > 0 && <section className="panel no-print"><h3>Anexos assinados</h3>{getTransferAttachments(transfer).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} label={`Anexo ${index + 1}`} />)}</section>}
     </div>
   );
 }

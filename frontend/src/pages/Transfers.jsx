@@ -10,6 +10,7 @@ import { TRANSFER_REASON_OPTIONS } from '../constants/operationOptions';
 import FloatingAlert from '../components/FloatingAlert';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
+import { getTransferAttachments, transferAttachmentSummary } from '../utils/transferAttachments';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
@@ -566,19 +567,36 @@ export default function Transfers() {
     }
   }
 
-  async function sign(id, file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const response = await api.post(`/transfers/${id}/sign`, { attachmentName: file.name, attachmentData: reader.result, signatureResponsible: 'Anexo recebido' });
-        showNotice(response.data?.message || 'Assinatura registrada com sucesso.', 'success');
-        await load();
-      } catch (error) {
-        showNotice(error.response?.data?.message || error.message || 'Não foi possível registrar a assinatura.');
-      }
-    };
-    reader.readAsDataURL(file);
+  async function sign(id, fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    if (files.length > 8) {
+      showNotice('Selecione no máximo 8 arquivos por vez.');
+      return;
+    }
+    const allowed = files.every((file) => file.type === 'application/pdf' || file.type.startsWith('image/'));
+    if (!allowed) {
+      showNotice('Envie somente arquivos PDF ou imagens.');
+      return;
+    }
+    const totalSize = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    if (totalSize > 12 * 1024 * 1024) {
+      showNotice('O conjunto de arquivos deve ter no máximo 12 MB por envio.');
+      return;
+    }
+    try {
+      const attachments = await Promise.all(files.map((file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result });
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      })));
+      const response = await api.post(`/transfers/${id}/sign`, { attachments, signatureResponsible: 'Anexo recebido' });
+      showNotice(response.data?.message || `${attachments.length} arquivo(s) anexado(s).`, 'success');
+      await load();
+    } catch (error) {
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível anexar os documentos.');
+    }
   }
 
   const filteredApprovedRequests = useMemo(() => {
@@ -705,7 +723,7 @@ export default function Transfers() {
         </div>
       </section>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success">Anexado</span>}<input type="file" accept="image/*,.pdf" onChange={(e) => sign(tr.id, e.target.files?.[0])} /></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}</section>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>{zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
         <div className="transfer-wizard">
@@ -877,7 +895,7 @@ export default function Transfers() {
       </Modal>
 
       <DetailsModal open={!!details} title={`🔎 Detalhes da guia ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/transferencias/${details.id}`}>Abrir guia</Link>}{isAdmin && details && <button onClick={() => { setEdit({ open: true, item: details, form: { notes: details.notes || '', status: details.status || 'pendente_assinatura', deliveredAt: details.deliveredAt ? String(details.deliveredAt).slice(0, 16) : '', signatureResponsible: details.signatureResponsible || '' } }); setDetails(null); }}>Editar</button>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", transferTypeLabel(details)], ["Técnico", details.Technician?.name], [transferWarehouseLabel(details), isToolTransfer(details) ? (details.fromTechnician?.name || '-') : (details.Warehouse?.name || details.warehouseId || '-')], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexo", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Anexo da guia" />}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.TechnicianTool?.name || item.itemDescription || item.Material?.name || 'Item'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", transferTypeLabel(details)], ["Técnico", details.Technician?.name], [transferWarehouseLabel(details), isToolTransfer(details) ? (details.fromTechnician?.name || '-') : (details.Warehouse?.name || details.warehouseId || '-')], ["Status", details.status], ["Entregue em", details.deliveredAt], ["Assinada em", details.signedAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor total", brl(details.totalValue)], ["Responsável", details.signatureResponsible], ["Anexos", transferAttachmentSummary(details)], ["Observações", details.notes]]} />{getTransferAttachments(details).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} label={`Anexo ${index + 1} da guia`} />)}<DetailList title="Itens transferidos" items={details.TransferItems || []} render={(item) => <><b>{item.TechnicianTool?.name || item.itemDescription || item.Material?.name || 'Item'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

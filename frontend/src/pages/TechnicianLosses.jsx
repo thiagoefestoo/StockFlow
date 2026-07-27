@@ -7,6 +7,7 @@ import AttachmentPreview from '../components/AttachmentPreview';
 import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
+import { getTransferAttachments, transferAttachmentSummary } from '../utils/transferAttachments';
 import { formatQuantity, formatQuantityWithUnit } from '../utils/formatQuantity';
 import { LOSS_REASON_OPTIONS } from '../constants/operationOptions';
 
@@ -424,7 +425,7 @@ export default function TechnicianLosses() {
       />
 
       <DetailsModal open={!!details} title={`Detalhes da perda ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/perdas-tecnico/${details.id}`}>Abrir guia</Link>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", lossNature(details)], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", details.attachmentName || 'Sem anexo'], ["Observações", details.notes]]} />{details.attachmentName && <AttachmentPreview name={details.attachmentName} data={details.attachmentData} label="Documento de reconhecimento" />}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{lossItemName(item)}</b><span>{item.itemType === 'ferramenta' ? 'Ferramenta' : 'Material'} • Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", lossNature(details)], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", transferAttachmentSummary(details)], ["Observações", details.notes]]} />{getTransferAttachments(details).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} label={`Documento ${index + 1}`} />)}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{lossItemName(item)}</b><span>{item.itemType === 'ferramenta' ? 'Ferramenta' : 'Material'} • Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

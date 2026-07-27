@@ -18,6 +18,55 @@ const transferInclude = [
 ];
 
 
+const MAX_ATTACHMENTS_PER_REQUEST = 8;
+const MAX_ATTACHMENTS_PER_TRANSFER = 30;
+const MAX_ATTACHMENT_PAYLOAD_LENGTH = 18 * 1024 * 1024;
+
+function normalizeAttachmentEntry(entry = {}) {
+  const name = String(entry.name || entry.attachmentName || '').trim();
+  const data = String(entry.data || entry.attachmentData || '').trim();
+  if (!name || !data) return null;
+  if (!/^data:(image\/[^;,]+|application\/pdf)[;,]/i.test(data)) return null;
+  return {
+    name: name.slice(0, 255),
+    data,
+    uploadedAt: entry.uploadedAt || new Date().toISOString(),
+  };
+}
+
+function readTransferAttachments(transfer) {
+  const source = transfer?.toJSON ? transfer.toJSON() : (transfer || {});
+  const raw = source.attachmentData;
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.attachments) ? parsed.attachments : []);
+    const normalized = entries.map(normalizeAttachmentEntry).filter(Boolean);
+    if (normalized.length) return normalized;
+  } catch (_) {
+    // Formato legado: um unico data URL salvo diretamente na coluna.
+  }
+
+  const legacy = normalizeAttachmentEntry({
+    name: source.attachmentName || 'documento-anexado',
+    data: raw,
+    uploadedAt: source.signedAt || source.updatedAt || source.createdAt,
+  });
+  return legacy ? [legacy] : [];
+}
+
+function transferWithAttachments(transfer, includeData = false) {
+  const payload = transfer?.toJSON ? transfer.toJSON() : { ...(transfer || {}) };
+  const attachments = readTransferAttachments(payload);
+  payload.attachmentCount = attachments.length;
+  payload.attachmentNames = attachments.map((item) => item.name);
+  if (includeData) payload.attachments = attachments;
+  delete payload.attachmentData;
+  return payload;
+}
+
+
 async function estimateTransferValue(items = [], sourceWarehouseId) {
   let totalValue = 0;
   for (const item of items) {
@@ -84,7 +133,7 @@ exports.list = asyncHandler(async (req, res) => {
 exports.get = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id, { include: transferInclude });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
-  return ok(res, transfer);
+  return ok(res, transferWithAttachments(transfer, true));
 });
 
 exports.create = asyncHandler(async (req, res) => {
@@ -446,15 +495,54 @@ exports.update = asyncHandler(async (req, res) => {
 exports.sign = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id);
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
-  const before = { ...transfer.toJSON(), attachmentData: undefined };
-  const { attachmentName, attachmentData, signatureResponsible } = req.body;
+
+  const before = transferWithAttachments(transfer, false);
+  const requestedAttachments = Array.isArray(req.body.attachments)
+    ? req.body.attachments
+    : [{ attachmentName: req.body.attachmentName, attachmentData: req.body.attachmentData }];
+
+  if (requestedAttachments.length > MAX_ATTACHMENTS_PER_REQUEST) {
+    return fail(res, 400, `Envie no máximo ${MAX_ATTACHMENTS_PER_REQUEST} arquivos por vez.`);
+  }
+
+  const incomingAttachments = requestedAttachments
+    .map(normalizeAttachmentEntry)
+    .filter(Boolean);
+
+  if (!incomingAttachments.length) {
+    return fail(res, 400, 'Selecione pelo menos um arquivo PDF ou imagem válido.');
+  }
+
+  const existingAttachments = readTransferAttachments(transfer);
+  const combinedAttachments = [...existingAttachments, ...incomingAttachments];
+
+  if (combinedAttachments.length > MAX_ATTACHMENTS_PER_TRANSFER) {
+    return fail(res, 400, `A guia pode possuir no máximo ${MAX_ATTACHMENTS_PER_TRANSFER} anexos.`);
+  }
+
+  const serializedAttachments = JSON.stringify(combinedAttachments);
+  if (serializedAttachments.length > MAX_ATTACHMENT_PAYLOAD_LENGTH) {
+    return fail(res, 413, 'O conjunto de anexos excede o limite permitido. Reduza o tamanho ou envie menos arquivos por vez.');
+  }
+
   transfer.status = 'assinado';
-  transfer.signedAt = new Date();
-  transfer.attachmentName = attachmentName || transfer.attachmentName;
-  transfer.attachmentData = attachmentData || transfer.attachmentData;
-  transfer.signatureResponsible = signatureResponsible || transfer.signatureResponsible;
+  transfer.signedAt = transfer.signedAt || new Date();
+  transfer.attachmentName = combinedAttachments.length === 1
+    ? combinedAttachments[0].name
+    : `${combinedAttachments.length} arquivos anexados`;
+  transfer.attachmentData = serializedAttachments;
+  transfer.signatureResponsible = req.body.signatureResponsible || transfer.signatureResponsible || 'Anexo recebido';
   await transfer.save();
-  const safeTransfer = { ...transfer.toJSON(), attachmentData: undefined };
-  await writeAudit({ req, action: 'sign', entity: 'Transfer', entityId: transfer.id, message: `Guia ${transfer.transferNumber} assinada/anexada.`, beforeData: before, afterData: safeTransfer });
-  return ok(res, safeTransfer, 'Assinatura/anexo registrado.');
+
+  const safeTransfer = transferWithAttachments(transfer, false);
+  await writeAudit({
+    req,
+    action: 'sign',
+    entity: 'Transfer',
+    entityId: transfer.id,
+    message: `${incomingAttachments.length} arquivo(s) anexado(s) à guia ${transfer.transferNumber}. Total de anexos: ${combinedAttachments.length}.`,
+    beforeData: before,
+    afterData: safeTransfer,
+  });
+  return ok(res, safeTransfer, `${incomingAttachments.length} arquivo(s) anexado(s) com sucesso.`);
 });
