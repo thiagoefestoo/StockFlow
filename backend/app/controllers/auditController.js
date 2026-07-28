@@ -5,7 +5,7 @@ const { ok, okPaginated } = require('../utils/response');
 const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
 
 exports.list = asyncHandler(async (req, res) => {
-  const where = {};
+  const where = { action: { [Op.notIn]: ['reverse_logistics_entry', 'reverse_logistics_exit'] } };
   if (req.query.action) where.action = req.query.action;
   if (req.query.entity) where.entity = req.query.entity;
   if (req.query.search) {
@@ -39,6 +39,6 @@ exports.get = asyncHandler(async (req, res) => {
   const log = await AuditLog.findByPk(req.params.id, {
     include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
   });
-  if (!log) return res.status(404).json({ success: false, message: 'Evento de auditoria não encontrado.' });
+  if (!log || ['reverse_logistics_entry', 'reverse_logistics_exit'].includes(log.action)) return res.status(404).json({ success: false, message: 'Evento de auditoria não encontrado.' });
   return ok(res, log);
 });

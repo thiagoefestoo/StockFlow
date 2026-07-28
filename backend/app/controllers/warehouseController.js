@@ -1,4 +1,3 @@
-const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const {
   Warehouse,
@@ -14,10 +13,10 @@ const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
-const { adjustBalance } = require('../services/stockService');
-const { money, qty } = require('../utils/number');
-const { isTrue, normalizeBoolean } = require('../utils/booleans');
+const { money } = require('../utils/number');
+const { normalizeBoolean } = require('../utils/booleans');
 const { buildWarehouseTransferPlan } = require('../services/warehouseTransferService');
+const { reverseWarehouseSnapshot, reverseWarehouseDetails, reverseWarehouseExportDetails } = require('../services/reverseLogisticsService');
 const {
   warehouseListWhere,
   assertWarehouseAccess,
@@ -25,21 +24,10 @@ const {
   isPrivileged,
 } = require('../utils/warehouseAccess');
 
-function parseSerials(value) {
-  if (Array.isArray(value)) return value.map((s) => String(s).trim()).filter(Boolean);
-  return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean);
-}
-
 function nextWarehouseDeleteNumber() {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
   return `EXE-${stamp}`;
-}
-
-function nextReverseExitNumber() {
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-  return `LR-SAIDA-${stamp}`;
 }
 
 async function warehouseInventorySnapshot(warehouseId, options = {}) {
@@ -80,6 +68,15 @@ async function warehouseInventorySnapshot(warehouseId, options = {}) {
 }
 
 async function warehouseStats(warehouse) {
+  if (warehouse.isReverseLogistics) {
+    return {
+      consumableLines: 0,
+      assetCount: 0,
+      totalValue: null,
+      reverseStatsRestrictedToDetails: true,
+    };
+  }
+
   const snapshot = await warehouseInventorySnapshot(warehouse.id);
   return {
     consumableLines: snapshot.consumableLines,
@@ -115,6 +112,38 @@ exports.get = asyncHandler(async (req, res) => {
   if (!warehouse) return fail(res, 404, 'Estoque não encontrado.');
   try { assertWarehouseAccess(req.user, warehouse.id); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
+  if (warehouse.isReverseLogistics) {
+    const [details, users] = await Promise.all([
+      reverseWarehouseDetails(warehouse.id),
+      User.findAll({
+        where: { warehouseIds: { [Op.contains]: [warehouse.id] } },
+        attributes: ['id', 'name', 'email', 'role', 'status', 'warehouseIds', 'approvalLimit'],
+        order: [['role', 'ASC'], ['name', 'ASC']],
+      }).catch(() => []),
+    ]);
+
+    return ok(res, {
+      warehouse,
+      users,
+      technicians: [],
+      balances: [],
+      assets: [],
+      movements: [],
+      reverseInventory: details.inventory,
+      reverseEntries: details.entries,
+      reverseExits: details.exits,
+      bi: {
+        ...details.bi,
+        linkedUsers: users.length,
+        linkedTechnicians: 0,
+        incomingMovements: details.bi.incomingEntries,
+        outgoingMovements: details.bi.reverseOutgoingMovements,
+        technicianTransfers: 0,
+        returns: 0,
+      },
+    });
+  }
+
   const movementScope = movementWhereForUser(req.user, warehouse.id);
   const [balancesRaw, assets, users, technicians, movements] = await Promise.all([
     StockBalance.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material], order: [[Material, 'name', 'ASC']] }),
@@ -144,7 +173,6 @@ exports.get = asyncHandler(async (req, res) => {
   const outgoing = movements.filter((movement) => Number(movement.fromWarehouseId) === Number(warehouse.id));
   const toTechnicians = movements.filter((movement) => movement.toOwnerType === 'tecnico' || movement.toTechnicianId);
   const returned = movements.filter((movement) => movement.type === 'retorno_tecnico');
-  const reverseOutgoing = movements.filter((movement) => movement.type === 'saida_logistica_reversa');
 
   return ok(res, {
     warehouse,
@@ -165,9 +193,25 @@ exports.get = asyncHandler(async (req, res) => {
       outgoingMovements: outgoing.length,
       technicianTransfers: toTechnicians.length,
       returns: returned.length,
-      reverseOutgoingMovements: reverseOutgoing.length,
+      reverseOutgoingMovements: 0,
       lastMovementAt: movements[0]?.movementAt || null,
     },
+  });
+});
+
+exports.reverseExport = asyncHandler(async (req, res) => {
+  const warehouse = await Warehouse.findByPk(req.params.id);
+  if (!warehouse) return fail(res, 404, 'Estoque não encontrado.');
+  if (!warehouse.isReverseLogistics) return fail(res, 400, 'A exportação isolada é exclusiva de estoque de logística reversa.');
+  try { assertWarehouseAccess(req.user, warehouse.id); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+
+  const details = await reverseWarehouseExportDetails(warehouse.id);
+  return ok(res, {
+    warehouse,
+    reverseInventory: details.inventory,
+    reverseEntries: details.entries,
+    reverseExits: details.exits,
+    bi: details.bi,
   });
 });
 
@@ -222,7 +266,9 @@ exports.requestDelete = asyncHandler(async (req, res) => {
   const warehouse = await Warehouse.findByPk(req.params.id);
   if (!warehouse) return fail(res, 404, 'Estoque não encontrado.');
 
-  const inventory = await warehouseInventorySnapshot(warehouse.id);
+  const inventory = warehouse.isReverseLogistics
+    ? await reverseWarehouseSnapshot(warehouse.id)
+    : await warehouseInventorySnapshot(warehouse.id);
   if (inventory.hasItems) {
     const suggestion = warehouse.isReverseLogistics
       ? 'Registre a saída dos materiais para o fornecedor antes de pedir a exclusão.'
@@ -298,128 +344,4 @@ exports.transferStock = asyncHandler(async (req, res) => {
 
   await writeAudit({ req, action: 'warehouse_transfer_requested', entity: 'ApprovalRequest', entityId: approval.id, message: `Solicitada aprovação para transferência ${plan.reference} de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`, afterData: approval.toJSON() });
   return created(res, { approval, plan }, 'Transferência enviada para aprovação do administrador. O saldo só será movimentado após aprovação.');
-});
-
-exports.reverseExit = asyncHandler(async (req, res) => {
-  const warehouse = await Warehouse.findByPk(req.params.id);
-  if (!warehouse) return fail(res, 404, 'Estoque não encontrado.');
-  if (!warehouse.isReverseLogistics) return fail(res, 400, 'Esta operação é exclusiva de estoque de logística reversa.');
-  if (warehouse.status !== 'ativo') return fail(res, 400, 'O estoque de logística reversa precisa estar ativo.');
-  try { assertWarehouseAccess(req.user, warehouse.id); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
-
-  const items = Array.isArray(req.body.items) ? req.body.items : [];
-  const supplierName = String(req.body.supplierName || '').trim();
-  const documentNumber = String(req.body.documentNumber || '').trim();
-  const notes = String(req.body.notes || '').trim();
-  const reference = String(req.body.reference || '').trim() || nextReverseExitNumber();
-
-  if (!supplierName) return fail(res, 400, 'Informe a empresa fornecedora que receberá o material recolhido.');
-  if (!documentNumber) return fail(res, 400, 'Informe o número do romaneio, protocolo ou documento de entrega.');
-  if (!items.length) return fail(res, 400, 'Adicione ao menos um material à saída de logística reversa.');
-  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
-
-  const result = await sequelize.transaction(async (transaction) => {
-    let totalQuantity = 0;
-    let totalValue = 0;
-    const affected = [];
-    const usedSerials = new Set();
-
-    for (const item of items) {
-      const material = await Material.findByPk(item.materialId, { transaction });
-      if (!material) throw new Error('Material não encontrado.');
-      const unitCost = money(material.unitCost || 0);
-
-      if (isTrue(material.requiresSerial)) {
-        const serialNumbers = parseSerials(item.serialNumbers);
-        if (!serialNumbers.length) throw new Error(`Selecione ao menos um serial de ${material.name}.`);
-        for (const serialNumber of serialNumbers) {
-          const serialKey = serialNumber.toUpperCase();
-          if (usedSerials.has(serialKey)) throw new Error(`Serial repetido na saída: ${serialNumber}.`);
-          usedSerials.add(serialKey);
-
-          const asset = await SerializedAsset.findOne({
-            where: { serialNumber: { [Op.iLike]: serialNumber } },
-            transaction,
-            lock: transaction.LOCK.UPDATE,
-          });
-          if (!asset || Number(asset.materialId) !== Number(material.id) || asset.ownerType !== 'estoque' || asset.status !== 'em_estoque' || Number(asset.warehouseId) !== Number(warehouse.id)) {
-            throw new Error(`Serial ${serialNumber} não está disponível neste estoque de logística reversa.`);
-          }
-
-          const before = asset.toJSON();
-          const value = money(asset.acquisitionCost || unitCost);
-          asset.ownerType = 'fornecedor';
-          asset.status = 'devolvido';
-          asset.warehouseId = null;
-          asset.technicianId = null;
-          asset.lastMovementAt = new Date();
-          asset.notes = [asset.notes, `Entregue ao fornecedor ${supplierName}. Documento ${documentNumber}. Referência ${reference}.`].filter(Boolean).join(' | ');
-          await asset.save({ transaction });
-
-          await StockMovement.create({
-            type: 'saida_logistica_reversa',
-            materialId: material.id,
-            assetId: asset.id,
-            quantity: 1,
-            serialNumber: asset.serialNumber,
-            fromOwnerType: 'estoque',
-            toOwnerType: 'fornecedor',
-            fromWarehouseId: warehouse.id,
-            reference,
-            notes: `Saída de logística reversa para ${supplierName}. Documento ${documentNumber}.${notes ? ` ${notes}` : ''}`,
-            createdById: req.user.id,
-          }, { transaction });
-
-          totalQuantity += 1;
-          totalValue += Number(value);
-          affected.push({ materialId: material.id, materialName: material.name, serialNumber: asset.serialNumber, quantity: 1, value, before, after: asset.toJSON() });
-        }
-      } else {
-        const quantity = qty(item.quantity);
-        if (quantity <= 0) throw new Error(`Informe uma quantidade válida para ${material.name}.`);
-        const balance = await StockBalance.findOne({
-          where: { materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: warehouse.id },
-          transaction,
-          lock: transaction.LOCK.UPDATE,
-        });
-        if (!balance || Number(balance.quantity || 0) < Number(quantity)) {
-          throw new Error(`Saldo insuficiente para ${material.name}. Disponível: ${balance?.quantity || 0}.`);
-        }
-        const beforeQuantity = Number(balance.quantity || 0);
-        const updated = await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: warehouse.id, delta: -Number(quantity), transaction });
-        const value = money(Number(quantity) * Number(unitCost));
-
-        await StockMovement.create({
-          type: 'saida_logistica_reversa',
-          materialId: material.id,
-          quantity,
-          fromOwnerType: 'estoque',
-          toOwnerType: 'fornecedor',
-          fromWarehouseId: warehouse.id,
-          reference,
-          notes: `Saída de logística reversa para ${supplierName}. Documento ${documentNumber}.${notes ? ` ${notes}` : ''}`,
-          createdById: req.user.id,
-        }, { transaction });
-
-        totalQuantity += Number(quantity);
-        totalValue += Number(value);
-        affected.push({ materialId: material.id, materialName: material.name, quantity: Number(quantity), unitCost, value, beforeQuantity, afterQuantity: Number(updated.quantity || 0) });
-      }
-    }
-
-    await writeAudit({
-      req,
-      action: 'reverse_logistics_exit',
-      entity: 'Warehouse',
-      entityId: warehouse.id,
-      message: `Saída de logística reversa ${reference} registrada no estoque ${warehouse.name} para ${supplierName}.`,
-      beforeData: { warehouseId: warehouse.id, warehouseName: warehouse.name },
-      afterData: { reference, supplierName, documentNumber, notes, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
-      transaction,
-    });
-
-    return { reference, supplierName, documentNumber, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affectedCount: affected.length };
-  });
-
-  return created(res, result, 'Saída de logística reversa registrada no histórico e na auditoria.');
 });

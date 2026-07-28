@@ -4,5 +4,7 @@ const { authenticate, requireRoles, requireModule } = require('../middlewares/au
 router.use(authenticate, requireModule('serviceOrders'));
 router.get('/', controller.list);
 router.post('/', controller.create);
+router.get('/:id/replacement-options', requireModule('serviceOrderEquipmentReplace'), controller.replacementOptions);
+router.post('/:id/replace-equipment', requireModule('serviceOrderEquipmentReplace'), controller.replaceEquipment);
 router.put('/:id', controller.update);
 module.exports = router;

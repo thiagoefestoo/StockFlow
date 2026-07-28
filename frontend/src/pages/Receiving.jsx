@@ -124,12 +124,15 @@ export default function Receiving() {
         ...form.items,
         {
           materialId: '',
+          code: '',
+          description: '',
+          unit: 'un',
           quantity: 1,
           unitCost: '',
           serialsText: '',
           manufacturerLot: '',
           purchaseOrder: '',
-          condition: 'novo',
+          condition: selectedWarehouse?.isReverseLogistics ? 'usado' : 'novo',
           warehouseLocation: '',
           itemNotes: '',
         },
@@ -165,9 +168,40 @@ export default function Receiving() {
 
   function validateItems() {
     if (!form.items.length) return 'Adicione pelo menos um item na entrada.';
+    const allSerials = [];
+
+    if (selectedWarehouse?.isReverseLogistics) {
+      const seenCodes = new Set();
+      for (const [index, item] of form.items.entries()) {
+        const itemLabel = `Item ${index + 1}${item.description ? ` - ${item.description}` : ''}`;
+        const code = String(item.code || '').trim().toUpperCase();
+        const description = String(item.description || '').trim();
+        const serials = splitSerials(item.serialsText);
+        const quantity = Number(item.quantity || 0);
+        const unitCost = Number(item.unitCost || 0);
+
+        if (!code) return `${itemLabel}: informe o código do material/equipamento.`;
+        if (!description) return `${itemLabel}: informe a descrição.`;
+        if (seenCodes.has(code)) return `O código ${code} aparece mais de uma vez. Una as quantidades ou os seriais em uma única linha.`;
+        seenCodes.add(code);
+        if (unitCost < 0) return `${itemLabel}: o valor unitário não pode ser negativo.`;
+
+        if (serials.length) {
+          const repeatedInItem = duplicateValues(serials);
+          if (repeatedInItem.length) return `Serial digitado repetido no ${itemLabel}: ${repeatedInItem.join(', ')}.`;
+          allSerials.push(...serials);
+        } else if (!quantity || quantity <= 0) {
+          return `${itemLabel}: informe uma quantidade válida ou ao menos um serial.`;
+        }
+      }
+
+      const repeatedInEntry = duplicateValues(allSerials);
+      if (repeatedInEntry.length) return `Serial digitado repetido na entrada: ${repeatedInEntry.join(', ')}.`;
+      return '';
+    }
+
     const repeatedMaterials = duplicateItemIds(form.items);
     if (repeatedMaterials.length) return 'O mesmo material não pode aparecer mais de uma vez na entrada. Remova a linha repetida antes de continuar.';
-    const allSerials = [];
 
     for (const [index, item] of form.items.entries()) {
       const material = materials.find((m) => Number(m.id) === Number(item.materialId));
@@ -222,24 +256,46 @@ export default function Receiving() {
       }
       setSaving(true);
 
-      const payload = {
-        ...form,
-        items: form.items.map((item) => {
-          const material = materials.find((m) => Number(m.id) === Number(item.materialId));
-          return {
-            ...item,
-            quantity: Number(item.quantity || 0),
-            serialNumbers: isSerialRequired(material) ? splitSerials(item.serialsText) : [],
-            unitCost: Number(item.unitCost || 0),
-          };
-        }),
-      };
-      await api.post('/batches', payload);
-      setMessage('Entrada registrada com comprovante, estoque/região, valores e seriais conferidos.');
+      if (selectedWarehouse?.isReverseLogistics) {
+        const payload = {
+          ...form,
+          items: form.items.map((item) => {
+            const serialNumbers = splitSerials(item.serialsText);
+            return {
+              code: String(item.code || '').trim().toUpperCase(),
+              description: String(item.description || '').trim(),
+              unit: item.unit || 'un',
+              quantity: serialNumbers.length || Number(item.quantity || 0),
+              serialNumbers,
+              unitCost: Number(item.unitCost || 0),
+              condition: item.condition || 'usado',
+              itemNotes: item.itemNotes || '',
+            };
+          }),
+        };
+        await api.post(`/warehouses/${selectedWarehouse.id}/reverse-entry`, payload);
+        setMessage('Entrada registrada somente no estoque de logística reversa. Consulte o resultado em Estoques Regionais > Detalhes/BI.');
+      } else {
+        const payload = {
+          ...form,
+          items: form.items.map((item) => {
+            const material = materials.find((m) => Number(m.id) === Number(item.materialId));
+            return {
+              ...item,
+              quantity: Number(item.quantity || 0),
+              serialNumbers: isSerialRequired(material) ? splitSerials(item.serialsText) : [],
+              unitCost: Number(item.unitCost || 0),
+            };
+          }),
+        };
+        await api.post('/batches', payload);
+        setMessage('Entrada registrada com comprovante, estoque/região, valores e seriais conferidos.');
+      }
+
       setReviewOpen(false);
       setModal(false);
       setForm(emptyForm());
-      load();
+      load(1, true);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao registrar entrada.');
     } finally {
@@ -249,6 +305,21 @@ export default function Receiving() {
 
   const selectedWarehouse = warehouses.find((warehouse) => String(warehouse.id) === String(form.warehouseId));
   const reviewItems = form.items.map((item, index) => {
+    if (selectedWarehouse?.isReverseLogistics) {
+      const serials = splitSerials(item.serialsText);
+      const quantity = serials.length || Number(item.quantity || 0);
+      const unitCost = Number(item.unitCost || 0);
+      return {
+        key: `${item.code || 'empty'}-${index}`,
+        name: `${item.code || 'Sem código'} • ${item.description || `Item ${index + 1}`}`,
+        detail: `${serials.length ? 'equipamento serializado' : `controle por ${item.unit || 'un'}`} • ${item.condition || 'usado'} • valor unitário ${brl(unitCost)}`,
+        quantity,
+        unitValue: unitCost,
+        totalValue: quantity * unitCost,
+        serials,
+      };
+    }
+
     const material = materials.find((row) => Number(row.id) === Number(item.materialId));
     const serials = isSerialRequired(material) ? splitSerials(item.serialsText) : [];
     const quantity = Number(item.quantity || 0);
@@ -258,12 +329,12 @@ export default function Receiving() {
       name: material?.name || `Item ${index + 1}`,
       detail: `${material?.category || 'categoria não informada'} • ${item.condition || 'condição não informada'} • custo unitário ${brl(unitCost)}`,
       quantity,
-      unit: material?.unit || 'un',
-      serialCount: serials.length,
-      serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
+      unitValue: unitCost,
       totalValue: quantity * unitCost,
+      serials,
     };
   });
+
   const reviewQuantity = reviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const reviewValue = reviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
 
@@ -275,11 +346,52 @@ export default function Receiving() {
 
     <Modal open={modal} title="Nova entrada com comprovante" onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>Revisar entrada</button></>}>
       <div className="form-stack receiving-form">
-        <div className="form-grid"><label>Número da entrada<input value={form.receiptNumber} onChange={(e) => setForm({ ...form, receiptNumber: e.target.value })} placeholder="ENT-20260716-001" /></label><label>Estoque/região<select value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.isReverseLogistics ? '[LOGÍSTICA REVERSA] ' : ''}{w.name} • {w.city || w.region || w.code}</option>)}</select></label><label>Data de recebimento<input type="date" value={form.receivedAt} onChange={(e) => setForm({ ...form, receivedAt: e.target.value })} /></label><label>Ciclo<select value={form.cycle} onChange={(e) => setForm({ ...form, cycle: e.target.value })}><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option><option value="extra">Extra</option></select></label><label>Origem/fornecedor<input value={form.sourceCompany} onChange={(e) => setForm({ ...form, sourceCompany: e.target.value })} /></label><label>Status conferência<select value={form.conferenceStatus} onChange={(e) => setForm({ ...form, conferenceStatus: e.target.value })}><option value="conferido">Conferido</option><option value="pendente_conferencia">Pendente</option><option value="divergente">Divergente</option></select></label></div>
+        <div className="form-grid"><label>Número da entrada<input value={form.receiptNumber} onChange={(e) => setForm({ ...form, receiptNumber: e.target.value })} placeholder="ENT-20260716-001" /></label><label>Estoque/região<select value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value, items: [] })}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.isReverseLogistics ? '[LOGÍSTICA REVERSA] ' : ''}{w.name} • {w.city || w.region || w.code}</option>)}</select></label><label>Data de recebimento<input type="date" value={form.receivedAt} onChange={(e) => setForm({ ...form, receivedAt: e.target.value })} /></label><label>Ciclo<select value={form.cycle} onChange={(e) => setForm({ ...form, cycle: e.target.value })}><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option><option value="extra">Extra</option></select></label><label>Origem/fornecedor<input value={form.sourceCompany} onChange={(e) => setForm({ ...form, sourceCompany: e.target.value })} /></label><label>Status conferência<select value={form.conferenceStatus} onChange={(e) => setForm({ ...form, conferenceStatus: e.target.value })}><option value="conferido">Conferido</option><option value="pendente_conferencia">Pendente</option><option value="divergente">Divergente</option></select></label></div>
         <div className="form-grid"><label>Tipo documento<select value={form.fiscalDocumentType} onChange={(e) => setForm({ ...form, fiscalDocumentType: e.target.value })}><option value="nota_fiscal">Nota fiscal</option><option value="termo_entrega">Termo de entrega</option><option value="romaneio">Romaneio</option><option value="recibo">Recibo</option><option value="outro">Outro</option></select></label><label>Nº documento<input value={form.fiscalDocumentNumber} onChange={(e) => setForm({ ...form, fiscalDocumentNumber: e.target.value })} /></label><label>Chave NF-e<input value={form.invoiceAccessKey} onChange={(e) => setForm({ ...form, invoiceAccessKey: e.target.value })} /></label><label>Data documento<input type="date" value={form.fiscalDocumentDate} onChange={(e) => setForm({ ...form, fiscalDocumentDate: e.target.value })} /></label><label>Emitente<input value={form.fiscalIssuer} onChange={(e) => setForm({ ...form, fiscalIssuer: e.target.value })} /></label><label>Recebido por<input value={form.receivedByName} onChange={(e) => setForm({ ...form, receivedByName: e.target.value })} /></label></div>
         <label>Documento de recebimento obrigatório<input type="file" required accept="image/*,.pdf" onChange={onFile} /><small>Anexe nota fiscal, romaneio, termo de entrega ou recibo. Sem anexo a entrada não será registrada.</small></label>{form.proofAttachmentName && <AttachmentPreview compact name={form.proofAttachmentName} data={form.proofAttachmentData} label="Comprovante selecionado" />}
         <div className="subtoolbar"><h4>Itens da entrada</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
         {form.items.map((item, i) => {
+          if (selectedWarehouse?.isReverseLogistics) {
+            const serials = splitSerials(item.serialsText);
+            const repeated = duplicateValues(serials);
+            return <div className="item-card reverse-entry-item" key={i}>
+              <div className="item-head"><strong>Item {i + 1} — logística reversa</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
+              <div className="alert info compact-alert">Este item fica somente no estoque de logística reversa. Não é necessário cadastrá-lo no catálogo geral.</div>
+              <div className="form-grid">
+                <label>Código<input value={item.code || ''} onChange={(e) => updateItem(i, { code: e.target.value.toUpperCase() })} placeholder="Ex.: ATFX203023" /></label>
+                <label>Descrição<input value={item.description || ''} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Nome do equipamento ou material recolhido" /></label>
+                <label>Quantidade<input type="number" min="0" step="1" value={serials.length || item.quantity} disabled={serials.length > 0} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label>
+                <label>Unidade<select value={item.unit || 'un'} onChange={(e) => updateItem(i, { unit: e.target.value })}><option value="un">Unidade</option><option value="m">Metro</option><option value="kg">Quilograma</option><option value="cx">Caixa</option><option value="pct">Pacote</option><option value="outro">Outro</option></select></label>
+                <label>Valor unitário opcional<input type="number" min="0" step="0.01" value={item.unitCost} onChange={(e) => updateItem(i, { unitCost: e.target.value })} placeholder="Pode ser 0,00" /></label>
+                <label>Condição<select value={item.condition || 'usado'} onChange={(e) => updateItem(i, { condition: e.target.value })}><option value="usado">Usado</option><option value="defeito">Defeito</option><option value="recondicionado">Recondicionado</option><option value="novo">Novo</option><option value="outro">Outro</option></select></label>
+              </div>
+              <div className="serial-bulk panel-soft">
+                <h4>Seriais opcionais — preenchimento em coluna</h4>
+                <label>Seriais/patrimônios
+                  <textarea
+                    rows={Math.min(Math.max(serials.length || 8, 8), 16)}
+                    value={item.serialsText || ''}
+                    onPaste={(event) => pasteSerialColumn(event, i)}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\t/g, '\n');
+                      const nextSerials = splitSerials(value);
+                      updateItem(i, { serialsText: value, quantity: nextSerials.length || item.quantity });
+                    }}
+                    placeholder={'Para equipamentos, cole uma coluna de seriais. Para materiais sem serial, deixe vazio e informe apenas a quantidade.'}
+                  />
+                </label>
+                <small>{serials.length ? `${serials.length} serial(is) informado(s); a quantidade será definida automaticamente.` : 'Sem serial: o controle será feito somente por quantidade.'}</small>
+                {serials.length > 0 && <div className="serial-column-preview">
+                  <div className="serial-column-preview-head"><span>Linha</span><strong>Serial</strong></div>
+                  {serials.slice(0, 200).map((serial, serialIndex) => <div className="serial-column-preview-row" key={`${serial}-${serialIndex}`}><span>{serialIndex + 1}</span><strong>{serial}</strong></div>)}
+                  {serials.length > 200 && <small>Exibindo os primeiros 200 de {serials.length} seriais. Todos serão enviados.</small>}
+                </div>}
+                {repeated.length > 0 && <div className="alert danger compact-alert">Serial digitado repetido: {repeated.join(', ')}</div>}
+              </div>
+              <label>Observação do item<textarea rows="2" value={item.itemNotes || ''} onChange={(e) => updateItem(i, { itemNotes: e.target.value })} /></label>
+            </div>;
+          }
+
           const material = materials.find((m) => Number(m.id) === Number(item.materialId));
           const availableMaterials = optionsWithoutSelected(materials, form.items, i);
           const requiresSerial = isSerialRequired(material);

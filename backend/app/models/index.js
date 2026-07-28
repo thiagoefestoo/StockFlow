@@ -20,6 +20,11 @@ const ApprovalRequest = require('./approvalRequest');
 const Warehouse = require('./warehouse');
 const TechnicianTool = require('./technicianTool');
 const TechnicianToolDocument = require('./technicianToolDocument');
+const ReverseLogisticsEntry = require('./reverseLogisticsEntry');
+const ReverseLogisticsItem = require('./reverseLogisticsItem');
+const ReverseLogisticsExit = require('./reverseLogisticsExit');
+const ReverseLogisticsExitItem = require('./reverseLogisticsExitItem');
+const ServiceOrderEquipmentReplacement = require('./serviceOrderEquipmentReplacement');
 
 ContractorCompany.hasMany(Technician, { foreignKey: 'companyId' });
 Technician.belongsTo(ContractorCompany, { foreignKey: 'companyId' });
@@ -105,6 +110,31 @@ MaterialRequestItem.belongsTo(SerializedAsset, { foreignKey: 'assetId' });
 ApprovalRequest.belongsTo(User, { as: 'requestedBy', foreignKey: 'requestedById' });
 ApprovalRequest.belongsTo(User, { as: 'decidedBy', foreignKey: 'decidedById' });
 
+
+Warehouse.hasMany(ReverseLogisticsEntry, { as: 'reverseEntries', foreignKey: 'warehouseId' });
+ReverseLogisticsEntry.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
+ReverseLogisticsEntry.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+ReverseLogisticsEntry.hasMany(ReverseLogisticsItem, { as: 'items', foreignKey: 'entryId' });
+ReverseLogisticsItem.belongsTo(ReverseLogisticsEntry, { as: 'entry', foreignKey: 'entryId' });
+ReverseLogisticsItem.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
+
+Warehouse.hasMany(ReverseLogisticsExit, { as: 'reverseExits', foreignKey: 'warehouseId' });
+ReverseLogisticsExit.belongsTo(Warehouse, { foreignKey: 'warehouseId' });
+ReverseLogisticsExit.belongsTo(User, { as: 'createdBy', foreignKey: 'createdById' });
+ReverseLogisticsExit.hasMany(ReverseLogisticsExitItem, { as: 'items', foreignKey: 'exitId' });
+ReverseLogisticsExitItem.belongsTo(ReverseLogisticsExit, { as: 'exit', foreignKey: 'exitId' });
+ReverseLogisticsExitItem.belongsTo(ReverseLogisticsItem, { as: 'inventoryItem', foreignKey: 'reverseItemId' });
+
+ServiceOrder.hasMany(ServiceOrderEquipmentReplacement, { as: 'equipmentReplacements', foreignKey: 'serviceOrderId' });
+ServiceOrderEquipmentReplacement.belongsTo(ServiceOrder, { foreignKey: 'serviceOrderId' });
+ServiceOrderEquipmentReplacement.belongsTo(Technician, { foreignKey: 'technicianId' });
+ServiceOrderEquipmentReplacement.belongsTo(SerializedAsset, { as: 'oldAsset', foreignKey: 'oldAssetId' });
+ServiceOrderEquipmentReplacement.belongsTo(SerializedAsset, { as: 'newAsset', foreignKey: 'newAssetId' });
+ServiceOrderEquipmentReplacement.belongsTo(Material, { as: 'oldMaterial', foreignKey: 'oldMaterialId' });
+ServiceOrderEquipmentReplacement.belongsTo(Material, { as: 'newMaterial', foreignKey: 'newMaterialId' });
+ServiceOrderEquipmentReplacement.belongsTo(User, { as: 'performedBy', foreignKey: 'performedById' });
+
+
 module.exports = {
   User,
   ContractorCompany,
@@ -128,4 +158,9 @@ module.exports = {
   Warehouse,
   TechnicianTool,
   TechnicianToolDocument,
+  ReverseLogisticsEntry,
+  ReverseLogisticsItem,
+  ReverseLogisticsExit,
+  ReverseLogisticsExitItem,
+  ServiceOrderEquipmentReplacement,
 };

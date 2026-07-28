@@ -20,6 +20,7 @@ const MODULES = [
   { key: 'technicianToolsEdit', label: 'Adicionar/baixar ferramentas na ficha do técnico', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'technicianTransferLimitManage', label: 'Editar limite de transferência sem aprovação', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'materialRequestDelivery', label: 'Entregar cargas aprovadas para técnicos', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
+  { key: 'serviceOrderEquipmentReplace', label: 'Substituir equipamento instalado em OS', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: [] },
   { key: 'users', label: 'Usuários e permissões', group: 'Administração', roles: ['admin'], routes: ['/usuarios'] },
   { key: 'biExecutive', label: 'BI Executivo/Operacional', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/executivo'] },
   { key: 'biFinancial', label: 'BI Financeiro', group: 'BI e auditoria', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/bi/financeiro'] },
@@ -36,7 +37,7 @@ const ASSIGNABLE_MODULE_KEYS = ALL_MODULE_KEYS.filter((key) => !ADMIN_ONLY_MODUL
 
 const DEFAULT_MODULES_BY_ROLE = {
   admin: ALL_MODULE_KEYS,
-  supervisor: ALL_MODULE_KEYS.filter((key) => !['users', 'technicianEdit', 'technicianTransferLimitManage', 'materialRequestDelivery'].includes(key)),
+  supervisor: ALL_MODULE_KEYS.filter((key) => !['users', 'technicianEdit', 'technicianTransferLimitManage', 'materialRequestDelivery', 'serviceOrderEquipmentReplace'].includes(key)),
   estoquista: [
     'operationsCockpit',
     'approvals',

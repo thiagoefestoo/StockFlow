@@ -2834,3 +2834,17 @@ input[readonly], textarea[readonly] {
     justify-content: space-between;
   }
 }
+
+/* Atualização 52: logística reversa isolada e substituição de equipamento em OS */
+.replacement-equipment-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.reverse-entry-item {
+  border-color: rgba(153, 102, 51, 0.35);
+  background: rgba(245, 231, 211, 0.22);
+}

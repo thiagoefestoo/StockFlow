@@ -10,9 +10,11 @@ const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../u
 const { writeAudit } = require('../services/auditService');
 const { isTrue } = require('../utils/booleans');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
+const { reverseWarehouseIds, warehouseOutsideReverse } = require('../utils/reverseLogistics');
 
 exports.list = asyncHandler(async (req, res) => {
-  const where = stockWhereForUser(req.user, req.query.warehouseId);
+  const reverseIds = await reverseWarehouseIds();
+  const where = { [Op.and]: [stockWhereForUser(req.user, req.query.warehouseId), warehouseOutsideReverse(reverseIds)] };
   const pagination = paginationFromQuery(req.query);
   const limit = pagination.enabled ? pagination.limit : Math.min(Math.max(Number(req.query.limit || 150), 1), 300);
   const [batches, total] = await Promise.all([
@@ -35,7 +37,8 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.get = asyncHandler(async (req, res) => {
-  const where = { ...stockWhereForUser(req.user), id: req.params.id };
+  const reverseIds = await reverseWarehouseIds();
+  const where = { id: req.params.id, [Op.and]: [stockWhereForUser(req.user), warehouseOutsideReverse(reverseIds)] };
   const batch = await StockBatch.findOne({
     where,
     include: [
@@ -79,6 +82,7 @@ exports.create = asyncHandler(async (req, res) => {
     try { assertWarehouseAccess(req.user, targetWarehouseId, 'Você não tem acesso ao estoque informado.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
     const warehouse = await Warehouse.findByPk(targetWarehouseId);
     if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque/região informado não existe ou está inativo.');
+    if (warehouse.isReverseLogistics) return fail(res, 400, 'Entradas de logística reversa usam o fluxo isolado e não podem ser registradas como entrada operacional.');
   }
 
   const result = await sequelize.transaction(async (transaction) => {

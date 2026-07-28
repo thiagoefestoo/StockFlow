@@ -24,7 +24,7 @@ const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
-const { reverseWarehouseIds } = require('../utils/reverseLogistics');
+const { reverseWarehouseIds, movementOutsideReverse } = require('../utils/reverseLogistics');
 
 function parseSerials(value) {
   if (Array.isArray(value)) return value.map((s) => String(s).trim()).filter(Boolean);
@@ -104,6 +104,8 @@ exports.movements = asyncHandler(async (req, res) => {
   if (req.query.technicianId) and.push({ [Op.or]: [{ fromTechnicianId: req.query.technicianId }, { toTechnicianId: req.query.technicianId }] });
   const movementScope = movementWhereForUser(req.user, req.query.warehouseId);
   if (movementScope) and.push(movementScope);
+  const reverseIds = await reverseWarehouseIds();
+  and.push(movementOutsideReverse(reverseIds));
   if (req.query.search) {
     const q = `%${req.query.search}%`;
     and.push({ [Op.or]: [{ serialNumber: { [Op.iLike]: q } }, { reference: { [Op.iLike]: q } }, { notes: { [Op.iLike]: q } }] });

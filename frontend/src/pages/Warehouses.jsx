@@ -6,7 +6,7 @@ import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import { useAuth } from '../contexts/AuthContext';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { formatQuantity } from '../utils/formatQuantity';
 
 const empty = {
   name: '',
@@ -87,7 +87,7 @@ function downloadWarehouseExcel(details) {
     ['Observações', warehouse.notes || '-'],
   ].map(([indicator, value]) => ({ indicator, value }));
 
-  const sheets = [
+  let sheets = [
     excelWorksheet('Resumo', [
       { label: 'INDICADOR', value: 'indicator', width: 220 },
       { label: 'VALOR', value: (row) => row.value, width: 220 },
@@ -140,6 +140,109 @@ function downloadWarehouseExcel(details) {
     ], details.movements || []),
   ];
 
+
+  if (warehouse.isReverseLogistics) {
+    const inventoryRows = (details.reverseInventory || []).flatMap((group) => {
+      if (group.requiresSerial) {
+        return (group.serials || []).map((serial) => ({
+          code: group.code,
+          description: group.description,
+          serialNumber: serial.serialNumber,
+          quantity: 1,
+          unit: group.unit || 'un',
+          unitCost: Number(group.unitCost || 0),
+          totalValue: Number(group.unitCost || 0),
+          condition: serial.condition || group.condition || 'usado',
+          receivedAt: serial.receivedAt || group.lastReceivedAt,
+        }));
+      }
+      return [{
+        code: group.code,
+        description: group.description,
+        serialNumber: '',
+        quantity: Number(group.quantity || 0),
+        unit: group.unit || 'un',
+        unitCost: Number(group.unitCost || 0),
+        totalValue: Number(group.totalValue || 0),
+        condition: group.condition || 'usado',
+        receivedAt: group.lastReceivedAt,
+      }];
+    });
+
+    const reverseSummaryRows = [
+      ['Número/código', warehouse.code],
+      ['Nome', warehouse.name],
+      ['Tipo', 'Estoque isolado de logística reversa'],
+      ['Cidade', warehouse.city || '-'],
+      ['UF', warehouse.state || '-'],
+      ['Status', warehouse.status === 'ativo' ? 'Ativo' : warehouse.status || '-'],
+      ['Quantidade atual em saldo', Number(bi.totalQuantity || 0)],
+      ['Valor atual isolado', Number(bi.totalValue || 0)],
+      ['Equipamentos serializados em saldo', Number(bi.assetCount || 0)],
+      ['Linhas por quantidade em saldo', Number(bi.consumableLines || 0)],
+      ['Entradas isoladas', Number(bi.incomingEntries || 0)],
+      ['Saídas isoladas para fornecedor', Number(bi.reverseOutgoingMovements || 0)],
+      ['Quantidade total recebida', Number(bi.receivedQuantity || 0)],
+      ['Valor total recebido', Number(bi.receivedValue || 0)],
+      ['Quantidade total entregue ao fornecedor', Number(bi.exitedQuantity || 0)],
+      ['Valor total entregue ao fornecedor', Number(bi.exitedValue || 0)],
+      ['Última operação reversa', dt(bi.lastMovementAt)],
+      ['Observações', warehouse.notes || '-'],
+    ].map(([indicator, value]) => ({ indicator, value }));
+
+    const entryRows = (details.reverseEntries || []).flatMap((entry) => {
+      const items = entry.items || [];
+      if (!items.length) return [{ entry }];
+      return items.map((item) => ({ ...item, entry }));
+    });
+    const exitRows = (details.reverseExits || []).flatMap((exit) => (exit.items || []).map((item) => ({ ...item, exit })));
+
+    sheets = [
+      excelWorksheet('Resumo', [
+        { label: 'INDICADOR', value: 'indicator', width: 220 },
+        { label: 'VALOR', value: (row) => row.value, width: 220 },
+      ], reverseSummaryRows),
+      excelWorksheet('Saldo atual', [
+        { label: 'CÓDIGO', value: 'code', width: 120 },
+        { label: 'DESCRIÇÃO', value: 'description', width: 260 },
+        { label: 'SERIAL/PATRIMÔNIO', value: 'serialNumber', width: 180 },
+        { label: 'QUANTIDADE', value: 'quantity', type: 'Number', style: 'Integer', width: 100 },
+        { label: 'UNIDADE', value: 'unit', width: 80 },
+        { label: 'VALOR UNITÁRIO', value: 'unitCost', type: 'Number', style: 'Money', width: 110 },
+        { label: 'VALOR TOTAL', value: 'totalValue', type: 'Number', style: 'Money', width: 110 },
+        { label: 'CONDIÇÃO', value: 'condition', width: 110 },
+        { label: 'RECEBIDO EM', value: (row) => dt(row.receivedAt), width: 150 },
+      ], inventoryRows),
+      excelWorksheet('Entradas reversas', [
+        { label: 'REFERÊNCIA', value: (row) => row.entry?.reference || '-', width: 170 },
+        { label: 'DATA', value: (row) => row.entry?.receivedAt || '-', width: 110 },
+        { label: 'ORIGEM', value: (row) => row.entry?.sourceCompany || '-', width: 180 },
+        { label: 'DOCUMENTO', value: (row) => row.entry?.documentNumber || '-', width: 150 },
+        { label: 'CÓDIGO', value: (row) => row.code || '-', width: 120 },
+        { label: 'DESCRIÇÃO', value: (row) => row.description || '-', width: 240 },
+        { label: 'SERIAL', value: (row) => row.serialNumber || '-', width: 170 },
+        { label: 'QUANTIDADE', value: (row) => Number(row.quantity || row.entry?.totalQuantity || 0), type: 'Number', style: 'Integer', width: 100 },
+        { label: 'UNIDADE', value: (row) => row.unit || '-', width: 80 },
+        { label: 'VALOR UNITÁRIO', value: (row) => Number(row.unitCost || 0), type: 'Number', style: 'Money', width: 110 },
+        { label: 'VALOR TOTAL', value: (row) => Number(row.quantity || 0) * Number(row.unitCost || 0), type: 'Number', style: 'Money', width: 110 },
+        { label: 'CONDIÇÃO', value: (row) => row.condition || '-', width: 100 },
+        { label: 'OPERADOR', value: (row) => row.entry?.createdBy?.name || 'Sistema', width: 150 },
+        { label: 'OBSERVAÇÕES', value: (row) => row.notes || row.entry?.notes || '-', width: 260 },
+      ], entryRows),
+      excelWorksheet('Saídas reversas', [
+        { label: 'REFERÊNCIA', value: (row) => row.exit?.reference || '-', width: 170 },
+        { label: 'DATA', value: (row) => dt(row.exit?.createdAt), width: 150 },
+        { label: 'FORNECEDOR', value: (row) => row.exit?.supplierName || '-', width: 190 },
+        { label: 'DOCUMENTO', value: (row) => row.exit?.documentNumber || '-', width: 150 },
+        { label: 'CÓDIGO', value: 'code', width: 120 },
+        { label: 'DESCRIÇÃO', value: 'description', width: 240 },
+        { label: 'SERIAL', value: (row) => row.serialNumber || '-', width: 170 },
+        { label: 'QUANTIDADE', value: (row) => Number(row.quantity || 0), type: 'Number', style: 'Integer', width: 100 },
+        { label: 'VALOR', value: (row) => Number(row.totalCost || 0), type: 'Number', style: 'Money', width: 100 },
+      ], exitRows),
+    ];
+  }
+
   const workbook = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40"><DocumentProperties xmlns="urn:schemas-microsoft-com:office:office"><Author>Super Infra Business Suite</Author><Title>Estoque ${xmlEscape(warehouse.name)}</Title><Created>${new Date().toISOString()}</Created></DocumentProperties><ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel"><WindowHeight>12000</WindowHeight><WindowWidth>22000</WindowWidth><ProtectStructure>False</ProtectStructure><ProtectWindows>False</ProtectWindows></ExcelWorkbook><Styles><Style ss:ID="Default" ss:Name="Normal"><Alignment ss:Vertical="Center"/><Borders/><Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11"/><Interior/><NumberFormat/><Protection/></Style><Style ss:ID="Header"><Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/><Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#165DFF" ss:Pattern="Solid"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#0B3B9E"/></Borders></Style><Style ss:ID="Money"><NumberFormat ss:Format="R$ #,##0.00"/></Style><Style ss:ID="Integer"><NumberFormat ss:Format="0"/></Style></Styles>${sheets.join('')}</Workbook>`;
 
   const blob = new Blob(['\ufeff', workbook], { type: 'application/vnd.ms-excel;charset=utf-8' });
@@ -182,6 +285,7 @@ export default function Warehouses() {
   const [reverseExitForm, setReverseExitForm] = useState(emptyReverseExit());
   const [reverseExitReviewOpen, setReverseExitReviewOpen] = useState(false);
   const [reverseExitSaving, setReverseExitSaving] = useState(false);
+  const [excelLoading, setExcelLoading] = useState(false);
 
   const canManageStructure = isAdmin || user?.role === 'supervisor';
 
@@ -236,6 +340,24 @@ export default function Warehouses() {
   async function openDetails(row) {
     const res = await api.get(`/warehouses/${row.id}`);
     setDetails(res.data.data);
+  }
+
+  async function downloadDetailsExcel() {
+    if (!details || excelLoading) return;
+    try {
+      setExcelLoading(true);
+      setMessage('');
+      let exportDetails = details;
+      if (details.warehouse?.isReverseLogistics) {
+        const response = await api.get(`/warehouses/${details.warehouse.id}/reverse-export`);
+        exportDetails = { ...details, ...(response.data.data || {}) };
+      }
+      downloadWarehouseExcel(exportDetails);
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Não foi possível gerar o Excel do estoque.');
+    } finally {
+      setExcelLoading(false);
+    }
   }
 
   function openTransfer(row = null) {
@@ -339,49 +461,37 @@ export default function Warehouses() {
 
   const reverseInventoryMaterials = useMemo(() => {
     if (!reverseExitDetails) return [];
-    const map = new Map();
-    for (const balance of reverseExitDetails.balances || []) {
-      const material = balance.Material;
-      if (!material || Number(balance.quantity || 0) <= 0) continue;
-      map.set(Number(material.id), {
-        materialId: Number(material.id),
-        name: material.name,
-        sku: material.sku,
-        unit: material.unit || 'un',
-        unitCost: Number(material.unitCost || 0),
-        requiresSerial: false,
-        availableQuantity: Number(balance.quantity || 0),
-        assets: [],
-      });
-    }
-    for (const asset of reverseExitDetails.assets || []) {
-      const material = asset.Material;
-      if (!material) continue;
-      const key = Number(material.id);
-      const current = map.get(key) || {
-        materialId: key,
-        name: material.name,
-        sku: material.sku,
-        unit: material.unit || 'un',
-        unitCost: Number(material.unitCost || 0),
-        requiresSerial: true,
-        availableQuantity: 0,
-        assets: [],
-      };
-      current.requiresSerial = true;
-      current.assets.push(asset);
-      current.availableQuantity = current.assets.length;
-      map.set(key, current);
-    }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    return (reverseExitDetails.reverseInventory || []).map((row) => ({
+      inventoryKey: row.inventoryKey,
+      code: row.code,
+      name: row.description,
+      description: row.description,
+      unit: row.unit || 'un',
+      unitCost: Number(row.unitCost || 0),
+      requiresSerial: !!row.requiresSerial,
+      availableQuantity: Number(row.quantity || 0),
+      assets: (row.serials || []).map((serial) => ({
+        id: serial.itemId,
+        serialNumber: serial.serialNumber,
+        acquisitionCost: Number(row.unitCost || 0),
+        receivedAt: serial.receivedAt,
+        condition: serial.condition,
+      })),
+    }));
   }, [reverseExitDetails]);
 
   function addReverseExitItem() {
-    const selected = new Set(reverseExitForm.items.map((item) => Number(item.materialId)));
-    const first = reverseInventoryMaterials.find((item) => !selected.has(Number(item.materialId)));
+    const selected = new Set(reverseExitForm.items.map((item) => String(item.inventoryKey || '')));
+    const first = reverseInventoryMaterials.find((item) => !selected.has(String(item.inventoryKey)));
     setReverseExitForm((current) => ({
       ...current,
-      items: [...current.items, { materialId: first?.materialId || '', quantity: 1, serialNumbers: [] }],
+      items: [...current.items, {
+        inventoryKey: first?.inventoryKey || '',
+        code: first?.code || '',
+        description: first?.description || '',
+        quantity: 1,
+        serialNumbers: [],
+      }],
     }));
   }
 
@@ -410,13 +520,23 @@ export default function Warehouses() {
     if (!reverseExitForm.supplierName.trim()) return 'Informe a empresa fornecedora que receberá o material.';
     if (!reverseExitForm.documentNumber.trim()) return 'Informe o número do romaneio, protocolo ou documento de entrega.';
     if (!reverseExitForm.items.length) return 'Adicione ao menos um material à saída.';
-    if (duplicateItemIds(reverseExitForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
-    const repeatedSerials = duplicateSerials(reverseExitForm.items);
-    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
+
+    const selectedKeys = new Set();
+    const selectedSerials = new Set();
     for (const item of reverseExitForm.items) {
-      const inventory = reverseInventoryMaterials.find((row) => Number(row.materialId) === Number(item.materialId));
-      if (!inventory) return 'Selecione um material válido em todos os itens.';
-      const quantity = inventory.requiresSerial ? (item.serialNumbers || []).length : Number(item.quantity || 0);
+      if (!item.inventoryKey) return 'Selecione um item válido em todas as linhas.';
+      if (selectedKeys.has(String(item.inventoryKey))) return 'O mesmo item não pode ser selecionado mais de uma vez.';
+      selectedKeys.add(String(item.inventoryKey));
+
+      const inventory = reverseInventoryMaterials.find((row) => String(row.inventoryKey) === String(item.inventoryKey));
+      if (!inventory) return 'Selecione um item válido em todos os itens.';
+      const serials = item.serialNumbers || [];
+      for (const serial of serials) {
+        const key = String(serial).toUpperCase();
+        if (selectedSerials.has(key)) return `O mesmo serial não pode ser selecionado mais de uma vez: ${serial}.`;
+        selectedSerials.add(key);
+      }
+      const quantity = inventory.requiresSerial ? serials.length : Number(item.quantity || 0);
       if (quantity <= 0) return `Informe uma quantidade válida para ${inventory.name}.`;
       if (quantity > Number(inventory.availableQuantity || 0)) return `Quantidade maior que o saldo disponível de ${inventory.name}.`;
     }
@@ -437,11 +557,15 @@ export default function Warehouses() {
       setReverseExitSaving(true);
       await api.post(`/warehouses/${reverseExitWarehouse.id}/reverse-exit`, {
         ...reverseExitForm,
-        items: reverseExitForm.items.map((item) => ({
-          materialId: Number(item.materialId),
-          quantity: Number(item.quantity || 0),
-          serialNumbers: item.serialNumbers || [],
-        })),
+        items: reverseExitForm.items.map((item) => {
+          const inventory = reverseInventoryMaterials.find((row) => String(row.inventoryKey) === String(item.inventoryKey));
+          return {
+            code: inventory?.code || item.code,
+            description: inventory?.description || item.description,
+            quantity: Number(item.quantity || 0),
+            serialNumbers: item.serialNumbers || [],
+          };
+        }),
       });
       setReverseExitReviewOpen(false);
       setReverseExitModal(false);
@@ -449,7 +573,7 @@ export default function Warehouses() {
       setReverseExitDetails(null);
       setReverseExitForm(emptyReverseExit());
       await load();
-      setMessage('Saída de logística reversa registrada com sucesso no histórico e na auditoria.');
+      setMessage('Saída registrada exclusivamente no estoque de logística reversa.');
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao registrar saída de logística reversa.');
     } finally {
@@ -501,11 +625,11 @@ export default function Warehouses() {
 
 
   const reverseExitReviewItems = reverseExitForm.items.map((item, index) => {
-    const inventory = reverseInventoryMaterials.find((row) => Number(row.materialId) === Number(item.materialId));
+    const inventory = reverseInventoryMaterials.find((row) => String(row.inventoryKey) === String(item.inventoryKey));
     const serials = item.serialNumbers || [];
     const quantity = inventory?.requiresSerial ? serials.length : Number(item.quantity || 0);
     return {
-      key: `${item.materialId || 'empty'}-${index}`,
+      key: `${item.inventoryKey || 'empty'}-${index}`,
       name: inventory?.name || `Item ${index + 1}`,
       detail: inventory?.requiresSerial ? 'Equipamento serializado recolhido' : 'Material usado recolhido',
       quantity,
@@ -553,7 +677,7 @@ export default function Warehouses() {
             <td>{r.name} {r.isReverseLogistics && <span className="reverse-logistics-badge">Logística reversa</span>}<br /><small>{r.notes || '-'}</small></td>
             <td>{r.city || '-'} {r.state || ''}<br /><small>{r.region || '-'}</small></td>
             <td>{r.responsibleName || '-'}</td>
-            <td>{brl(r.totalValue)}</td>
+            <td>{r.isReverseLogistics ? <small>Somente em Detalhes/BI</small> : brl(r.totalValue)}</td>
             <td><span className={`badge ${r.status}`}>{r.status === 'ativo' ? 'Ativo' : r.status}</span></td>
             <td><div className="row-actions"><button className="info" onClick={() => openDetails(r)}>Detalhes/BI</button>{r.isReverseLogistics ? <button className="reverse-action" onClick={() => openReverseExit(r)}>Registrar saída</button> : <button className="ghost" onClick={() => openTransfer(r)}>Receber transferência</button>}{canManageStructure && <button className="ghost" onClick={() => { setForm({ ...empty, ...r }); setModal(true); }}>Editar</button>}{canManageStructure && <button className="ghost danger-outline" onClick={() => requestWarehouseDelete(r)}>Solicitar exclusão</button>}</div></td>
           </tr>)}</tbody>
@@ -592,14 +716,15 @@ export default function Warehouses() {
         <div className="subtoolbar"><h4>Materiais entregues ao fornecedor</h4><button type="button" className="ghost" onClick={addReverseExitItem}>Adicionar item</button></div>
         {reverseExitForm.items.length === 0 && <div className="empty-state">Adicione os materiais usados que sairão do estoque de logística reversa.</div>}
         {reverseExitForm.items.map((item, index) => {
-          const inventory = reverseInventoryMaterials.find((row) => Number(row.materialId) === Number(item.materialId));
-          const availableOptions = optionsWithoutSelected(reverseInventoryMaterials.map((row) => ({ ...row, id: row.materialId })), reverseExitForm.items, index);
-          const selectedElsewhere = selectedSerialsExcept(reverseExitForm.items, index);
+          const inventory = reverseInventoryMaterials.find((row) => String(row.inventoryKey) === String(item.inventoryKey));
+          const selectedKeys = new Set(reverseExitForm.items.filter((_, itemIndex) => itemIndex !== index).map((row) => String(row.inventoryKey || '')));
+          const availableOptions = reverseInventoryMaterials.filter((row) => !selectedKeys.has(String(row.inventoryKey)));
+          const selectedElsewhere = new Set(reverseExitForm.items.filter((_, itemIndex) => itemIndex !== index).flatMap((row) => row.serialNumbers || []).map((serial) => String(serial).toUpperCase()));
           const availableAssets = (inventory?.assets || []).filter((asset) => !selectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
           return <div className="item-card" key={index}>
             <div className="item-head"><strong>Item {index + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeReverseExitItem(index)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => updateReverseExitItem(index, { materialId: e.target.value, quantity: 1, serialNumbers: [] })}><option value="">Selecione</option>{availableOptions.map((row) => <option key={row.materialId} value={row.materialId}>{row.name} • saldo {formatQuantity(row.availableQuantity, row.unit)}</option>)}</select></label>
+              <label>Material/equipamento<select value={item.inventoryKey} onChange={(e) => { const selected = reverseInventoryMaterials.find((row) => String(row.inventoryKey) === String(e.target.value)); updateReverseExitItem(index, { inventoryKey: e.target.value, code: selected?.code || '', description: selected?.description || '', quantity: 1, serialNumbers: [] }); }}><option value="">Selecione</option>{availableOptions.map((row) => <option key={row.inventoryKey} value={row.inventoryKey}>{row.code} • {row.name} • saldo {formatQuantity(row.availableQuantity, row.unit)}</option>)}</select></label>
               {!inventory?.requiresSerial && <label>Quantidade<input type="number" min="1" max={inventory?.availableQuantity || 0} step="1" value={item.quantity} onChange={(e) => updateReverseExitItem(index, { quantity: e.target.value })} /><small>Disponível: {formatQuantity(inventory?.availableQuantity || 0, inventory?.unit)}</small></label>}
             </div>
             {inventory?.requiresSerial && <div className="serial-picker"><div className="serial-picker-head"><strong>Seriais disponíveis</strong><small>{(item.serialNumbers || []).length} selecionado(s)</small></div><div className="serial-list">{availableAssets.map((asset) => { const checked = (item.serialNumbers || []).includes(asset.serialNumber); return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleReverseSerial(index, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>{inventory.name} • {brl(asset.acquisitionCost || inventory.unitCost)}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div></div>}
@@ -621,7 +746,7 @@ export default function Warehouses() {
       items={reverseExitReviewItems}
       totalQuantity={reverseExitReviewQuantity}
       totalValue={reverseExitReviewValue}
-      warning="Ao confirmar, o saldo será baixado somente deste estoque e a operação ficará registrada no histórico e na auditoria."
+      warning="Ao confirmar, a saída ficará registrada somente no Detalhes/BI deste estoque de logística reversa."
       loading={reverseExitSaving}
       confirmLabel="Confirmar saída para fornecedor"
       onCancel={() => setReverseExitReviewOpen(false)}
@@ -686,18 +811,24 @@ export default function Warehouses() {
       onConfirm={submitWarehouseTransfer}
     />
 
-    <DetailsModal open={!!details} title={`Estoque ${details?.warehouse?.name || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <button onClick={() => downloadWarehouseExcel(details)}>Baixar Excel</button>}</>}>
+    <DetailsModal open={!!details} title={`Estoque ${details?.warehouse?.name || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <button disabled={excelLoading} onClick={downloadDetailsExcel}>{excelLoading ? 'Gerando Excel...' : 'Baixar Excel'}</button>}</>}>
       <DetailGrid fields={details ? [
         ['Número/código', details.warehouse.code], ['Nome', details.warehouse.name], ['Tipo', details.warehouse.isReverseLogistics ? 'Logística reversa' : 'Estoque operacional'], ['Cidade', `${details.warehouse.city || '-'} ${details.warehouse.state || ''}`], ['Região', details.warehouse.region], ['Responsável', details.warehouse.responsibleName], ['Estoque ativo?', details.warehouse.status === 'ativo' ? 'Sim' : details.warehouse.status], ['Valor total', brl(details.bi?.totalValue)], ['Última movimentação', dt(details.bi?.lastMovementAt)],
       ] : []} />
-      {details && <>
-        <div className="kpi-grid small"><KpiCard label={details.warehouse.isReverseLogistics ? "Valor isolado recolhido" : "Valor em materiais"} value={brl(details.bi?.totalValue)} /><KpiCard label="Equipamentos" value={details.bi?.assetCount || 0} /><KpiCard label="Linhas consumíveis" value={details.bi?.consumableLines || 0} /><KpiCard label={details.warehouse.isReverseLogistics ? "Saídas p/ fornecedor" : "Transferências p/ técnico"} value={details.warehouse.isReverseLogistics ? (details.bi?.reverseOutgoingMovements || 0) : (details.bi?.technicianTransfers || 0)} /></div>
+      {details && (details.warehouse.isReverseLogistics ? <>
+        <div className="kpi-grid small"><KpiCard label="Valor isolado recolhido" value={brl(details.bi?.totalValue)} /><KpiCard label="Quantidade em saldo" value={formatQuantity(details.bi?.totalQuantity || 0)} /><KpiCard label="Equipamentos serializados" value={details.bi?.assetCount || 0} /><KpiCard label="Saídas para fornecedor" value={details.bi?.reverseOutgoingMovements || 0} /></div>
+        <div className="alert info">Todos os dados abaixo pertencem exclusivamente à logística reversa. Eles não alimentam estoque operacional, caixa técnica, BI geral, histórico geral ou auditoria geral.</div>
+        <DetailList title="Saldo atual da logística reversa" items={details.reverseInventory || []} render={(item) => <><b>{item.code} • {item.description}</b><span>{formatQuantity(item.quantity, item.unit)} • {brl(item.totalValue)} • {item.requiresSerial ? `${(item.serials || []).length} serial(is)` : 'controle por quantidade'}</span><small>{item.requiresSerial ? (item.serials || []).slice(0, 12).map((serial) => serial.serialNumber).join(', ') : `Valor unitário: ${brl(item.unitCost)}`}</small></>} />
+        <DetailList title="Entradas registradas somente neste estoque" items={details.reverseEntries || []} render={(entry) => <><b>{entry.reference} • {entry.receivedAt}</b><span>{entry.sourceCompany || '-'} • Qtd. {formatQuantity(entry.totalQuantity)} • {brl(entry.totalValue)}</span><small>Documento: {entry.documentNumber || '-'} • Operador: {entry.createdBy?.name || 'Sistema'}</small></>} />
+        <DetailList title="Saídas para fornecedor registradas somente neste estoque" items={details.reverseExits || []} render={(exit) => <><b>{exit.reference} • {dt(exit.createdAt)}</b><span>{exit.supplierName} • Qtd. {formatQuantity(exit.totalQuantity)} • {brl(exit.totalValue)}</span><small>Documento: {exit.documentNumber} • {(exit.items || []).length} linha(s)</small></>} />
+      </> : <>
+        <div className="kpi-grid small"><KpiCard label="Valor em materiais" value={brl(details.bi?.totalValue)} /><KpiCard label="Equipamentos" value={details.bi?.assetCount || 0} /><KpiCard label="Linhas consumíveis" value={details.bi?.consumableLines || 0} /><KpiCard label="Transferências p/ técnico" value={details.bi?.technicianTransfers || 0} /></div>
         <DetailList title="Estoquistas/usuários vinculados" items={details.users || []} render={(u) => <><b>{u.name}</b><span>{u.email} • {u.role} • {u.status}</span><small>Limite de aprovação: {brl(u.approvalLimit)}</small></>} />
         <DetailList title="Técnicos com estoque padrão vinculado" items={details.technicians || []} render={(t) => <><b>{t.name}</b><span>{t.email || '-'} • {t.status}</span><small>{(t.serviceCities || []).join(', ')}</small></>} />
         <DetailList title="Equipamentos serializados no estoque" items={details.assets || []} render={(a) => <><b>{a.serialNumber}</b><span>{a.Material?.name} • {a.status} • {brl(a.acquisitionCost || a.Material?.unitCost)}</span></>} />
         <DetailList title="Materiais consumíveis no estoque" items={details.balances || []} render={(b) => <><b>{b.Material?.name}</b><span>{formatQuantity(b.quantity, b.Material?.unit)} • {brl(Number(b.quantity || 0) * Number(b.Material?.unitCost || 0))}</span></>} />
         <DetailList title="Histórico e BI de movimentações deste estoque" items={details.movements || []} render={(m) => <><b>{m.reference || m.type} • {dt(m.movementAt)}</b><span>{m.Material?.name || '-'} • Qtd. {formatQuantity(m.quantity)} • {m.serialNumber || 'sem serial'}</span><small>{m.fromWarehouse?.name || m.fromOwnerType || '-'} → {m.toWarehouse?.name || m.toOwnerType || m.toTechnician?.name || '-'} • Operador: {m.createdBy?.name || 'Sistema'}</small></>} />
-      </>}
+      </>)}
     </DetailsModal>
   </div>;
 }

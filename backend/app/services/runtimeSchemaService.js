@@ -255,6 +255,215 @@ async function ensureReverseLogisticsSchema(queryInterface) {
   });
 }
 
+
+async function ensureIsolatedReverseLogisticsTables(queryInterface) {
+  const entries = await queryInterface.describeTable('reverse_logistics_entries').catch(() => null);
+  if (!entries) {
+    await queryInterface.createTable('reverse_logistics_entries', {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+      reference: { type: DataTypes.STRING(140), allowNull: false, unique: true },
+      sourceCompany: { type: DataTypes.STRING(180), allowNull: true },
+      receivedAt: { type: DataTypes.DATEONLY, allowNull: false },
+      documentType: { type: DataTypes.STRING(50), allowNull: true },
+      documentNumber: { type: DataTypes.STRING(140), allowNull: true },
+      documentDate: { type: DataTypes.DATEONLY, allowNull: true },
+      receivedByName: { type: DataTypes.STRING(180), allowNull: true },
+      proofAttachmentName: { type: DataTypes.STRING(255), allowNull: true },
+      proofAttachmentData: { type: DataTypes.TEXT('long'), allowNull: true },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+      totalQuantity: { type: DataTypes.DECIMAL(14, 3), allowNull: false, defaultValue: 0 },
+      totalValue: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
+      warehouseId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'warehouses', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      createdById: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+      },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    });
+    await queryInterface.addIndex('reverse_logistics_entries', ['warehouseId', 'receivedAt']);
+    console.log('✅ Tabela reverse_logistics_entries criada para entradas isoladas.');
+  }
+
+  const items = await queryInterface.describeTable('reverse_logistics_items').catch(() => null);
+  if (!items) {
+    await queryInterface.createTable('reverse_logistics_items', {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+      code: { type: DataTypes.STRING(100), allowNull: false },
+      description: { type: DataTypes.STRING(255), allowNull: false },
+      serialNumber: { type: DataTypes.STRING(160), allowNull: true },
+      quantity: { type: DataTypes.DECIMAL(14, 3), allowNull: false, defaultValue: 0 },
+      unit: { type: DataTypes.STRING(30), allowNull: false, defaultValue: 'un' },
+      unitCost: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
+      condition: { type: DataTypes.STRING(40), allowNull: false, defaultValue: 'usado' },
+      status: { type: DataTypes.STRING(40), allowNull: false, defaultValue: 'em_estoque' },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+      receivedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      exitedAt: { type: DataTypes.DATE, allowNull: true },
+      warehouseId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'warehouses', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      entryId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'reverse_logistics_entries', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    });
+    await queryInterface.addIndex('reverse_logistics_items', ['warehouseId', 'status']);
+    await queryInterface.addIndex('reverse_logistics_items', ['warehouseId', 'code']);
+    await queryInterface.addIndex('reverse_logistics_items', ['serialNumber']);
+    console.log('✅ Tabela reverse_logistics_items criada sem vínculo obrigatório com o catálogo.');
+  }
+
+  const exits = await queryInterface.describeTable('reverse_logistics_exits').catch(() => null);
+  if (!exits) {
+    await queryInterface.createTable('reverse_logistics_exits', {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+      reference: { type: DataTypes.STRING(140), allowNull: false, unique: true },
+      supplierName: { type: DataTypes.STRING(180), allowNull: false },
+      documentNumber: { type: DataTypes.STRING(140), allowNull: false },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+      totalQuantity: { type: DataTypes.DECIMAL(14, 3), allowNull: false, defaultValue: 0 },
+      totalValue: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
+      warehouseId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'warehouses', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      createdById: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+      },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    });
+    await queryInterface.addIndex('reverse_logistics_exits', ['warehouseId', 'createdAt']);
+    console.log('✅ Tabela reverse_logistics_exits criada para saídas isoladas.');
+  }
+
+  const exitItems = await queryInterface.describeTable('reverse_logistics_exit_items').catch(() => null);
+  if (!exitItems) {
+    await queryInterface.createTable('reverse_logistics_exit_items', {
+      id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+      code: { type: DataTypes.STRING(100), allowNull: false },
+      description: { type: DataTypes.STRING(255), allowNull: false },
+      serialNumber: { type: DataTypes.STRING(160), allowNull: true },
+      quantity: { type: DataTypes.DECIMAL(14, 3), allowNull: false, defaultValue: 0 },
+      unit: { type: DataTypes.STRING(30), allowNull: false, defaultValue: 'un' },
+      unitCost: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
+      totalCost: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
+      reverseItemId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'reverse_logistics_items', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+      },
+      exitId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'reverse_logistics_exits', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
+      },
+      createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    });
+    await queryInterface.addIndex('reverse_logistics_exit_items', ['exitId']);
+    await queryInterface.addIndex('reverse_logistics_exit_items', ['reverseItemId']);
+    console.log('✅ Tabela reverse_logistics_exit_items criada.');
+  }
+}
+
+async function ensureServiceOrderEquipmentReplacementSchema(queryInterface) {
+  const replacements = await queryInterface.describeTable('service_order_equipment_replacements').catch(() => null);
+  if (replacements) return;
+
+  await queryInterface.createTable('service_order_equipment_replacements', {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+    oldSerialNumber: { type: DataTypes.STRING(140), allowNull: false },
+    newSerialNumber: { type: DataTypes.STRING(140), allowNull: false },
+    reason: { type: DataTypes.STRING(255), allowNull: true },
+    notes: { type: DataTypes.TEXT, allowNull: true },
+    serviceOrderId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'service_orders', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'CASCADE',
+    },
+    technicianId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'technicians', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'RESTRICT',
+    },
+    oldAssetId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'serialized_assets', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'RESTRICT',
+    },
+    newAssetId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'serialized_assets', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'RESTRICT',
+    },
+    oldMaterialId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'materials', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'RESTRICT',
+    },
+    newMaterialId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'materials', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'RESTRICT',
+    },
+    performedById: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    },
+    createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+  });
+  await queryInterface.addIndex('service_order_equipment_replacements', ['serviceOrderId', 'createdAt']);
+  await queryInterface.addIndex('service_order_equipment_replacements', ['technicianId']);
+  console.log('✅ Tabela service_order_equipment_replacements criada.');
+}
+
 async function ensureRuntimeSchema() {
   const queryInterface = sequelize.getQueryInterface();
   const users = await queryInterface.describeTable('users').catch(() => null);
@@ -306,6 +515,8 @@ async function ensureRuntimeSchema() {
   await ensureTransferItemLossSchema(queryInterface);
   await ensureToolTransferSchema(queryInterface);
   await ensureReverseLogisticsSchema(queryInterface);
+  await ensureIsolatedReverseLogisticsTables(queryInterface);
+  await ensureServiceOrderEquipmentReplacementSchema(queryInterface);
 }
 
 module.exports = { ensureRuntimeSchema };

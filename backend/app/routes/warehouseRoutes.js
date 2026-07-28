@@ -1,11 +1,14 @@
 const router = require('express').Router();
 const controller = require('../controllers/warehouseController');
+const reverseController = require('../controllers/reverseLogisticsController');
 const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 router.use(authenticate);
 router.get('/', requireModule('warehouses', 'receiving', 'transfers', 'materialRequests', 'technicianInbox', 'technicianBoxControl', 'technicianReturns'), controller.list);
 router.post('/transfer-stock', requireModule('warehouses', 'transfers'), controller.transferStock);
-router.post('/:id/reverse-exit', requireModule('warehouses'), controller.reverseExit);
+router.post('/:id/reverse-entry', requireModule('receiving', 'warehouses'), reverseController.entry);
+router.post('/:id/reverse-exit', requireModule('warehouses'), reverseController.exit);
 router.post('/:id/request-delete', requireModule('warehouses'), controller.requestDelete);
+router.get('/:id/reverse-export', requireModule('warehouses'), controller.reverseExport);
 router.get('/:id', requireModule('warehouses'), controller.get);
 router.post('/', requireModule('warehouses'), controller.create);
 router.put('/:id', requireModule('warehouses'), controller.update);
