@@ -223,8 +223,10 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
   if (oldAssetId === newAssetId) return fail(res, 400, 'O equipamento atual e o novo equipamento precisam ser diferentes.');
 
   const result = await sequelize.transaction(async (transaction) => {
+    // PostgreSQL não permite FOR UPDATE no lado anulável de um OUTER JOIN.
+    // Por isso, as linhas operacionais são bloqueadas sem includes e os dados
+    // relacionados são consultados separadamente dentro da mesma transação.
     const order = await ServiceOrder.findByPk(req.params.id, {
-      include: [Technician],
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
@@ -234,6 +236,8 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
       throw Object.assign(new Error('Você só pode substituir equipamentos das suas próprias ordens de serviço.'), { statusCode: 403 });
     }
 
+    const technician = await Technician.findByPk(order.technicianId, { transaction });
+
     const serviceOrderMaterial = await ServiceOrderMaterial.findOne({
       where: { serviceOrderId: order.id, assetId: oldAssetId },
       transaction,
@@ -241,35 +245,48 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
     });
     if (!serviceOrderMaterial) throw Object.assign(new Error('O equipamento atual não pertence a esta OS.'), { statusCode: 400 });
 
-    const oldAsset = await SerializedAsset.findByPk(oldAssetId, {
-      include: [Material],
+    // Bloqueia os dois equipamentos em uma única consulta e em ordem fixa para
+    // reduzir risco de deadlock em substituições concorrentes.
+    const lockedAssets = await SerializedAsset.findAll({
+      where: { id: { [Op.in]: [oldAssetId, newAssetId] } },
+      order: [['id', 'ASC']],
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    const newAsset = await SerializedAsset.findByPk(newAssetId, {
-      include: [Material],
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
+    const assetsById = new Map(lockedAssets.map((asset) => [Number(asset.id), asset]));
+    const oldAsset = assetsById.get(oldAssetId);
+    const newAsset = assetsById.get(newAssetId);
 
     if (!oldAsset || !newAsset) throw Object.assign(new Error('Equipamento atual ou novo equipamento não encontrado.'), { statusCode: 404 });
+
+    const materials = await Material.findAll({
+      where: { id: { [Op.in]: [oldAsset.materialId, newAsset.materialId] } },
+      transaction,
+    });
+    const materialsById = new Map(materials.map((material) => [Number(material.id), material]));
+    const oldMaterial = materialsById.get(Number(oldAsset.materialId));
+    const newMaterial = materialsById.get(Number(newAsset.materialId));
+
+    if (!oldMaterial || !newMaterial) {
+      throw Object.assign(new Error('O material vinculado ao equipamento atual ou ao novo equipamento não foi encontrado.'), { statusCode: 404 });
+    }
     if (oldAsset.ownerType !== 'cliente' || oldAsset.status !== 'instalado') {
       throw Object.assign(new Error(`O equipamento ${oldAsset.serialNumber} não está instalado em cliente.`), { statusCode: 400 });
     }
     if (newAsset.ownerType !== 'tecnico' || newAsset.status !== 'com_tecnico' || Number(newAsset.technicianId) !== Number(order.technicianId)) {
-      throw Object.assign(new Error(`O equipamento ${newAsset.serialNumber} não está disponível na caixa do técnico ${order.Technician?.name || ''}.`), { statusCode: 400 });
+      throw Object.assign(new Error(`O equipamento ${newAsset.serialNumber} não está disponível na caixa do técnico ${technician?.name || ''}.`), { statusCode: 400 });
     }
 
-    const oldCategory = String(oldAsset.Material?.category || '').trim().toLowerCase();
-    const newCategory = String(newAsset.Material?.category || '').trim().toLowerCase();
+    const oldCategory = String(oldMaterial.category || '').trim().toLowerCase();
+    const newCategory = String(newMaterial.category || '').trim().toLowerCase();
     if (oldCategory && newCategory && oldCategory !== newCategory) {
-      throw Object.assign(new Error(`A substituição deve usar equipamento da mesma categoria. Atual: ${oldAsset.Material?.category}; novo: ${newAsset.Material?.category}.`), { statusCode: 400 });
+      throw Object.assign(new Error(`A substituição deve usar equipamento da mesma categoria. Atual: ${oldMaterial.category}; novo: ${newMaterial.category}.`), { statusCode: 400 });
     }
 
     const before = {
       serviceOrderMaterial: serviceOrderMaterial.toJSON(),
-      oldAsset: oldAsset.toJSON(),
-      newAsset: newAsset.toJSON(),
+      oldAsset: { ...oldAsset.toJSON(), Material: oldMaterial.toJSON() },
+      newAsset: { ...newAsset.toJSON(), Material: newMaterial.toJSON() },
     };
     const reference = replacementReference(order);
     const movementAt = new Date();
@@ -302,7 +319,7 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
     serviceOrderMaterial.assetId = newAsset.id;
     serviceOrderMaterial.serialNumber = newAsset.serialNumber;
     serviceOrderMaterial.quantity = 1;
-    serviceOrderMaterial.unitCost = money(newAsset.acquisitionCost || newAsset.Material?.unitCost || 0);
+    serviceOrderMaterial.unitCost = money(newAsset.acquisitionCost || newMaterial.unitCost || 0);
     serviceOrderMaterial.totalCost = serviceOrderMaterial.unitCost;
     await serviceOrderMaterial.save({ transaction });
 
@@ -359,8 +376,8 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
         reference,
         replacement: replacement.toJSON(),
         serviceOrderMaterial: serviceOrderMaterial.toJSON(),
-        oldAsset: oldAsset.toJSON(),
-        newAsset: newAsset.toJSON(),
+        oldAsset: { ...oldAsset.toJSON(), Material: oldMaterial.toJSON() },
+        newAsset: { ...newAsset.toJSON(), Material: newMaterial.toJSON() },
       },
       transaction,
     });
