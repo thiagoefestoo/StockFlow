@@ -6,16 +6,25 @@ import EmptyState from '../components/EmptyState';
 export default function Dashboard() {
   const [bi, setBi] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [city, setCity] = useState('');
+  const [cities, setCities] = useState([]);
   async function load() {
     setLoading(true);
-    try { setBi((await api.get('/bi/executive')).data.data); } finally { setLoading(false); }
+    try {
+      const [biResponse, optionsResponse] = await Promise.all([
+        api.get('/bi/executive', { params: city ? { city } : {} }),
+        api.getCached('/bi/filter-options', {}, 300000),
+      ]);
+      setBi(biResponse.data.data);
+      setCities(optionsResponse.data.data?.cities || []);
+    } finally { setLoading(false); }
   }
   async function runIntelligence() {
     await api.post('/notifications/generate');
     load();
     alert('Inteligência executada. Confira o sino de notificações.');
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [city]);
   if (loading) return <div className="panel">Carregando painel...</div>;
   const c = bi?.cards || {};
   return (
@@ -26,7 +35,10 @@ export default function Dashboard() {
           <h2>Radar operacional da prestadora</h2>
           <p>Monitore estoque, carga dos técnicos, guias pendentes de assinatura, patrimônio em campo e baixas por OS.</p>
         </div>
-        <button onClick={runIntelligence}>Gerar alertas agora</button>
+        <div className="row-actions">
+          <label className="city-selector"><span>Cidade</span><select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Todas as cidades</option>{cities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <button onClick={runIntelligence}>Gerar alertas agora</button>
+        </div>
       </section>
       <div className="kpi-grid">
         <KpiCard label="Equipamentos serializados" value={c.totalAssets || 0} hint="ONUs e ativos com serial" />

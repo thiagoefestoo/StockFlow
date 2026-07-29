@@ -17,15 +17,19 @@ export default function OperationsCockpit() {
   const [data, setData] = useState(null);
   const [message, setMessage] = useState('');
   const [details, setDetails] = useState(null);
+  const [city, setCity] = useState('');
+  const [cities, setCities] = useState([]);
   async function load() {
     try {
       setMessage('');
-      setData((await api.get('/operations/cockpit')).data.data);
+      const response = await api.get('/operations/cockpit', { params: city ? { city } : {} });
+      setData(response.data.data);
+      setCities(response.data.data?.cities || []);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao carregar cockpit.');
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [city]);
   const k = data?.kpis || {};
   return (
     <div className="page-grid erp-page">
@@ -35,7 +39,10 @@ export default function OperationsCockpit() {
           <h2>Centro de controle da prestadora</h2>
           <p>Fila de aprovações, materiais em carga, guias sem assinatura, OS abertas e patrimônio sob responsabilidade técnica.</p>
         </div>
-        <button onClick={load}>Atualizar agora</button>
+        <div className="row-actions">
+          <label className="city-selector"><span>Cidade</span><select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Todas as cidades</option>{cities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <button onClick={load}>Atualizar agora</button>
+        </div>
       </section>
       {message && <div className="alert danger">{message}</div>}
       <div className="kpi-grid">

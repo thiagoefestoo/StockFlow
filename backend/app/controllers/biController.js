@@ -84,6 +84,7 @@ function buildFilters(query = {}) {
   return {
     ...range,
     calculationMode: query.calculationMode || 'competencia',
+    city: String(query.city || '').trim(),
     technicianIds: asArray(query.technicianId),
     companyIds: asArray(query.companyId),
     materialIds: asArray(query.materialId),
@@ -102,6 +103,59 @@ function buildFilters(query = {}) {
     maxValue: numeric(query.maxValue),
     search: String(query.search || '').trim().toLowerCase(),
   };
+}
+
+
+async function resolveCityScope(filters = {}) {
+  const city = String(filters.city || '').trim();
+  if (!city) return { ...filters, warehouseIds: [], technicianCityIds: [], cityOsNumbers: [] };
+
+  const warehouses = await Warehouse.findAll({
+    where: {
+      isReverseLogistics: false,
+      status: 'ativo',
+      city: { [Op.iLike]: city },
+    },
+    attributes: ['id'],
+    raw: true,
+  });
+  const warehouseIds = warehouses.map((row) => Number(row.id)).filter(Number.isFinite);
+  const technicians = warehouseIds.length
+    ? await Technician.findAll({
+        where: { defaultWarehouseId: { [Op.in]: warehouseIds } },
+        attributes: ['id'],
+        raw: true,
+      })
+    : [];
+  const technicianCityIds = technicians.map((row) => Number(row.id)).filter(Number.isFinite);
+  const orders = await ServiceOrder.findAll({
+    where: {
+      [Op.or]: [
+        { city: { [Op.iLike]: city } },
+        ...(warehouseIds.length ? [{ warehouseId: { [Op.in]: warehouseIds } }] : []),
+      ],
+    },
+    attributes: ['osNumber'],
+    raw: true,
+  });
+  const cityOsNumbers = orders.map((row) => String(row.osNumber || '').trim()).filter(Boolean);
+  return { ...filters, warehouseIds, technicianCityIds, cityOsNumbers };
+}
+
+function cityMatchesTechnician(technician, filters) {
+  if (!filters.city) return true;
+  return filters.technicianCityIds.includes(Number(technician?.id));
+}
+
+function cityMatchesWarehouseId(warehouseId, filters) {
+  if (!filters.city) return true;
+  return filters.warehouseIds.includes(Number(warehouseId));
+}
+
+function cityMatchesOrder(order, filters) {
+  if (!filters.city) return true;
+  return String(order?.city || '').trim().toLowerCase() === String(filters.city).trim().toLowerCase()
+    || cityMatchesWarehouseId(order?.warehouseId, filters);
 }
 
 function matchesSelected(value, selected = []) {
@@ -167,6 +221,7 @@ function rowHasFilteredMaterial(items = [], filters) {
 
 function filterBatches(batches, filters) {
   return batches.filter((batch) => {
+    if (!cityMatchesWarehouseId(batch.warehouseId, filters)) return false;
     if (!inDateRange(batch.receivedAt || batch.createdAt, filters)) return false;
     if (!matchesSelected(batch.sourceCompany, filters.sourceCompanies)) return false;
     if (!matchesSelected(batch.fiscalDocumentType, filters.fiscalDocumentTypes)) return false;
@@ -180,6 +235,7 @@ function filterBatches(batches, filters) {
 
 function filterTransfers(transfers, filters) {
   return transfers.filter((transfer) => {
+    if (filters.city && !cityMatchesWarehouseId(transfer.warehouseId, filters) && !filters.technicianCityIds.includes(Number(transfer.technicianId))) return false;
     const dateField = filters.calculationMode === 'movimento' ? (transfer.signedAt || transfer.deliveredAt || transfer.createdAt) : (transfer.deliveredAt || transfer.createdAt);
     if (!inDateRange(dateField, filters)) return false;
     if (!matchesSelected(transfer.status, filters.transferStatuses)) return false;
@@ -193,6 +249,7 @@ function filterTransfers(transfers, filters) {
 
 function filterOrders(orders, filters) {
   return orders.filter((order) => {
+    if (!cityMatchesOrder(order, filters)) return false;
     const dateField = filters.calculationMode === 'movimento' ? (order.completedAt || order.createdAt) : (order.createdAt || order.completedAt);
     if (!inDateRange(dateField, filters)) return false;
     if (!matchesSelected(order.status, filters.orderStatuses)) return false;
@@ -207,6 +264,12 @@ function filterOrders(orders, filters) {
 
 function filterMovements(movements, filters) {
   return movements.filter((movement) => {
+    if (filters.city) {
+      const warehouseMatch = cityMatchesWarehouseId(movement.fromWarehouseId, filters) || cityMatchesWarehouseId(movement.toWarehouseId, filters);
+      const technicianMatch = filters.technicianCityIds.includes(Number(movement.fromTechnicianId)) || filters.technicianCityIds.includes(Number(movement.toTechnicianId));
+      const osMatch = filters.cityOsNumbers.includes(String(movement.reference || '').trim());
+      if (!warehouseMatch && !technicianMatch && !osMatch) return false;
+    }
     if (!inDateRange(movement.movementAt || movement.createdAt, filters)) return false;
     if (!matchesSelected(movement.type, filters.movementTypes)) return false;
     if (!matchesSelected(movement.fromOwnerType, filters.ownerTypes) && !matchesSelected(movement.toOwnerType, filters.ownerTypes)) return false;
@@ -223,11 +286,12 @@ function filterMovements(movements, filters) {
 
 async function getFilterOptions() {
   const reverseIds = await reverseWarehouseIds();
-  const [materials, technicians, companies, batches] = await Promise.all([
+  const [materials, technicians, companies, batches, warehouses] = await Promise.all([
     Material.findAll({ order: [['name', 'ASC']] }),
     Technician.findAll({ include: [ContractorCompany], order: [['name', 'ASC']] }),
     ContractorCompany.findAll({ order: [['name', 'ASC']] }),
     StockBatch.findAll({ where: warehouseOutsideReverse(reverseIds), attributes: ['sourceCompany'], order: [['sourceCompany', 'ASC']] }),
+    Warehouse.findAll({ where: { isReverseLogistics: false, status: 'ativo' }, attributes: ['city'], order: [['city', 'ASC']] }),
   ]);
   return {
     materials: materials.map((m) => ({ id: m.id, name: `${m.name} (${m.sku})`, category: m.category, requiresSerial: m.requiresSerial })),
@@ -235,6 +299,7 @@ async function getFilterOptions() {
     companies: companies.map((c) => ({ id: c.id, name: c.name })),
     categories: [...new Set(materials.map((m) => m.category).filter(Boolean))],
     sourceCompanies: [...new Set(batches.map((b) => b.sourceCompany).filter(Boolean))],
+    cities: [...new Set(warehouses.map((w) => String(w.city || '').trim()).filter(Boolean))],
     ownerTypes: ['estoque', 'tecnico', 'cliente', 'fornecedor'],
     assetStatuses: ['em_estoque', 'com_tecnico', 'instalado', 'devolvido', 'manutencao', 'perdido', 'baixado'],
     movementTypes: ['entrada', 'transferencia_tecnico', 'retorno_tecnico', 'baixa_os', 'ajuste', 'perda', 'cancelamento'],
@@ -419,6 +484,17 @@ async function calculateStockPosition(materials, filters = {}) {
   const quantities = { estoque: 0, tecnico: 0, cliente: 0, manutencao: 0, perdido: 0, totalAtual: 0, totalRastreado: 0 };
   const reverseIds = await reverseWarehouseIds();
   const reverseSet = new Set(reverseIds.map(Number));
+  const installedSerialsForCity = new Set();
+  if (filters.city) {
+    const cityOrders = await ServiceOrder.findAll({
+      where: { [Op.or]: [{ city: { [Op.iLike]: filters.city } }, ...(filters.warehouseIds.length ? [{ warehouseId: { [Op.in]: filters.warehouseIds } }] : [])] },
+      attributes: ['id'],
+      include: [{ model: ServiceOrderMaterial, attributes: ['serialNumber'] }],
+    });
+    cityOrders.forEach((order) => (order.ServiceOrderMaterials || []).forEach((item) => {
+      if (item.serialNumber) installedSerialsForCity.add(String(item.serialNumber).trim().toUpperCase());
+    }));
+  }
 
   const selectedMaterials = materials.filter((material) => materialMatches(material, { ...filters, search: '' }));
   const materialIds = selectedMaterials.map((material) => material.id);
@@ -461,6 +537,11 @@ async function calculateStockPosition(materials, filters = {}) {
     if (material.requiresSerial) {
       const assets = (assetsByMaterial.get(Number(material.id)) || []).filter((asset) => {
         if (asset.ownerType === 'estoque' && reverseSet.has(Number(asset.warehouseId))) return false;
+        if (filters.city) {
+          if (asset.ownerType === 'estoque' && !cityMatchesWarehouseId(asset.warehouseId, filters)) return false;
+          if (asset.ownerType === 'tecnico' && !filters.technicianCityIds.includes(Number(asset.technicianId))) return false;
+          if (asset.ownerType === 'cliente' && !installedSerialsForCity.has(String(asset.serialNumber || '').trim().toUpperCase())) return false;
+        }
         if (!matchesSelected(asset.ownerType, filters.ownerTypes)) return false;
         if (!matchesSelected(asset.status, filters.assetStatuses)) return false;
         if ((filters.technicianIds.length || filters.companyIds.length) && !technicianMatches(asset.Technician, filters)) return false;
@@ -486,6 +567,10 @@ async function calculateStockPosition(materials, filters = {}) {
     } else {
       const balances = (balancesByMaterial.get(Number(material.id)) || []).filter((row) => {
         if (row.ownerType === 'estoque' && reverseSet.has(Number(row.warehouseId))) return false;
+        if (filters.city) {
+          if (row.ownerType === 'estoque' && !cityMatchesWarehouseId(row.warehouseId, filters)) return false;
+          if (row.ownerType === 'tecnico' && !filters.technicianCityIds.includes(Number(row.technicianId))) return false;
+        }
         if (!matchesSelected(row.ownerType, filters.ownerTypes)) return false;
         if ((filters.technicianIds.length || filters.companyIds.length) && !technicianMatches(row.Technician, filters)) return false;
         return true;
@@ -623,7 +708,7 @@ async function loadBiData(filters, requested = {}) {
       : Promise.resolve([]),
     needs('technicians')
       ? Technician.findAll({
-          attributes: ['id', 'name', 'document', 'email', 'type', 'status', 'companyId'],
+          attributes: ['id', 'name', 'document', 'email', 'type', 'status', 'companyId', 'defaultWarehouseId'],
           include: [{ model: ContractorCompany, attributes: ['id', 'name'] }],
           order: [['name', 'ASC']],
         })
@@ -631,7 +716,7 @@ async function loadBiData(filters, requested = {}) {
     needs('materialRequests')
       ? MaterialRequest.findAll({
           where: dateWhere('createdAt', filters),
-          attributes: ['id', 'requestNumber', 'status', 'priority', 'totalQuantity', 'totalValue', 'technicianId', 'createdAt'],
+          attributes: ['id', 'requestNumber', 'status', 'priority', 'totalQuantity', 'totalValue', 'technicianId', 'warehouseId', 'createdAt'],
           include: [{ model: Technician, attributes: ['id', 'name', 'companyId'] }],
           order: [['createdAt', 'DESC']],
           limit: 1000,
@@ -652,14 +737,27 @@ async function loadBiData(filters, requested = {}) {
   transfers = filterTransfers(transfers, filters);
   orders = filterOrders(orders, filters);
   movements = filterMovements(movements, filters);
-  technicians = technicians.filter((tech) => technicianMatches(tech, filters) && textIncludes([tech.name, tech.document, tech.email, tech.ContractorCompany?.name], filters.search || ''));
-  materialRequests = materialRequests.filter((request) => technicianMatches(request.Technician, filters) && inDateRange(request.createdAt, filters));
+  technicians = technicians.filter((tech) => cityMatchesTechnician(tech, filters) && technicianMatches(tech, filters) && textIncludes([tech.name, tech.document, tech.email, tech.ContractorCompany?.name], filters.search || ''));
+  materialRequests = materialRequests.filter((request) => (!filters.city || cityMatchesWarehouseId(request.warehouseId, filters) || filters.technicianCityIds.includes(Number(request.technicianId))) && technicianMatches(request.Technician, filters) && inDateRange(request.createdAt, filters));
   approvalRequests = approvalRequests.filter((approval) => inDateRange(approval.createdAt, filters));
 
   return { materials, batches, transfers, orders, movements, technicians, materialRequests, approvalRequests };
 }
 
-async function installedQuantitiesByMaterial(materials = [], stockPosition = null) {
+async function installedQuantitiesByMaterial(materials = [], stockPosition = null, filters = {}) {
+  if (filters.city) {
+    const orders = await ServiceOrder.findAll({
+      where: { [Op.or]: [{ city: { [Op.iLike]: filters.city } }, ...(filters.warehouseIds.length ? [{ warehouseId: { [Op.in]: filters.warehouseIds } }] : [])], status: 'concluida' },
+      attributes: ['id'],
+      include: [{ model: ServiceOrderMaterial, attributes: ['materialId', 'quantity'] }],
+    });
+    const totals = new Map();
+    orders.forEach((order) => (order.ServiceOrderMaterials || []).forEach((item) => {
+      const id = Number(item.materialId);
+      totals.set(id, Number(totals.get(id) || 0) + Number(item.quantity || 0));
+    }));
+    return totals;
+  }
   const positionRows = new Map((stockPosition?.rows || []).map((row) => [Number(row.id), Number(row.clienteQty || 0)]));
   const nonSerializedIds = materials.filter((material) => !material.requiresSerial).map((material) => Number(material.id)).filter(Number.isFinite);
   const movementTotals = new Map();
@@ -692,7 +790,7 @@ async function summarizeMaterials(filters, materials = null, stockPosition = nul
   const selectedMaterials = materials || (await Material.findAll({ attributes: materialAttributes(), order: [['name', 'ASC']] }))
     .filter((material) => materialMatches(material, { ...filters, search: '' }));
   const position = stockPosition || await calculateStockPosition(selectedMaterials, filters);
-  const installedByMaterial = await installedQuantitiesByMaterial(selectedMaterials, position);
+  const installedByMaterial = await installedQuantitiesByMaterial(selectedMaterials, position, filters);
   return position.rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -709,7 +807,7 @@ async function summarizeMaterials(filters, materials = null, stockPosition = nul
 }
 
 exports.executive = asyncHandler(async (req, res) => {
-  const filters = buildFilters(req.query);
+  const filters = await resolveCityScope(buildFilters(req.query));
   const { materials, transfers, orders, movements, technicians } = await loadBiData(filters, {
     all: false,
     materials: true,
@@ -828,12 +926,13 @@ exports.executive = asyncHandler(async (req, res) => {
     assetsByOwner,
     assetsByStatus,
     filtersApplied: { ...req.query, startDate: dateOnly(filters.start), endDate: dateOnly(filters.end) },
+    selectedCity: filters.city || null,
     generatedAt: new Date().toISOString(),
   });
 });
 
 exports.technicians = asyncHandler(async (req, res) => {
-  const filters = buildFilters(req.query);
+  const filters = await resolveCityScope(buildFilters(req.query));
   const { technicians, transfers, orders } = await loadBiData(filters, {
     all: false,
     technicians: true,
@@ -904,7 +1003,7 @@ exports.technicians = asyncHandler(async (req, res) => {
 });
 
 exports.audit = asyncHandler(async (req, res) => {
-  const filters = buildFilters(req.query);
+  const filters = await resolveCityScope(buildFilters(req.query));
   const { transfers, movements } = await loadBiData(filters, {
     all: false,
     transfers: true,
@@ -1002,7 +1101,7 @@ exports.audit = asyncHandler(async (req, res) => {
 });
 
 exports.financial = asyncHandler(async (req, res) => {
-  const filters = buildFilters(req.query);
+  const filters = await resolveCityScope(buildFilters(req.query));
   const { materials, batches, transfers, orders, movements, technicians, materialRequests, approvalRequests } = await loadBiData(filters);
   const stockPosition = await calculateStockPosition(materials, filters);
   const confirmedBatches = batches.filter((batch) => batch.status !== 'cancelado');

@@ -12,6 +12,7 @@ const {
   Notification,
   TechnicianToolDocument,
   TechnicianTool,
+  Warehouse,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
@@ -149,62 +150,109 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
 });
 
 exports.cockpit = asyncHandler(async (req, res) => {
+  const selectedCity = String(req.query.city || '').trim();
+  const operationalWarehouses = await Warehouse.findAll({
+    where: { isReverseLogistics: false, status: 'ativo' },
+    attributes: ['id', 'city'],
+    order: [['city', 'ASC'], ['name', 'ASC']],
+    raw: true,
+  });
+  const cities = [...new Set(operationalWarehouses.map((row) => String(row.city || '').trim()).filter(Boolean))];
+  const cityWarehouseIds = selectedCity
+    ? operationalWarehouses.filter((row) => String(row.city || '').trim().toLowerCase() === selectedCity.toLowerCase()).map((row) => Number(row.id))
+    : operationalWarehouses.map((row) => Number(row.id));
+  const cityTechnicians = selectedCity
+    ? await Technician.findAll({ where: { defaultWarehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } }, attributes: ['id'], raw: true })
+    : [];
+  const cityTechnicianIds = cityTechnicians.map((row) => Number(row.id));
+
+  const requestCityWhere = selectedCity ? {
+    [Op.or]: [
+      { warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
+      { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
+    ],
+  } : {};
+  const transferCityWhere = selectedCity ? {
+    [Op.or]: [
+      { warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
+      { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
+    ],
+  } : {};
+  const orderCityWhere = selectedCity ? {
+    [Op.or]: [
+      { city: { [Op.iLike]: selectedCity } },
+      { warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
+    ],
+  } : {};
+
   if (String(req.query.summaryOnly || '').toLowerCase() === 'true') {
+    const scopedRequests = selectedCity ? await MaterialRequest.findAll({ where: requestCityWhere, attributes: ['id'], raw: true }) : [];
+    const scopedIds = scopedRequests.map((row) => String(row.id));
+    const approvalWhere = selectedCity
+      ? { status: 'pendente', entityId: { [Op.in]: scopedIds.length ? scopedIds : ['-1'] } }
+      : { status: 'pendente' };
     const [pendingApprovals, pendingSignatures, openOrders, unreadNotifications] = await Promise.all([
-      ApprovalRequest.count({ where: { status: 'pendente' } }),
-      Transfer.count({ where: { status: 'pendente_assinatura' } }),
-      ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
+      ApprovalRequest.count({ where: approvalWhere }),
+      Transfer.count({ where: { ...transferCityWhere, status: 'pendente_assinatura' } }),
+      ServiceOrder.count({ where: { ...orderCityWhere, status: { [Op.in]: ['aberta', 'pendente'] } } }),
       Notification.count({ where: { status: 'nao_lida' } }),
     ]);
     return ok(res, {
       kpis: { pendingApprovals, pendingSignatures, openOrders, unreadNotifications },
-      queue: [],
-      custodyRanking: [],
-      recentMovements: [],
-      recentRequests: [],
-      summaryOnly: true,
+      queue: [], custodyRanking: [], recentMovements: [], recentRequests: [],
+      summaryOnly: true, selectedCity: selectedCity || null, cities,
     });
   }
 
   const today = new Date();
   const last30 = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
   const reverseIds = await reverseWarehouseIds();
-  const reverseSet = new Set(reverseIds);
-  const operationalStockWhere = reverseIds.length ? { warehouseId: { [Op.notIn]: reverseIds } } : {};
+  const reverseSet = new Set(reverseIds.map(Number));
+
+  const requestRows = await MaterialRequest.findAll({ where: requestCityWhere, attributes: ['id'], raw: true });
+  const requestIds = requestRows.map((row) => String(row.id));
+  const approvalWhere = selectedCity
+    ? { status: 'pendente', entityId: { [Op.in]: requestIds.length ? requestIds : ['-1'] } }
+    : { status: 'pendente' };
+
+  const movementCityWhere = selectedCity ? {
+    [Op.or]: [
+      { fromWarehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
+      { toWarehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
+      { fromTechnicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
+      { toTechnicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
+    ],
+  } : {};
 
   const [
-    pendingRequests,
-    approvedRequests,
-    deliveredRequests,
-    pendingApprovals,
-    pendingSignatures,
-    openOrders,
-    completedOrders30,
-    unreadNotifications,
-    assetsWithTech,
-    assetsInStock,
-    recentMovements,
-    recentRequests,
+    pendingRequests, approvedRequests, deliveredRequests, pendingApprovals,
+    pendingSignatures, openOrders, completedOrders30, unreadNotifications,
+    assetsWithTech, assetsInStock, recentMovements, recentRequests, balances,
   ] = await Promise.all([
-    MaterialRequest.count({ where: { status: 'pendente_aprovacao' } }),
-    MaterialRequest.count({ where: { status: 'aprovado' } }),
-    MaterialRequest.count({ where: { status: 'entregue' } }),
-    ApprovalRequest.count({ where: { status: 'pendente' } }),
-    Transfer.count({ where: { status: 'pendente_assinatura' } }),
-    ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
-    ServiceOrder.count({ where: { status: 'concluida', completedAt: { [Op.gte]: last30 } } }),
+    MaterialRequest.count({ where: { ...requestCityWhere, status: 'pendente_aprovacao' } }),
+    MaterialRequest.count({ where: { ...requestCityWhere, status: 'aprovado' } }),
+    MaterialRequest.count({ where: { ...requestCityWhere, status: 'entregue' } }),
+    ApprovalRequest.count({ where: approvalWhere }),
+    Transfer.count({ where: { ...transferCityWhere, status: 'pendente_assinatura' } }),
+    ServiceOrder.count({ where: { ...orderCityWhere, status: { [Op.in]: ['aberta', 'pendente'] } } }),
+    ServiceOrder.count({ where: { ...orderCityWhere, status: 'concluida', completedAt: { [Op.gte]: last30 } } }),
     Notification.count({ where: { status: 'nao_lida' } }),
-    SerializedAsset.findAll({ where: { ownerType: 'tecnico' }, include: [Material, Technician] }),
-    SerializedAsset.findAll({ where: { ownerType: 'estoque', ...operationalStockWhere }, include: [Material] }),
-    StockMovement.findAll({ where: movementOutsideReverse(reverseIds), include: [Material, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }], order: [['movementAt', 'DESC']], limit: 12 }),
-    MaterialRequest.findAll({ include: [Technician], order: [['createdAt', 'DESC']], limit: 8 }),
+    SerializedAsset.findAll({ where: { ownerType: 'tecnico', ...(selectedCity ? { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } } : {}) }, include: [Material, Technician] }),
+    SerializedAsset.findAll({ where: { ownerType: 'estoque', warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } }, include: [Material] }),
+    StockMovement.findAll({ where: { [Op.and]: [movementOutsideReverse(reverseIds), movementCityWhere] }, include: [Material, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }], order: [['movementAt', 'DESC']], limit: 12 }),
+    MaterialRequest.findAll({ where: requestCityWhere, include: [Technician], order: [['createdAt', 'DESC']], limit: 8 }),
+    StockBalance.findAll({ include: [Material, Technician] }),
   ]);
 
-  const balances = await StockBalance.findAll({ include: [Material, Technician] });
-  const stockValue = balances.filter((row) => row.ownerType === 'estoque' && !reverseSet.has(Number(row.warehouseId))).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0)
+  const filteredBalances = balances.filter((row) => {
+    if (row.ownerType === 'estoque') return !reverseSet.has(Number(row.warehouseId)) && (!selectedCity || cityWarehouseIds.includes(Number(row.warehouseId)));
+    if (row.ownerType === 'tecnico') return !selectedCity || cityTechnicianIds.includes(Number(row.technicianId));
+    return false;
+  });
+  const stockValue = filteredBalances.filter((row) => row.ownerType === 'estoque').reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0)
     + assetsInStock.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0);
   const custodyValue = assetsWithTech.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0)
-    + balances.filter((row) => row.ownerType === 'tecnico').reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
+    + filteredBalances.filter((row) => row.ownerType === 'tecnico').reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
 
   const technicianMap = new Map();
   for (const asset of assetsWithTech) {
@@ -214,9 +262,10 @@ exports.cockpit = asyncHandler(async (req, res) => {
     current.value += Number(asset.acquisitionCost || asset.Material?.unitCost || 0);
     technicianMap.set(key, current);
   }
-  for (const row of balances.filter((item) => item.ownerType === 'tecnico')) {
+  for (const row of filteredBalances.filter((item) => item.ownerType === 'tecnico')) {
     const key = row.Technician?.id || 'sem-tecnico';
     const current = technicianMap.get(key) || { technician: row.Technician?.name || 'Sem técnico', assets: 0, value: 0 };
+    current.assets += Number(row.quantity || 0);
     current.value += Number(row.quantity || 0) * Number(row.Material?.unitCost || 0);
     technicianMap.set(key, current);
   }
@@ -229,23 +278,12 @@ exports.cockpit = asyncHandler(async (req, res) => {
   ].filter(Boolean);
 
   return ok(res, {
-    kpis: {
-      pendingApprovals,
-      pendingRequests,
-      approvedRequests,
-      deliveredRequests,
-      pendingSignatures,
-      openOrders,
-      completedOrders30,
-      unreadNotifications,
-      stockValue,
-      custodyValue,
-      assetsWithTech: assetsWithTech.length,
-      assetsInStock: assetsInStock.length,
-    },
+    kpis: { pendingApprovals, pendingRequests, approvedRequests, deliveredRequests, pendingSignatures, openOrders, completedOrders30, unreadNotifications, stockValue, custodyValue, assetsWithTech: assetsWithTech.length, assetsInStock: assetsInStock.length },
     queue,
     custodyRanking: [...technicianMap.values()].sort((a, b) => b.value - a.value).slice(0, 8),
     recentMovements,
     recentRequests,
+    selectedCity: selectedCity || null,
+    cities,
   });
 });

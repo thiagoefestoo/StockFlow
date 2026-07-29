@@ -6,6 +6,7 @@ const EMPTY_FILTERS = {
   startDate: '',
   endDate: '',
   calculationMode: 'competencia',
+  city: '',
   technicianId: '',
   companyId: '',
   materialId: '',
@@ -32,6 +33,7 @@ const FIELD_LABELS = {
   startDate: 'Data inicial',
   endDate: 'Data final',
   calculationMode: 'Cálculo',
+  city: 'Cidade',
   technicianId: 'Técnico',
   companyId: 'Empresa',
   materialId: 'Material',
@@ -120,6 +122,7 @@ export default function BIFilters({ value, onChange, onApply, onReset, loading, 
   const lists = useMemo(() => {
     const data = options || {};
     return {
+      cities: uniqueOptions(data.cities),
       technicians: optionList(data.technicians),
       companies: optionList(data.companies),
       materials: optionList(data.materials),
@@ -139,6 +142,7 @@ export default function BIFilters({ value, onChange, onApply, onReset, loading, 
   const optionMaps = useMemo(() => {
     const build = (items = []) => Object.fromEntries(items.map((item) => [String(item.value), item.label]));
     return {
+      city: build(lists.cities),
       technicianId: build(lists.technicians),
       companyId: build(lists.companies),
       materialId: build(lists.materials),
@@ -242,6 +246,7 @@ export default function BIFilters({ value, onChange, onApply, onReset, loading, 
             <option value="cliente">Apenas cliente/instalado</option>
           </SelectField>
 
+          <SelectField label="Cidade operacional" field="city" options={lists.cities} />
           <SelectField label="Técnico" field="technicianId" options={lists.technicians} />
           <SelectField label="Empresa / terceirizada" field="companyId" options={lists.companies} />
           <SelectField label="Material" field="materialId" options={lists.materials} />

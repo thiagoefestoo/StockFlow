@@ -2848,3 +2848,26 @@ input[readonly], textarea[readonly] {
   border-color: rgba(153, 102, 51, 0.35);
   background: rgba(245, 231, 211, 0.22);
 }
+
+
+.city-selector {
+  display: grid;
+  gap: 4px;
+  min-width: 210px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted, #64748b);
+}
+.city-selector select {
+  min-height: 40px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0 12px;
+  color: #0f172a;
+  font-weight: 700;
+}
+@media (max-width: 720px) {
+  .city-selector { min-width: 100%; }
+  .command-center .row-actions, .hero-panel .row-actions { width: 100%; }
+}
