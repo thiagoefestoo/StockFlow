@@ -18,6 +18,8 @@ export default function ServiceOrders() {
   const canReplaceEquipment = canAccessModule('serviceOrderEquipmentReplace');
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState('');
+  const [cities, setCities] = useState([]);
+  const [cityFilter, setCityFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
@@ -26,10 +28,10 @@ export default function ServiceOrders() {
   const [replacement, setReplacement] = useState(emptyReplacement());
   const [message, setMessage] = useState('');
 
-  async function load(targetPage = page) {
+  async function load(targetPage = page, selectedCity = cityFilter) {
     setLoading(true);
     try {
-      const response = await api.get('/service-orders', { params: { search, page: targetPage, pageSize: 15 } });
+      const response = await api.get('/service-orders', { params: { search, city: selectedCity || undefined, page: targetPage, pageSize: 15 } });
       setOrders(response.data.data || []);
       setPagination(response.data.pagination || { page: targetPage, pageSize: 15, total: response.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
@@ -40,7 +42,17 @@ export default function ServiceOrders() {
     }
   }
 
-  useEffect(() => { load(1); }, []);
+  async function loadCities() {
+    try {
+      const response = await api.get('/warehouses', { params: { operationalOnly: true, status: 'ativo' } });
+      const values = Array.from(new Set((response.data.data || []).map((warehouse) => String(warehouse.city || '').trim()).filter(Boolean)));
+      setCities(values.sort((a, b) => a.localeCompare(b, 'pt-BR')));
+    } catch {
+      setCities([]);
+    }
+  }
+
+  useEffect(() => { loadCities(); load(1, ''); }, []);
 
   async function saveEdit() {
     try {
@@ -62,7 +74,7 @@ export default function ServiceOrders() {
         customerName: order.customerName || '',
         customerCpf: order.customerCpf || '',
         customerAddress: order.customerAddress || '',
-        city: order.city || '',
+        city: order.city || order.Warehouse?.city || '',
         serviceType: order.serviceType || '',
         status: order.status || 'concluida',
         completedAt: order.completedAt ? String(order.completedAt).slice(0, 16) : '',
@@ -138,16 +150,16 @@ export default function ServiceOrders() {
       <FloatingAlert message={message} type={message.includes('sucesso') || message.includes('substituído') ? 'success' : 'danger'} onClose={() => setMessage('')} />
       <div className="toolbar">
         <div><h2>Ordens de serviço</h2><p>Consulta de baixas feitas pelos técnicos com número do contrato e cliente.</p></div>
-        <div className="inline"><input placeholder="Buscar OS/cliente/contrato" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') load(1); }} /><button onClick={() => load(1)} disabled={loading}>{loading ? 'Buscando...' : 'Buscar'}</button></div>
+        <div className="inline service-order-filters"><select aria-label="Filtrar ordens por cidade" value={cityFilter} onChange={(e) => { const value = e.target.value; setCityFilter(value); load(1, value); }}><option value="">Todas as cidades</option>{cities.map((city) => <option key={city} value={city}>{city}</option>)}</select><input placeholder="Buscar OS/cliente/contrato" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') load(1); }} /><button onClick={() => load(1)} disabled={loading}>{loading ? 'Buscando...' : 'Buscar'}</button></div>
       </div>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Nº Contrato</th><th>Técnico</th><th>Tipo</th><th>Status</th><th>Data da baixa</th><th>Materiais</th><th className="action-cell">Opções</th></tr></thead><tbody>{orders.map((o) => <tr key={o.id}><td>{o.osNumber}</td><td>{o.customerName}</td><td>{o.customerCpf}</td><td>{o.Technician?.name}</td><td>{serviceTypeLabel(o.serviceType)}</td><td>{o.status}</td><td>{dt(o.completedAt)}</td><td>{o.ServiceOrderMaterials?.map((m) => m.serialNumber || `${m.Material?.name} (${formatQuantity(m.quantity)})`).join(', ')}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(o)}>Detalhes</button>{canReplaceEquipment && orderHasInstalledEquipment(o) && <button className="warning" onClick={() => openReplacement(o)}>Trocar equipamento</button>}{isAdmin && <button className="ghost" onClick={() => openEdit(o)}>Editar</button>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Nº Contrato</th><th>Cidade</th><th>Técnico</th><th>Tipo</th><th>Status</th><th>Data da baixa</th><th>Materiais</th><th className="action-cell">Opções</th></tr></thead><tbody>{orders.map((o) => <tr key={o.id}><td>{o.osNumber}</td><td>{o.customerName}</td><td>{o.customerCpf}</td><td>{o.city || o.Warehouse?.city || '-'}</td><td>{o.Technician?.name}</td><td>{serviceTypeLabel(o.serviceType)}</td><td>{o.status}</td><td>{dt(o.completedAt)}</td><td>{o.ServiceOrderMaterials?.map((m) => m.serialNumber || `${m.Material?.name} (${formatQuantity(m.quantity)})`).join(', ')}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(o)}>Detalhes</button>{canReplaceEquipment && orderHasInstalledEquipment(o) && <button className="warning" onClick={() => openReplacement(o)}>Trocar equipamento</button>}{isAdmin && <button className="ghost" onClick={() => openEdit(o)}>Editar</button>}</div></td></tr>)}</tbody></table></div>
         <Pagination {...pagination} page={page} loading={loading} onPageChange={load} />
       </section>
 
       <Modal open={edit.open} title={`Editar OS ${edit.item?.osNumber || ''}`} onClose={() => setEdit({ open: false, item: null, form: {} })} footer={<><button className="ghost" onClick={() => setEdit({ open: false, item: null, form: {} })}>Cancelar</button><button onClick={saveEdit}>Salvar alteração</button></>}>
-        <div className="form-grid"><label>Número OS<input value={edit.form.osNumber || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, osNumber: e.target.value } })} /></label><label>Cliente<input value={edit.form.customerName || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, customerName: e.target.value } })} /></label><label>Número do contrato<input value={edit.form.customerCpf || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, customerCpf: e.target.value } })} /></label><label>Endereço<input value={edit.form.customerAddress || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, customerAddress: e.target.value } })} /></label><label>Cidade<input value={edit.form.city || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, city: e.target.value } })} /></label><label>Tipo<select value={edit.form.serviceType || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, serviceType: e.target.value } })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Status<select value={edit.form.status || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, status: e.target.value } })}><option value="aberta">Aberta</option><option value="pendente">Pendente</option><option value="concluida">Concluída</option><option value="cancelada">Cancelada</option></select></label><label>Concluída em<input type="datetime-local" value={edit.form.completedAt || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, completedAt: e.target.value } })} /></label></div><label>Observações<textarea rows="4" value={edit.form.notes || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, notes: e.target.value } })} /></label>
+        <div className="form-grid"><label>Número OS<input value={edit.form.osNumber || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, osNumber: e.target.value } })} /></label><label>Cliente<input value={edit.form.customerName || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, customerName: e.target.value } })} /></label><label>Número do contrato<input value={edit.form.customerCpf || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, customerCpf: e.target.value } })} /></label><label>Endereço<input value={edit.form.customerAddress || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, customerAddress: e.target.value } })} /></label><label>Cidade vinculada<input value={edit.form.city || ''} readOnly /><small>A cidade é definida pelo estoque regional vinculado ao técnico no momento da baixa.</small></label><label>Tipo<select value={edit.form.serviceType || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, serviceType: e.target.value } })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Status<select value={edit.form.status || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, status: e.target.value } })}><option value="aberta">Aberta</option><option value="pendente">Pendente</option><option value="concluida">Concluída</option><option value="cancelada">Cancelada</option></select></label><label>Concluída em<input type="datetime-local" value={edit.form.completedAt || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, completedAt: e.target.value } })} /></label></div><label>Observações<textarea rows="4" value={edit.form.notes || ''} onChange={(e) => setEdit({ ...edit, form: { ...edit.form, notes: e.target.value } })} /></label>
       </Modal>
 
       <Modal open={replacement.open} title={`Substituir equipamento da OS ${replacement.order?.osNumber || ''}`} onClose={() => !replacement.saving && setReplacement(emptyReplacement())} footer={<><button className="ghost" disabled={replacement.saving} onClick={() => setReplacement(emptyReplacement())}>Cancelar</button><button disabled={replacement.loading || replacement.saving || !replacement.oldAssetId || !replacement.newAssetId} onClick={submitReplacement}>{replacement.saving ? 'Substituindo...' : 'Confirmar substituição'}</button></>}>
@@ -171,7 +183,7 @@ export default function ServiceOrders() {
       </Modal>
 
       <DetailsModal open={!!details} title={`Detalhes da OS ${details?.osNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canReplaceEquipment && details && orderHasInstalledEquipment(details) && <button className="warning" onClick={() => openReplacement(details)}>Trocar equipamento</button>}{isAdmin && details && <button onClick={() => { openEdit(details); setDetails(null); }}>Editar OS</button>}</>}>
-        {details && <><DetailGrid fields={[["OS", details.osNumber], ["Cliente", details.customerName], ["Nº Contrato", details.customerCpf], ["Endereço", details.customerAddress], ["Cidade", details.city], ["Técnico", details.Technician?.name], ["Tipo", serviceTypeLabel(details.serviceType)], ["Status", details.status], ["Concluída em", details.completedAt], ["Criada em", details.createdAt], ["Observações", details.notes]]} /><DetailList title="Materiais baixados" items={details.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /><DetailList title="Histórico de substituições" items={details.equipmentReplacements || []} render={(item) => <><b>{item.oldSerialNumber} → {item.newSerialNumber}</b><span>{item.reason || 'Substituição de equipamento'} • {dt(item.createdAt)}</span><small>Operador: {item.performedBy?.name || 'Sistema'}{item.notes ? ` • ${item.notes}` : ''}</small></>} /><div className="viz-callout">Baixas e substituições por OS alimentam automaticamente caixa do técnico, patrimônio, histórico, auditoria e BI.</div></>}
+        {details && <><DetailGrid fields={[["OS", details.osNumber], ["Cliente", details.customerName], ["Nº Contrato", details.customerCpf], ["Endereço", details.customerAddress], ["Cidade", details.city || details.Warehouse?.city], ["Técnico", details.Technician?.name], ["Tipo", serviceTypeLabel(details.serviceType)], ["Status", details.status], ["Concluída em", details.completedAt], ["Criada em", details.createdAt], ["Observações", details.notes]]} /><DetailList title="Materiais baixados" items={details.ServiceOrderMaterials || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /><DetailList title="Histórico de substituições" items={details.equipmentReplacements || []} render={(item) => <><b>{item.oldSerialNumber} → {item.newSerialNumber}</b><span>{item.reason || 'Substituição de equipamento'} • {dt(item.createdAt)}</span><small>Operador: {item.performedBy?.name || 'Sistema'}{item.notes ? ` • ${item.notes}` : ''}</small></>} /><div className="viz-callout">Baixas e substituições por OS alimentam automaticamente caixa do técnico, patrimônio, histórico, auditoria e BI.</div></>}
       </DetailsModal>
     </div>
   );

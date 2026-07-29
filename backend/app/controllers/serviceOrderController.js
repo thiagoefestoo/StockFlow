@@ -1,6 +1,6 @@
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
-const { ServiceOrder, ServiceOrderMaterial, ServiceOrderEquipmentReplacement, Material, SerializedAsset, StockMovement, Technician, User } = require('../models');
+const { ServiceOrder, ServiceOrderMaterial, ServiceOrderEquipmentReplacement, Material, SerializedAsset, StockMovement, Technician, User, Warehouse } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, okPaginated, created, fail } = require('../utils/response');
 const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
@@ -8,6 +8,7 @@ const { money, qty, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
+const { resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
 
 function serviceRequiresSerial(serviceType, addressChangeType) {
   return serviceType === 'instalacao'
@@ -50,10 +51,11 @@ exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
   if (req.query.search) where[Op.or] = [{ osNumber: { [Op.iLike]: `%${req.query.search}%` } }, { customerName: { [Op.iLike]: `%${req.query.search}%` } }, { customerCpf: { [Op.iLike]: `%${req.query.search}%` } }];
+  if (req.query.city) where.city = { [Op.iLike]: String(req.query.city).trim() };
   const pagination = paginationFromQuery(req.query);
   const query = {
     where,
-    include: [Technician, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }, equipmentReplacementInclude()],
+    include: [Technician, Warehouse, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }, equipmentReplacementInclude()],
     order: [['createdAt', 'DESC']],
     ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 400 }),
   };
@@ -67,10 +69,12 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
+  let { technicianId, osNumber, customerName, customerCpf, customerAddress, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
   if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome do cliente e número do contrato são obrigatórios.');
+  let operationalLocation;
+  try { operationalLocation = await resolveServiceOrderLocation(technicianId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   if (!Array.isArray(materials) || !materials.length) return fail(res, 400, 'Adicione ao menos um material usado na OS.');
   try { assertUniqueOperationItems(materials); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
@@ -100,7 +104,8 @@ exports.create = asyncHandler(async (req, res) => {
       customerName,
       customerCpf: normalizeDoc(customerCpf),
       customerAddress,
-      city,
+      city: operationalLocation.city,
+      warehouseId: operationalLocation.warehouse.id,
       serviceType,
       status: status || 'concluida',
       completedAt: completedAt || new Date(),
@@ -409,10 +414,10 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
 
 
 exports.update = asyncHandler(async (req, res) => {
-  const order = await ServiceOrder.findByPk(req.params.id, { include: [Technician, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }, equipmentReplacementInclude()] });
+  const order = await ServiceOrder.findByPk(req.params.id, { include: [Technician, Warehouse, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }, equipmentReplacementInclude()] });
   if (!order) return fail(res, 404, 'OS não encontrada.');
   const before = order.toJSON();
-  const allowed = ['osNumber', 'customerName', 'customerCpf', 'customerAddress', 'city', 'serviceType', 'status', 'completedAt', 'notes'];
+  const allowed = ['osNumber', 'customerName', 'customerCpf', 'customerAddress', 'serviceType', 'status', 'completedAt', 'notes'];
   for (const field of allowed) {
     if (req.body[field] !== undefined) order[field] = field === 'customerCpf' ? normalizeDoc(req.body[field]) : req.body[field];
   }

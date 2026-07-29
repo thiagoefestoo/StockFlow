@@ -5,7 +5,7 @@ import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
-import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
+import { formatQuantity } from '../utils/formatQuantity';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial, serviceTypeLabel } from '../utils/serviceOrderRules';
 import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/operationOptions';
 
@@ -40,6 +40,9 @@ export default function TechnicianBoxControl() {
   const [details, setDetails] = useState(null);
   const [reviewType, setReviewType] = useState('');
   const [saving, setSaving] = useState(false);
+  const selectedTechnician = useMemo(() => technicians.find((item) => String(item.id) === String(selectedTech)) || null, [technicians, selectedTech]);
+  const linkedClientCity = String(selectedTechnician?.defaultWarehouse?.city || box?.technician?.defaultWarehouse?.city || '').trim();
+  const linkedClientWarehouseName = selectedTechnician?.defaultWarehouse?.name || box?.technician?.defaultWarehouse?.name || '';
 
   async function loadTechs() {
     const [techRes, whRes] = await Promise.all([
@@ -75,6 +78,10 @@ export default function TechnicianBoxControl() {
     setBox(null);
     setLastBoxRefresh(null);
   }, [selectedTech]);
+
+  useEffect(() => {
+    setClientForm((current) => (current.city === linkedClientCity ? current : { ...current, city: linkedClientCity }));
+  }, [linkedClientCity]);
 
   useEffect(() => {
     if (!selectedTech) return undefined;
@@ -196,6 +203,8 @@ export default function TechnicianBoxControl() {
   }
 
   function validateClientOperation() {
+    if (!selectedTech) return 'Selecione o técnico.';
+    if (!linkedClientCity) return 'O técnico não possui cidade vinculada. Defina o estoque regional padrão no cadastro do técnico.';
     if (clientForm.serviceType === 'outro' && !clientForm.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!clientForm.items.length) return 'Adicione ao menos um material usado no cliente.';
     if (duplicateItemIds(clientForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
@@ -255,6 +264,7 @@ export default function TechnicianBoxControl() {
       setSaving(true);
       const payload = {
         ...clientForm,
+        city: linkedClientCity,
         notes: clientForm.notes,
         technicianId: selectedTech,
         items: clientForm.items.map((item) => ({ ...item, quantity: Number(item.quantity || 0), serialNumbers: splitSerials(item.serialNumbersText) })),
@@ -262,7 +272,7 @@ export default function TechnicianBoxControl() {
       await api.post('/stock/technician-box/move-to-client', payload);
       setMessage('✅ Movimentação para cliente registrada. Caixa, OS, histórico, auditoria e BI foram atualizados.');
       setReviewType('');
-      setClientForm(emptyClientForm);
+      setClientForm({ ...emptyClientForm, city: linkedClientCity });
       loadBox(selectedTech);
     } catch (error) {
       setMessage(`❌ ${error.response?.data?.message || error.message || 'Erro ao movimentar para cliente.'}`);
@@ -294,7 +304,6 @@ export default function TechnicianBoxControl() {
     }
   }
 
-  const selected = technicians.find((t) => String(t.id) === String(selectedTech));
   const selectedReturnWarehouse = warehouses.find((warehouse) => String(warehouse.id) === String(returnForm.warehouseId));
   function buildReviewItems(operationForm) {
     return operationForm.items.map((item, index) => {
@@ -342,7 +351,11 @@ export default function TechnicianBoxControl() {
             </select>
           </label>
           <label>🏢 Terceirizada / vínculo
-            <input value={selected?.ContractorCompany?.name || selected?.type || ''} readOnly />
+            <input value={selectedTechnician?.ContractorCompany?.name || selectedTechnician?.type || ''} readOnly />
+          </label>
+          <label>📍 Cidade vinculada
+            <input value={linkedClientCity || ''} readOnly placeholder="Selecione um técnico" />
+            <small>{linkedClientWarehouseName ? `Definida pelo estoque regional ${linkedClientWarehouseName}.` : 'O técnico precisa ter um estoque regional padrão.'}</small>
           </label>
         </div>
       </section>
@@ -457,7 +470,7 @@ export default function TechnicianBoxControl() {
                 <label>Número do contrato <input value={clientForm.customerCpf} onChange={(e) => setClientForm({ ...clientForm, customerCpf: e.target.value })} /></label>
                 <label>Nome do cliente <input value={clientForm.customerName} onChange={(e) => setClientForm({ ...clientForm, customerName: e.target.value })} /></label>
                 <label>Endereço <input value={clientForm.customerAddress} onChange={(e) => setClientForm({ ...clientForm, customerAddress: e.target.value })} /></label>
-                <label>Cidade <input value={clientForm.city} onChange={(e) => setClientForm({ ...clientForm, city: e.target.value })} /></label>
+                <label>Cidade vinculada <select value={linkedClientCity} disabled><option value={linkedClientCity}>{linkedClientCity || 'Técnico sem cidade vinculada'}</option></select><small>{linkedClientWarehouseName ? `Definida pelo estoque regional ${linkedClientWarehouseName}.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
               </div>
               <label>Observação da baixa<textarea rows="3" value={clientForm.notes} onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })} placeholder="Motivo, atendimento, autorização, observações do supervisor..." /></label>
               <div className="subtoolbar"><h4>Itens usados no cliente</h4><button className="ghost" onClick={addClientItem}>➕ Adicionar item</button></div>
@@ -500,12 +513,13 @@ export default function TechnicianBoxControl() {
         title={reviewType === 'client' ? 'Revisar baixa para cliente/OS' : 'Revisar devolução ao estoque'}
         description={reviewType === 'client' ? 'Confira cliente, serviço, OS, itens e seriais antes de registrar a baixa.' : 'Confira técnico, estoque de destino, itens e seriais antes de registrar a devolução.'}
         metadata={reviewType === 'client' ? [
-          { label: 'Técnico', value: selected?.name },
+          { label: 'Técnico', value: selectedTechnician?.name },
           { label: 'Cliente', value: clientForm.customerName || 'Não informado', hint: clientForm.customerCpf || clientForm.customerAddress },
           { label: 'OS', value: clientForm.osNumber || 'Sem número de OS' },
           { label: 'Tipo de serviço', value: serviceTypeLabel(clientForm.serviceType) },
+          { label: 'Cidade', value: linkedClientCity || '-' },
         ] : [
-          { label: 'Técnico de origem', value: selected?.name },
+          { label: 'Técnico de origem', value: selectedTechnician?.name },
           { label: 'Estoque de destino', value: selectedReturnWarehouse?.name, hint: selectedReturnWarehouse?.code },
           { label: 'Referência', value: returnForm.reference || 'Gerada automaticamente' },
           { label: 'Motivo', value: returnForm.notes || 'Não informado' },
