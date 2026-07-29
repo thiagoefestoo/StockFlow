@@ -43,6 +43,10 @@ function isSerialRequired(material) {
   return ['true', 'sim', 's', 'yes', 'on'].includes(raw);
 }
 
+function isToolMaterial(material) {
+  return String(material?.category || '').trim().toLowerCase() === 'ferramenta';
+}
+
 function duplicateValues(values) {
   const seen = new Set();
   const repeated = new Set();
@@ -124,6 +128,7 @@ export default function Receiving() {
         ...form.items,
         {
           materialId: '',
+          entryKind: 'material',
           code: '',
           description: '',
           unit: 'un',
@@ -393,19 +398,23 @@ export default function Receiving() {
           }
 
           const material = materials.find((m) => Number(m.id) === Number(item.materialId));
-          const availableMaterials = optionsWithoutSelected(materials, form.items, i);
+          const entryKind = item.entryKind || (isToolMaterial(material) ? 'ferramenta' : 'material');
+          const filteredMaterials = materials.filter((row) => (entryKind === 'ferramenta' ? isToolMaterial(row) : !isToolMaterial(row)));
+          const availableMaterials = optionsWithoutSelected(filteredMaterials, form.items, i);
           const requiresSerial = isSerialRequired(material);
           const serials = requiresSerial ? splitSerials(item.serialsText) : [];
           const repeated = duplicateValues(serials);
           return <div className="item-card" key={i}>
             <div className="item-head"><strong>Item {i + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => { const mat = materials.find((m) => Number(m.id) === Number(e.target.value)); updateItem(i, { materialId: e.target.value, unitCost: mat?.unitCost && Number(mat.unitCost) > 0 ? mat.unitCost : '', serialsText: '' }); }}><option value="">Selecionar item</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • {isSerialRequired(m) ? 'com serial' : 'sem serial'}</option>)}</select></label>
+              <label>Tipo do item<select value={entryKind} onChange={(e) => updateItem(i, { entryKind: e.target.value, materialId: '', unitCost: '', serialsText: '' })}><option value="material">Material/equipamento</option><option value="ferramenta">Ferramenta</option></select></label>
+              <label>{entryKind === 'ferramenta' ? 'Ferramenta' : 'Material'}<select value={item.materialId} onChange={(e) => { const mat = materials.find((m) => Number(m.id) === Number(e.target.value)); updateItem(i, { materialId: e.target.value, entryKind: isToolMaterial(mat) ? 'ferramenta' : 'material', unitCost: mat?.unitCost && Number(mat.unitCost) > 0 ? mat.unitCost : '', serialsText: '' }); }}><option value="">Selecionar item</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • {isSerialRequired(m) ? 'com serial' : 'sem serial'}</option>)}</select></label>
               <label>Quantidade<input type="number" min="1" step="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label>
               <label>Valor unitário obrigatório<input type="number" min="0.01" step="0.01" value={item.unitCost} onChange={(e) => updateItem(i, { unitCost: e.target.value })} placeholder="Informe o valor unitário" /></label>
               <label>Pedido/OC<input value={item.purchaseOrder || ''} onChange={(e) => updateItem(i, { purchaseOrder: e.target.value })} /></label>
               <label>Condição<select value={item.condition} onChange={(e) => updateItem(i, { condition: e.target.value })}><option value="novo">Novo</option><option value="usado">Usado</option><option value="recondicionado">Recondicionado</option><option value="defeito">Defeito</option><option value="outro">Outro</option></select></label>
             </div>
+            {entryKind === 'ferramenta' && availableMaterials.length === 0 && !material && <div className="alert info compact-alert">Nenhuma ferramenta está cadastrada no catálogo. Cadastre o item em Materiais/Estoque usando a categoria <strong>Ferramenta</strong>.</div>}
             {requiresSerial ? <div className="serial-bulk panel-soft">
               <h4>Seriais obrigatórios — preenchimento em coluna</h4>
               <label>Colar coluna do Excel

@@ -24,10 +24,11 @@ export function AuthProvider({ children }) {
   );
 
   const logout = useCallback((message = '') => {
+    const safeMessage = typeof message === 'string' ? message : '';
     clearAuthSession();
     api.clearGetCache?.();
     setUser(null);
-    if (message) setSessionMessage(message);
+    setSessionMessage(safeMessage);
   }, []);
 
   const expireSession = useCallback((message = SESSION_EXPIRED_MESSAGE) => {

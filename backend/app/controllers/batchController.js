@@ -11,6 +11,7 @@ const { writeAudit } = require('../services/auditService');
 const { isTrue } = require('../utils/booleans');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { reverseWarehouseIds, warehouseOutsideReverse } = require('../utils/reverseLogistics');
+const { correctForcedInitialStock } = require('../services/initialStockCorrectionService');
 
 exports.list = asyncHandler(async (req, res) => {
   const reverseIds = await reverseWarehouseIds();
@@ -187,6 +188,14 @@ exports.create = asyncHandler(async (req, res) => {
           }, { transaction });
         }
       } else {
+        // Corrige, de forma idempotente, a unidade que versões anteriores criavam
+        // automaticamente ao cadastrar o material antes de registrar a entrada real.
+        await correctForcedInitialStock({
+          materialId: material.id,
+          warehouseId: targetWarehouseId,
+          createdById: req.user.id,
+          transaction,
+        });
         await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: targetWarehouseId, delta: quantity, transaction });
         await StockMovement.create({
           type: 'entrada',

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import NotificationBell from './NotificationBell';
 import LivePulse from './LivePulse';
@@ -18,6 +18,7 @@ const adminGroups = [
 export default function Layout() {
   const { user, logout, isAdmin, canAccessPath } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isSignatureDocumentRoute = /^\/(transferencias|perdas-tecnico)\/[^/]+$/.test(location.pathname)
     || /^\/tecnicos\/[^/]+\/ferramentas-termo$/.test(location.pathname)
     || /^\/ferramentas-tecnico\/[^/]+$/.test(location.pathname);
@@ -62,6 +63,11 @@ export default function Layout() {
   function badgeLabel(count) {
     const value = Number(count || 0);
     return value > 99 ? '99+' : String(value);
+  }
+
+  function handleLogout() {
+    logout();
+    navigate('/login', { replace: true });
   }
 
   return (
@@ -112,7 +118,7 @@ export default function Layout() {
             <NotificationBell />
             <div className="system-status"><i /> Online</div>
             <NavLink to="/minha-conta" className="account-chip">{user?.name?.split(' ')?.[0] || 'Conta'}</NavLink>
-            <button className="ghost" onClick={logout}>Sair</button>
+            <button className="ghost" onClick={handleLogout}>Sair</button>
           </div>
         </header>
         {!isSignatureDocumentRoute && <LivePulse />}

@@ -5,7 +5,7 @@ const Material = sequelize.define('Material', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   sku: { type: DataTypes.STRING(80), allowNull: false, unique: true },
   name: { type: DataTypes.STRING(180), allowNull: false },
-  category: { type: DataTypes.ENUM('onu', 'drop', 'conector', 'esticador', 'cabo', 'roteador', 'ferragem', 'epi', 'outro'), allowNull: false, defaultValue: 'outro' },
+  category: { type: DataTypes.ENUM('onu', 'drop', 'conector', 'esticador', 'cabo', 'roteador', 'ferragem', 'ferramenta', 'epi', 'outro'), allowNull: false, defaultValue: 'outro' },
   unit: { type: DataTypes.STRING(30), allowNull: false, defaultValue: 'un' },
   requiresSerial: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   unitCost: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },

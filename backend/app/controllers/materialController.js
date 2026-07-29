@@ -108,7 +108,9 @@ exports.create = asyncHandler(async (req, res) => {
 
   const serials = normalizeSerials(initialSerialNumbers.length ? initialSerialNumbers : initialSerialsText);
   const requiresSerial = isTrue(normalizedPayload.requiresSerial);
-  const quantity = requiresSerial ? serials.length : qty(initialQuantity || 0);
+  // Materiais sem serial não recebem saldo no cadastro do catálogo. A quantidade real
+  // deve nascer exclusivamente pela tela Entrada em Estoque, evitando a unidade extra.
+  const quantity = requiresSerial ? serials.length : 0;
 
   if (requiresSerial && quantity > 0 && serials.length !== quantity) return fail(res, 400, 'A quantidade de seriais precisa bater com a quantidade inicial.');
 

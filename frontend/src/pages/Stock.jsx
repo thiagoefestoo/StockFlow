@@ -41,7 +41,7 @@ const empty = {
   autoLowStockAlert: true,
   notes: '',
   initialWarehouseId: '',
-  initialQuantity: 1,
+  initialQuantity: 0,
   initialSerialsText: '',
 };
 
@@ -53,6 +53,7 @@ const categories = [
   ['cabo', 'Cabo'],
   ['roteador', 'Roteador'],
   ['ferragem', 'Ferragem'],
+  ['ferramenta', 'Ferramenta'],
   ['epi', 'EPI'],
   ['outro', 'Outro'],
 ];
@@ -380,7 +381,7 @@ export default function Stock() {
             <div className="section-header"><span>3</span><div><h4>Cadastro direto no estoque regional</h4><p>Não existe mais entrada em estoque central. Todo material novo deve nascer vinculado a um estoque regional.</p></div></div>
             <div className="form-grid">
               <MaterialField label="Estoque regional obrigatório"><select value={form.initialWarehouseId || ''} onChange={(e) => change('initialWarehouseId', e.target.value)}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}</select></MaterialField>
-              {!booleanValue(form.requiresSerial) && <MaterialField label="Quantidade inicial" hint="Fixada em 1 no cadastro. A quantidade real será informada depois, na tela de Entrada de estoque."><input type="number" value={1} disabled readOnly /></MaterialField>}
+              {!booleanValue(form.requiresSerial) && <MaterialField label="Quantidade inicial" hint="O catálogo começa com saldo zero. A quantidade real será registrada somente na tela de Entrada em Estoque."><input type="number" value={0} disabled readOnly /></MaterialField>}
               {booleanValue(form.requiresSerial) && <MaterialField label="Seriais iniciais" className="span-2" hint={`${splitSerials(form.initialSerialsText).length} serial(is) informado(s). Cada linha vira um equipamento em estoque.`}><textarea rows="5" value={form.initialSerialsText || ''} onChange={(e) => change('initialSerialsText', e.target.value)} placeholder="Um serial por linha" /></MaterialField>}
             </div>
           </section>}

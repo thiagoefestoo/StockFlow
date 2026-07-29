@@ -9,6 +9,7 @@ require('./app/models');
 const { startAutoIntelligence } = require('./app/services/intelligenceService');
 const { ensureBootstrapAdmin } = require('./app/services/adminBootstrapService');
 const { ensureRuntimeSchema } = require('./app/services/runtimeSchemaService');
+const { repairForcedInitialStockBalances } = require('./app/services/initialStockCorrectionService');
 
 const app = express();
 
@@ -104,6 +105,7 @@ async function start() {
   try {
     await sequelize.authenticate();
     await ensureRuntimeSchema();
+    await repairForcedInitialStockBalances();
     if (env.dbSync) await sequelize.sync({ alter: true });
     await ensureBootstrapAdmin();
     startAutoIntelligence(env.autoIntelligenceMinutes);

@@ -38,6 +38,33 @@ async function ensureNotificationSchema(queryInterface) {
   }
 }
 
+async function ensureMaterialCategorySchema(queryInterface) {
+  const materials = await queryInterface.describeTable('materials').catch(() => null);
+  if (!materials?.category) return;
+
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT type_name.typname AS enum_name
+      FROM pg_type type_name
+      JOIN pg_enum enum_value ON type_name.oid = enum_value.enumtypid
+      JOIN pg_attribute column_info ON column_info.atttypid = type_name.oid
+      JOIN pg_class table_info ON table_info.oid = column_info.attrelid
+      WHERE table_info.relname = 'materials'
+        AND column_info.attname = 'category'
+      LIMIT 1
+    `);
+    const enumName = rows?.[0]?.enum_name;
+    if (!enumName) return;
+
+    const escapedEnumName = String(enumName).replace(/"/g, '""');
+    await sequelize.query(`ALTER TYPE "${escapedEnumName}" ADD VALUE IF NOT EXISTS 'ferramenta'`);
+    console.log('✅ Categoria ferramenta habilitada no catálogo de materiais.');
+  } catch (error) {
+    // Mantém a API disponível mesmo se o banco estiver temporariamente sem permissão de alteração.
+    console.warn('⚠️ Não foi possível habilitar a categoria ferramenta:', error.message);
+  }
+}
+
 async function ensureTechnicianToolsSchema(queryInterface) {
   let tools = await queryInterface.describeTable('technician_tools').catch(() => null);
 
@@ -509,6 +536,7 @@ async function ensureRuntimeSchema() {
   }
 
   await ensureTechnicianCompanySchema(queryInterface);
+  await ensureMaterialCategorySchema(queryInterface);
   await ensureNotificationSchema(queryInterface);
   await ensureTechnicianToolsSchema(queryInterface);
   await ensureTechnicianToolDocumentsSchema(queryInterface);
