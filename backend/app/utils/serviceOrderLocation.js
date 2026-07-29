@@ -6,6 +6,20 @@ function operationalLocationError(message, statusCode = 400) {
   return error;
 }
 
+function normalizeServiceOrderCity(value) {
+  const city = String(value || '').trim().replace(/\s+/g, ' ');
+
+  if (!city) {
+    throw operationalLocationError('Informe a cidade onde o técnico está realizando a OS.');
+  }
+
+  if (city.length > 120) {
+    throw operationalLocationError('A cidade da OS deve ter no máximo 120 caracteres.');
+  }
+
+  return city;
+}
+
 async function resolveServiceOrderLocation(technicianId, options = {}) {
   const transaction = options.transaction || null;
   const id = Number(technicianId);
@@ -44,4 +58,4 @@ async function resolveServiceOrderLocation(technicianId, options = {}) {
   return { technician, warehouse, city };
 }
 
-module.exports = { resolveServiceOrderLocation };
+module.exports = { normalizeServiceOrderCity, resolveServiceOrderLocation };

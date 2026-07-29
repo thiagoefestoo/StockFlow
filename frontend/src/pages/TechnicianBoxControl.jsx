@@ -81,7 +81,7 @@ export default function TechnicianBoxControl() {
 
   useEffect(() => {
     setClientForm((current) => (current.city === linkedClientCity ? current : { ...current, city: linkedClientCity }));
-  }, [linkedClientCity]);
+  }, [linkedClientCity, selectedTech]);
 
   useEffect(() => {
     if (!selectedTech) return undefined;
@@ -205,6 +205,7 @@ export default function TechnicianBoxControl() {
   function validateClientOperation() {
     if (!selectedTech) return 'Selecione o técnico.';
     if (!linkedClientCity) return 'O técnico não possui cidade vinculada. Defina o estoque regional padrão no cadastro do técnico.';
+    if (!String(clientForm.city || '').trim()) return 'Informe a cidade onde o técnico está realizando a OS.';
     if (clientForm.serviceType === 'outro' && !clientForm.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!clientForm.items.length) return 'Adicione ao menos um material usado no cliente.';
     if (duplicateItemIds(clientForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
@@ -264,7 +265,7 @@ export default function TechnicianBoxControl() {
       setSaving(true);
       const payload = {
         ...clientForm,
-        city: linkedClientCity,
+        city: String(clientForm.city || '').trim(),
         notes: clientForm.notes,
         technicianId: selectedTech,
         items: clientForm.items.map((item) => ({ ...item, quantity: Number(item.quantity || 0), serialNumbers: splitSerials(item.serialNumbersText) })),
@@ -470,7 +471,7 @@ export default function TechnicianBoxControl() {
                 <label>Número do contrato <input value={clientForm.customerCpf} onChange={(e) => setClientForm({ ...clientForm, customerCpf: e.target.value })} /></label>
                 <label>Nome do cliente <input value={clientForm.customerName} onChange={(e) => setClientForm({ ...clientForm, customerName: e.target.value })} /></label>
                 <label>Endereço <input value={clientForm.customerAddress} onChange={(e) => setClientForm({ ...clientForm, customerAddress: e.target.value })} /></label>
-                <label>Cidade vinculada <select value={linkedClientCity} disabled><option value={linkedClientCity}>{linkedClientCity || 'Técnico sem cidade vinculada'}</option></select><small>{linkedClientWarehouseName ? `Definida pelo estoque regional ${linkedClientWarehouseName}.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
+                <label>Cidade da OS <input value={clientForm.city} maxLength={120} onChange={(e) => setClientForm({ ...clientForm, city: e.target.value })} placeholder="Digite a cidade do atendimento" /><small>{linkedClientWarehouseName ? `Preenchida inicialmente pela cidade do estoque ${linkedClientWarehouseName}. A baixa continua vinculada a esse estoque, mas a cidade pode ser alterada.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
               </div>
               <label>Observação da baixa<textarea rows="3" value={clientForm.notes} onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })} placeholder="Motivo, atendimento, autorização, observações do supervisor..." /></label>
               <div className="subtoolbar"><h4>Itens usados no cliente</h4><button className="ghost" onClick={addClientItem}>➕ Adicionar item</button></div>
@@ -517,7 +518,7 @@ export default function TechnicianBoxControl() {
           { label: 'Cliente', value: clientForm.customerName || 'Não informado', hint: clientForm.customerCpf || clientForm.customerAddress },
           { label: 'OS', value: clientForm.osNumber || 'Sem número de OS' },
           { label: 'Tipo de serviço', value: serviceTypeLabel(clientForm.serviceType) },
-          { label: 'Cidade', value: linkedClientCity || '-' },
+          { label: 'Cidade', value: clientForm.city || '-' },
         ] : [
           { label: 'Técnico de origem', value: selectedTechnician?.name },
           { label: 'Estoque de destino', value: selectedReturnWarehouse?.name, hint: selectedReturnWarehouse?.code },

@@ -8,7 +8,7 @@ const { money, qty, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
-const { resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
+const { normalizeServiceOrderCity, resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
 
 function serviceRequiresSerial(serviceType, addressChangeType) {
   return serviceType === 'instalacao'
@@ -69,12 +69,14 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  let { technicianId, osNumber, customerName, customerCpf, customerAddress, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
+  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
   if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome do cliente e número do contrato são obrigatórios.');
   let operationalLocation;
   try { operationalLocation = await resolveServiceOrderLocation(technicianId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+  let serviceOrderCity;
+  try { serviceOrderCity = normalizeServiceOrderCity(city); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   if (!Array.isArray(materials) || !materials.length) return fail(res, 400, 'Adicione ao menos um material usado na OS.');
   try { assertUniqueOperationItems(materials); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
@@ -104,7 +106,7 @@ exports.create = asyncHandler(async (req, res) => {
       customerName,
       customerCpf: normalizeDoc(customerCpf),
       customerAddress,
-      city: operationalLocation.city,
+      city: serviceOrderCity,
       warehouseId: operationalLocation.warehouse.id,
       serviceType,
       status: status || 'concluida',

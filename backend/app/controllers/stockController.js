@@ -25,7 +25,7 @@ const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
 const { reverseWarehouseIds, movementOutsideReverse } = require('../utils/reverseLogistics');
-const { resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
+const { normalizeServiceOrderCity, resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
 
 function parseSerials(value) {
   if (Array.isArray(value)) return value.map((s) => String(s).trim()).filter(Boolean);
@@ -323,7 +323,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
 
 
 exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
-  let { technicianId, osNumber, customerName, customerCpf, customerAddress, serviceType = 'outro', addressChangeType, completedAt, reference, notes, items = [] } = req.body;
+  let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'outro', addressChangeType, completedAt, reference, notes, items = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico é obrigatório.');
   if (!items.length) {
@@ -336,6 +336,8 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
   if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   let operationalLocation;
   try { operationalLocation = await resolveServiceOrderLocation(technicianId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+  let serviceOrderCity;
+  try { serviceOrderCity = normalizeServiceOrderCity(city); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   const technician = operationalLocation.technician;
 
   const serialRequired = serviceRequiresSerial(serviceType, addressChangeType);
@@ -368,7 +370,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
         customerName,
         customerCpf: normalizeDoc(customerCpf),
         customerAddress,
-        city: operationalLocation.city,
+        city: serviceOrderCity,
         warehouseId: operationalLocation.warehouse.id,
         serviceType,
         status: 'concluida',
@@ -423,7 +425,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
       entity: 'TechnicianBox',
       entityId: String(technicianId),
       message: `${qty(totalQuantity)} item(ns) da caixa de ${technician.name} transferidos para cliente ${customerName}.`,
-      afterData: { reference: movementReference, osId: order?.id || null, customerName, customerCpf: normalizeDoc(customerCpf), city: operationalLocation.city, warehouseId: operationalLocation.warehouse.id, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
+      afterData: { reference: movementReference, osId: order?.id || null, customerName, customerCpf: normalizeDoc(customerCpf), city: serviceOrderCity, warehouseId: operationalLocation.warehouse.id, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
       transaction,
     });
 

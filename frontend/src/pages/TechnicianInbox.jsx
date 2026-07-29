@@ -108,7 +108,7 @@ export default function TechnicianInbox() {
 
   useEffect(() => {
     setOsForm((current) => (current.city === linkedCity ? current : { ...current, city: linkedCity }));
-  }, [linkedCity]);
+  }, [linkedCity, selectedTech]);
   const boxGroups = useMemo(() => {
     const map = {};
     for (const row of stock?.groupedMaterials || []) {
@@ -193,6 +193,7 @@ export default function TechnicianInbox() {
     if (!String(osForm.customerName || '').trim()) return 'Informe o nome do cliente.';
     if (!String(osForm.customerCpf || '').trim()) return 'Informe o número do contrato.';
     if (!linkedCity) return 'O técnico não possui cidade vinculada. Defina o estoque regional padrão no cadastro do técnico.';
+    if (!String(osForm.city || '').trim()) return 'Informe a cidade onde o técnico está realizando a OS.';
     if (osForm.serviceType === 'outro' && !osForm.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!osForm.materials.length) return 'Adicione ao menos um material usado na OS.';
     if (duplicateItemIds(osForm.materials).length) return 'O mesmo material não pode aparecer mais de uma vez na OS.';
@@ -240,7 +241,7 @@ export default function TechnicianInbox() {
     }
     setSubmittingOs(true);
     try {
-      const payload = { ...osForm, city: linkedCity, notes: osForm.notes, technicianId: selectedTech, materials: osForm.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
+      const payload = { ...osForm, city: String(osForm.city || '').trim(), notes: osForm.notes, technicianId: selectedTech, materials: osForm.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
       await api.post('/service-orders', payload);
       setMessage('OS baixada com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
       setOsReviewOpen(false);
@@ -360,7 +361,7 @@ export default function TechnicianInbox() {
             <label>Número do contrato *<input value={osForm.customerCpf} onChange={(e) => setOsForm({ ...osForm, customerCpf: e.target.value })} required /></label>
             <label>Nome do cliente *<input value={osForm.customerName} onChange={(e) => setOsForm({ ...osForm, customerName: e.target.value })} required /></label>
             <label>Endereço<input value={osForm.customerAddress} onChange={(e) => setOsForm({ ...osForm, customerAddress: e.target.value })} /></label>
-            <label>Cidade vinculada<select value={linkedCity} disabled><option value={linkedCity}>{linkedCity || 'Técnico sem cidade vinculada'}</option></select><small>{linkedWarehouseName ? `Definida pelo estoque regional ${linkedWarehouseName}.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
+            <label>Cidade da OS<input value={osForm.city} maxLength={120} onChange={(e) => setOsForm({ ...osForm, city: e.target.value })} placeholder="Digite a cidade do atendimento" required /><small>{linkedWarehouseName ? `Preenchida inicialmente pela cidade do estoque ${linkedWarehouseName}. A baixa continua vinculada a esse estoque, mas a cidade pode ser alterada.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
             <label>Tipo de serviço executado<select value={osForm.serviceType} onChange={(e) => setOsForm({ ...osForm, serviceType: e.target.value, addressChangeType: e.target.value === 'outro' ? osForm.addressChangeType : '' })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             {osForm.serviceType === 'outro' && <label>Troca de equipamento?<select value={osForm.addressChangeType} onChange={(e) => setOsForm({ ...osForm, addressChangeType: e.target.value })}><option value="">Selecione</option>{ADDRESS_CHANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
           </div>

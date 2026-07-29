@@ -48,7 +48,7 @@ export default function TechnicianPortal() {
 
   useEffect(() => {
     setForm((current) => (current.city === linkedCity ? current : { ...current, city: linkedCity }));
-  }, [linkedCity]);
+  }, [linkedCity, selectedTech]);
 
   function addMaterial() { setForm({ ...form, materials: [...form.materials, { materialId: '', quantity: 1, serialNumbers: [] }] }); }
   function removeMaterial(i) { setForm({ ...form, materials: form.materials.filter((_, index) => index !== i) }); }
@@ -67,6 +67,7 @@ export default function TechnicianPortal() {
     if (!String(form.customerName || '').trim()) return 'Informe o nome do cliente.';
     if (!String(form.customerCpf || '').trim()) return 'Informe o número do contrato.';
     if (!linkedCity) return 'O técnico não possui cidade vinculada. Defina o estoque regional padrão no cadastro do técnico.';
+    if (!String(form.city || '').trim()) return 'Informe a cidade onde o técnico está realizando a OS.';
     if (form.serviceType === 'outro' && !form.addressChangeType) return 'Informe se a mudança de endereço terá troca de equipamento.';
     if (!form.materials.length) return 'Adicione ao menos um material usado na OS.';
     if (duplicateItemIds(form.materials).length) return 'O mesmo material não pode aparecer mais de uma vez na OS.';
@@ -109,7 +110,7 @@ export default function TechnicianPortal() {
       setOsFieldsOpen(true);
       return;
     }
-    const payload = { ...form, city: linkedCity, notes: form.notes, technicianId: selectedTech, materials: form.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
+    const payload = { ...form, city: String(form.city || '').trim(), notes: form.notes, technicianId: selectedTech, materials: form.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
     setSaving(true);
     try {
       await api.post('/service-orders', payload);
@@ -140,7 +141,7 @@ export default function TechnicianPortal() {
           <label>CPF do cliente *<input value={form.customerCpf} onChange={(e) => setForm({ ...form, customerCpf: e.target.value })} required /></label>
           <label>Nome do cliente *<input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} required /></label>
           <label>Endereço<input value={form.customerAddress} onChange={(e) => setForm({ ...form, customerAddress: e.target.value })} /></label>
-          <label>Cidade vinculada<select value={linkedCity} disabled><option value={linkedCity}>{linkedCity || 'Técnico sem cidade vinculada'}</option></select><small>{linkedWarehouseName ? `Definida pelo estoque regional ${linkedWarehouseName}.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
+          <label>Cidade da OS<input value={form.city} maxLength={120} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder="Digite a cidade do atendimento" required /><small>{linkedWarehouseName ? `Preenchida inicialmente pela cidade do estoque ${linkedWarehouseName}. A baixa continua vinculada a esse estoque, mas a cidade pode ser alterada.` : 'Defina o estoque padrão no cadastro do técnico.'}</small></label>
           <label>Tipo de serviço executado<select value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value, addressChangeType: e.target.value === 'outro' ? form.addressChangeType : '' })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>{form.serviceType === 'outro' && <label>Troca de equipamento?<select value={form.addressChangeType} onChange={(e) => setForm({ ...form, addressChangeType: e.target.value })}><option value="">Selecione</option>{ADDRESS_CHANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
         </div>
         <div className="subtoolbar"><h4>Material usado</h4><button className="ghost" onClick={addMaterial}>Adicionar</button></div>
