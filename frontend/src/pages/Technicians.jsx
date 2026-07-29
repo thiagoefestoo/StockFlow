@@ -25,7 +25,7 @@ const empty = {
   transferApprovalLimit: 500,
 };
 
-const emptyTool = { name: '', serialNumber: '', brand: '', referenceValue: '', notes: '' };
+const emptyTool = { materialId: '', warehouseId: '', quantity: 1, notes: '' };
 const emptyRemoval = { status: 'devolvida', removalReason: '', replacementName: '', replacementSerial: '', replacementBrand: '', replacementValue: '' };
 const emptyToolDocument = { file: null, signedAt: '', notes: '' };
 const TOOL_STATUS_LABELS = { com_tecnico: 'Com o técnico', substituida: 'Substituída', perdida: 'Perdida', desgaste: 'Baixada por desgaste', devolvida: 'Devolvida' };
@@ -69,6 +69,8 @@ export default function Technicians() {
   const [tools, setTools] = useState([]);
   const [toolModal, setToolModal] = useState(false);
   const [toolForm, setToolForm] = useState(emptyTool);
+  const [availableTools, setAvailableTools] = useState([]);
+  const [availableToolsLoading, setAvailableToolsLoading] = useState(false);
   const [toolSaving, setToolSaving] = useState(false);
   const [toolError, setToolError] = useState('');
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -211,29 +213,62 @@ export default function Technicians() {
     if (details.technician) openDetails(details.technician);
   }
 
-  function openAddTool() {
+  async function openAddTool() {
+    if (!details.technician) return;
     setToolError('');
-    setToolForm(emptyTool);
+    setAvailableTools([]);
+    setToolForm({ ...emptyTool, warehouseId: details.technician.defaultWarehouseId || '' });
     setToolModal(true);
+    setAvailableToolsLoading(true);
+    try {
+      const response = await api.get(`/technicians/${details.technician.id}/tools/available-stock`);
+      const rows = response.data.data?.tools || [];
+      setAvailableTools(rows);
+      setToolForm((current) => ({
+        ...current,
+        warehouseId: response.data.data?.warehouse?.id || current.warehouseId,
+        materialId: rows.length === 1 ? String(rows[0].materialId) : current.materialId,
+      }));
+    } catch (err) {
+      setToolError(err.response?.data?.message || 'Não foi possível carregar as ferramentas disponíveis no estoque.');
+    } finally {
+      setAvailableToolsLoading(false);
+    }
   }
 
   async function saveTool() {
     if (!details.technician) return;
+    const selected = availableTools.find((row) => Number(row.materialId) === Number(toolForm.materialId));
+    const quantity = Number(toolForm.quantity || 0);
+    if (!selected) {
+      setToolError('Selecione uma ferramenta com saldo disponível.');
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      setToolError('Informe uma quantidade inteira maior que zero.');
+      return;
+    }
+    if (quantity > Number(selected.availableQuantity || 0)) {
+      setToolError(`A quantidade não pode ultrapassar o saldo disponível de ${formatQuantity(selected.availableQuantity)} ${selected.unit || 'un'}.`);
+      return;
+    }
     setToolSaving(true);
     setToolError('');
     try {
       await api.post(`/technicians/${details.technician.id}/tools`, {
-        name: toolForm.name,
-        serialNumber: toolForm.serialNumber,
-        brand: toolForm.brand || null,
-        referenceValue: Number(toolForm.referenceValue || 0),
+        materialId: Number(toolForm.materialId),
+        warehouseId: Number(toolForm.warehouseId || selected.warehouseId),
+        quantity,
         notes: toolForm.notes || null,
       });
       setToolModal(false);
       setToolForm(emptyTool);
-      await loadTools(details.technician.id);
+      setAvailableTools([]);
+      await Promise.all([loadTools(details.technician.id), load()]);
+      const stock = (await api.get(`/technicians/${details.technician.id}/stock`)).data.data;
+      setDetails((current) => ({ ...current, stock }));
     } catch (err) {
-      setToolError(err.response?.data?.message || 'Não foi possível registrar a ferramenta.');
+      setToolError(err.response?.data?.message || 'Não foi possível transferir a ferramenta para a ficha do técnico.');
     } finally {
       setToolSaving(false);
     }
@@ -342,6 +377,30 @@ export default function Technicians() {
   const totalValue = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.totalCustodyValue ?? technician.assetValue ?? 0), 0), [technicians]);
   const totalTools = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolCount || 0), 0), [technicians]);
   const totalToolDocuments = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolDocumentCount || 0), 0), [technicians]);
+  const groupedToolRows = useMemo(() => {
+    const rows = new Map();
+    for (const tool of tools) {
+      const stockControlled = Boolean(tool.materialId);
+      const key = stockControlled
+        ? `${tool.status}:${tool.materialId}:${tool.sourceWarehouseId || ''}`
+        : `legacy:${tool.id}`;
+      if (!rows.has(key)) {
+        rows.set(key, {
+          key,
+          sample: tool,
+          quantity: 0,
+          totalValue: 0,
+          tools: [],
+        });
+      }
+      const row = rows.get(key);
+      row.quantity += 1;
+      row.totalValue += Number(tool.referenceValue || 0);
+      row.tools.push(tool);
+    }
+    return Array.from(rows.values());
+  }, [tools]);
+  const selectedAvailableTool = availableTools.find((row) => Number(row.materialId) === Number(toolForm.materialId));
   const cityOptions = useMemo(() => Array.from(new Set(warehouses.map((w) => String(w.city || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
   function selectedServiceCities() { return textToCities(form.serviceCitiesText); }
   function toggleServiceCity(city) {
@@ -464,26 +523,35 @@ export default function Technicians() {
                 <div className="action-toolbar">
                   {details.technician && <Link className="ghost" to={`/ferramentas-tecnico/${details.technician.id}`} target="_blank" rel="noreferrer" onClick={prepareAuthSessionHandoff}>Gerar termo (imprimir)</Link>}
                   {canEditTools && <button className="ghost" onClick={openDocumentUpload}>Anexar termo assinado</button>}
-                  {canEditTools && <button onClick={openAddTool}>Adicionar ferramenta</button>}
+                  {canEditTools && <button onClick={openAddTool}>Adicionar ferramentas</button>}
                 </div>
               </div>
               <p><small>Ferramentas registradas aqui ficam na ficha patrimonial do técnico, com valor, data de entrega, tempo de custódia e histórico de baixa. Elas não alteram o saldo de materiais da caixa técnica.</small></p>
               {toolError && <div className="alert danger">{toolError}</div>}
               {toolsLoading && <div className="empty-state">Carregando ferramentas em custódia...</div>}
               {!toolsLoading && tools.length === 0 && <div className="empty-state">Nenhuma ferramenta registrada na ficha deste técnico.</div>}
-              {tools.map((tool) => (
-                <div className="detail-row" key={tool.id}>
-                  <b>{tool.name}</b>
-                  <span>Série/patrimônio: {tool.serialNumber} • {tool.brand || 'sem marca/modelo'} • {brl(tool.referenceValue)} • entregue em {dt(tool.deliveredAt)} • {tool.custodyDays ?? 0} dia(s) em custódia</span>
-                  <small>
-                    Status: {TOOL_STATUS_LABELS[tool.status] || tool.status}
-                    {tool.status !== 'com_tecnico' && ` • baixada em ${dt(tool.removedAt)} • motivo: ${tool.removalReason || '-'}`}
-                  </small>
-                  {canEditTools && tool.status === 'com_tecnico' && (
-                    <div className="action-toolbar"><button className="ghost danger-outline" onClick={() => openRemoveTool(tool)}>Baixar / substituir / perda</button></div>
-                  )}
-                </div>
-              ))}
+              {groupedToolRows.map((row) => {
+                const tool = row.sample;
+                const stockControlled = Boolean(tool.materialId);
+                return (
+                  <div className="detail-row" key={row.key}>
+                    <b>{tool.Material?.name || tool.name}</b>
+                    <span>
+                      Quantidade: {formatQuantity(row.quantity)} un • valor total {brl(row.totalValue)} • entregue em {dt(tool.deliveredAt)} • {tool.custodyDays ?? 0} dia(s) em custódia
+                    </span>
+                    <small>
+                      {stockControlled
+                        ? `Controle por quantidade • estoque de origem: ${tool.sourceWarehouse?.name || 'não informado'}`
+                        : `Série/patrimônio: ${tool.serialNumber} • ${tool.brand || 'sem marca/modelo'}`}
+                      {' • '}Status: {TOOL_STATUS_LABELS[tool.status] || tool.status}
+                      {tool.status !== 'com_tecnico' && ` • baixada em ${dt(tool.removedAt)} • motivo: ${tool.removalReason || '-'}`}
+                    </small>
+                    {canEditTools && tool.status === 'com_tecnico' && (
+                      <div className="action-toolbar"><button className="ghost danger-outline" onClick={() => openRemoveTool(row.tools[0])}>{row.quantity > 1 ? 'Baixar 1 unidade / perda' : 'Baixar / substituir / perda'}</button></div>
+                    )}
+                  </div>
+                );
+              })}
             </section>
           )}
           {canViewTools && (
@@ -514,17 +582,25 @@ export default function Technicians() {
         {documentPreview && <AttachmentPreview name={documentPreview.documentName} data={documentPreview.documentData} label="Termo assinado" />}
       </Modal>
 
-      <Modal open={toolModal} title={`Adicionar ferramenta: ${details.technician?.name || ''}`} onClose={() => setToolModal(false)} footer={<><button className="ghost" onClick={() => setToolModal(false)}>Cancelar</button><button disabled={toolSaving} onClick={saveTool}>{toolSaving ? 'Salvando...' : 'Registrar ferramenta'}</button></>}>
+      <Modal open={toolModal} title={`Adicionar ferramentas na ficha: ${details.technician?.name || ''}`} onClose={() => !toolSaving && setToolModal(false)} footer={<><button className="ghost" disabled={toolSaving} onClick={() => setToolModal(false)}>Cancelar</button><button disabled={toolSaving || availableToolsLoading || !availableTools.length} onClick={saveTool}>{toolSaving ? 'Transferindo...' : 'Transferir para a ficha'}</button></>}>
         <div className="form-stack">
           {toolError && <div className="alert danger">{toolError}</div>}
-          <div className="form-grid">
-            <label>Nome/descrição<input value={toolForm.name} onChange={(e) => setToolForm({ ...toolForm, name: e.target.value })} placeholder="Ex.: Furadeira Bosch, Escada 5m" /></label>
-            <label>Nº de patrimônio/série<input value={toolForm.serialNumber} onChange={(e) => setToolForm({ ...toolForm, serialNumber: e.target.value })} /></label>
-            <label>Marca/modelo<input value={toolForm.brand} onChange={(e) => setToolForm({ ...toolForm, brand: e.target.value })} /></label>
-            <label>Valor de referência<input type="number" min="0" step="0.01" value={toolForm.referenceValue} onChange={(e) => setToolForm({ ...toolForm, referenceValue: e.target.value })} /></label>
+          <div className="viz-callout">
+            As ferramentas abaixo são carregadas somente do estoque vinculado ao técnico e aparecem apenas quando possuem entrada registrada e saldo disponível. Elas não entram na Caixa do Técnico.
           </div>
-          <label>Observações<textarea rows={2} value={toolForm.notes} onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })} /></label>
-          <small>Este item ficará na ficha do técnico até que seja devolvido, substituído ou baixado por perda/desgaste. Não entra na caixa técnica nem na movimentação de material.</small>
+          {availableToolsLoading && <div className="empty-state">Carregando ferramentas disponíveis...</div>}
+          {!availableToolsLoading && availableTools.length === 0 && !toolError && <div className="empty-state">Nenhuma ferramenta com entrada e saldo disponível no estoque vinculado.</div>}
+          {!availableToolsLoading && availableTools.length > 0 && <>
+            <div className="form-grid">
+              <label>Ferramenta disponível<select value={toolForm.materialId} onChange={(e) => setToolForm({ ...toolForm, materialId: e.target.value, quantity: 1 })}><option value="">Selecione a ferramenta</option>{availableTools.map((tool) => <option key={tool.materialId} value={tool.materialId}>{tool.name} • saldo {formatQuantity(tool.availableQuantity)} {tool.unit || 'un'}</option>)}</select></label>
+              <label>Quantidade<input type="number" min="1" max={selectedAvailableTool?.availableQuantity || 1} step="1" value={toolForm.quantity} onChange={(e) => setToolForm({ ...toolForm, quantity: e.target.value })} /></label>
+            </div>
+            {selectedAvailableTool && <div className="panel-soft">
+              <b>{selectedAvailableTool.name}</b>
+              <p style={{ margin: '0.35rem 0 0' }}><small>Estoque: {selectedAvailableTool.warehouseName} • saldo disponível: {formatQuantity(selectedAvailableTool.availableQuantity)} {selectedAvailableTool.unit || 'un'} • valor unitário: {brl(selectedAvailableTool.unitCost)}</small></p>
+            </div>}
+            <label>Observações<textarea rows={2} value={toolForm.notes} onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })} placeholder="Ex.: entregue na admissão, conferido com o responsável." /></label>
+          </>}
         </div>
       </Modal>
 
@@ -541,13 +617,13 @@ export default function Technicians() {
       <Modal open={removeModal.open} title={`Baixar ferramenta: ${removeModal.tool?.name || ''}`} onClose={() => setRemoveModal({ open: false, tool: null })} footer={<><button className="ghost" onClick={() => setRemoveModal({ open: false, tool: null })}>Cancelar</button><button disabled={removeSaving} onClick={saveRemoveTool}>{removeSaving ? 'Salvando...' : 'Confirmar baixa'}</button></>}>
         <div className="form-stack">
           {removeError && <div className="alert danger">{removeError}</div>}
-          <p><small>Série/patrimônio: <b>{removeModal.tool?.serialNumber}</b> • Valor de referência: {brl(removeModal.tool?.referenceValue)}</small></p>
+          <p><small>{removeModal.tool?.materialId ? 'Controle por quantidade (1 unidade)' : <>Série/patrimônio: <b>{removeModal.tool?.serialNumber}</b></>} • Valor de referência: {brl(removeModal.tool?.referenceValue)}</small></p>
           <label>Motivo da baixa<select value={removeForm.status} onChange={(e) => { const status = e.target.value; setRemoveForm({ ...removeForm, status, removalReason: status === 'nao_recebido' && !removeForm.removalReason.trim() ? 'Material não recebido' : removeForm.removalReason }); }}>
             <option value="devolvida">Devolução</option>
             <option value="nao_recebido">Material não recebido</option>
             <option value="perdida">Perda/extravio</option>
             <option value="desgaste">Desgaste/quebra</option>
-            <option value="substituida">Substituição por outra ferramenta</option>
+            {!removeModal.tool?.materialId && <option value="substituida">Substituição por outra ferramenta</option>}
           </select></label>
           <label>Descrição do motivo<textarea rows={2} value={removeForm.removalReason} onChange={(e) => setRemoveForm({ ...removeForm, removalReason: e.target.value })} placeholder="Ex.: material não recebido, devolvida na saída de férias, perdida em campo em 12/07, cabo rompido..." /></label>
           {removeForm.status === 'substituida' && (

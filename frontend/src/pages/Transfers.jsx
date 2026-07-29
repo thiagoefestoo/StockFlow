@@ -180,8 +180,9 @@ export default function Transfers() {
       ]);
       const stockMaterials = overview.data.data || [];
       const stockAssets = assets.data.data || [];
-      setWarehouseMaterials(stockMaterials.filter((material) => Number(material.mainStock || 0) > 0));
-      setAvailableAssets(stockAssets);
+      const transferableMaterials = stockMaterials.filter((material) => Number(material.mainStock || 0) > 0 && String(material.category || '').toLowerCase() !== 'ferramenta');
+      setWarehouseMaterials(transferableMaterials);
+      setAvailableAssets(stockAssets.filter((asset) => String(asset.Material?.category || '').toLowerCase() !== 'ferramenta'));
       setForm((current) => {
         if (!current.materialRequestId || String(current.warehouseId) !== String(warehouseId)) return current;
         return {

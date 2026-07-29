@@ -190,7 +190,9 @@ exports.list = asyncHandler(async (req, res) => {
     const assetCount = await SerializedAsset.count({ where: { technicianId: technician.id, ownerType: 'tecnico' } });
     const assetValue = await SerializedAsset.sum('acquisitionCost', { where: { technicianId: technician.id, ownerType: 'tecnico' } });
     const balances = await StockBalance.findAll({ where: { technicianId: technician.id, ownerType: 'tecnico' }, include: [Material] });
-    const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
+    const consumableValue = balances
+      .filter((row) => String(row.Material?.category || '').toLowerCase() !== 'ferramenta')
+      .reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
     const activeTools = hasModuleAccess(req.user, 'technicianTools')
       ? await TechnicianTool.findAll({
         where: { technicianId: technician.id, status: 'com_tecnico' },
@@ -319,19 +321,23 @@ exports.stock = asyncHandler(async (req, res) => {
     return fail(res, 403, 'Você só pode acessar a própria caixa técnica.');
   }
 
-  const assets = await SerializedAsset.findAll({
+  const rawAssets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material],
     order: [['custodyStartedAt', 'ASC']],
   });
 
-  const balances = await StockBalance.findAll({
+  const rawBalances = await StockBalance.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material],
     order: [[Material, 'name', 'ASC']],
   });
 
-  const movements = await StockMovement.findAll({
+  // Ferramentas pertencem exclusivamente à ficha do técnico e não à caixa de consumíveis.
+  const assets = rawAssets.filter((asset) => String(asset.Material?.category || '').toLowerCase() !== 'ferramenta');
+  const balances = rawBalances.filter((balance) => String(balance.Material?.category || '').toLowerCase() !== 'ferramenta');
+
+  const rawMovements = await StockMovement.findAll({
     where: { [Op.or]: [{ fromTechnicianId: technician.id }, { toTechnicianId: technician.id }] },
     include: [
       Material,
@@ -343,9 +349,10 @@ exports.stock = asyncHandler(async (req, res) => {
     order: [['movementAt', 'DESC']],
     limit: 80,
   });
+  const movements = rawMovements.filter((movement) => String(movement.Material?.category || '').toLowerCase() !== 'ferramenta' && movement.toOwnerType !== 'ficha_tecnico' && movement.fromOwnerType !== 'ficha_tecnico');
 
   const transfers = await Transfer.findAll({
-    where: { technicianId: technician.id },
+    where: { technicianId: technician.id, transferType: { [Op.ne]: 'ferramenta' } },
     include: [{ model: TransferItem, include: [Material, SerializedAsset] }],
     order: [['deliveredAt', 'DESC']],
     limit: 30,
@@ -360,6 +367,7 @@ exports.stock = asyncHandler(async (req, res) => {
   const tools = hasModuleAccess(req.user, 'technicianTools')
     ? await TechnicianTool.findAll({
       where: { technicianId: technician.id },
+      include: [Material, { model: Warehouse, as: 'sourceWarehouse' }],
       order: [['status', 'ASC'], ['deliveredAt', 'ASC']],
     }).catch(() => [])
     : [];

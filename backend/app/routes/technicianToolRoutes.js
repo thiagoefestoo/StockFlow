@@ -4,6 +4,7 @@ const { authenticate, requireModule } = require('../middlewares/authMiddleware')
 
 router.use(authenticate);
 router.get('/', requireModule('technicians', 'technicianTools', 'technicianLosses'), controller.list);
+router.get('/available-stock', requireModule('technicians', 'technicianTools', 'technicianToolsEdit'), controller.availableStock);
 router.get('/term', requireModule('technicians', 'technicianTools'), controller.termData);
 router.get('/documents', requireModule('technicians', 'technicianTools'), controller.listDocuments);
 router.get('/documents/:documentId', requireModule('technicians', 'technicianTools'), controller.getDocument);

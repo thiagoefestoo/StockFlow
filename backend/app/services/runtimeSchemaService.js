@@ -117,6 +117,20 @@ async function ensureTechnicianToolsSchema(queryInterface) {
   if (!tools) return;
 
   const missingColumns = [
+    ['materialId', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'materials', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    }],
+    ['sourceWarehouseId', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'warehouses', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+    }],
     ['brand', { type: DataTypes.STRING(100), allowNull: true }],
     ['referenceValue', { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 }],
     ['deliveredAt', { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }],
@@ -133,6 +147,9 @@ async function ensureTechnicianToolsSchema(queryInterface) {
       console.log(`✅ Coluna technician_tools.${column} criada.`);
     }
   }
+
+  await queryInterface.addIndex('technician_tools', ['materialId']).catch(() => null);
+  await queryInterface.addIndex('technician_tools', ['sourceWarehouseId']).catch(() => null);
 }
 
 async function ensureTransferItemLossSchema(queryInterface) {

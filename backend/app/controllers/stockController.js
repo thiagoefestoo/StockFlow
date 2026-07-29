@@ -71,8 +71,8 @@ exports.overview = asyncHandler(async (req, res) => {
     rows.push({
       ...material.toJSON(),
       mainStock: material.requiresSerial ? mainAssets : Number(mainBalance || 0),
-      technicianStock: material.requiresSerial ? techAssets : Number(techBalances || 0),
-      installedStock: material.requiresSerial ? installedAssets : 0,
+      technicianStock: material.category === 'ferramenta' ? 0 : (material.requiresSerial ? techAssets : Number(techBalances || 0)),
+      installedStock: material.category === 'ferramenta' ? 0 : (material.requiresSerial ? installedAssets : 0),
     });
   }
   return ok(res, rows);
@@ -146,22 +146,26 @@ exports.movements = asyncHandler(async (req, res) => {
 exports.technicianBox = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
-  const assets = await SerializedAsset.findAll({
+  const rawAssets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material, Warehouse],
     order: [['custodyStartedAt', 'ASC'], ['serialNumber', 'ASC']],
   });
-  const balances = await StockBalance.findAll({
+  const rawBalances = await StockBalance.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material, Warehouse],
     order: [[Material, 'name', 'ASC']],
   });
-  const movements = await StockMovement.findAll({
+  // Ferramentas ficam somente na ficha de custódia, separadas da caixa técnica.
+  const assets = rawAssets.filter((asset) => String(asset.Material?.category || '').toLowerCase() !== 'ferramenta');
+  const balances = rawBalances.filter((balance) => String(balance.Material?.category || '').toLowerCase() !== 'ferramenta');
+  const rawMovements = await StockMovement.findAll({
     where: { [Op.or]: [{ fromTechnicianId: technician.id }, { toTechnicianId: technician.id }] },
     include: [Material, SerializedAsset, { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }],
     order: [['movementAt', 'DESC']],
     limit: 250,
   });
+  const movements = rawMovements.filter((movement) => String(movement.Material?.category || '').toLowerCase() !== 'ferramenta' && movement.toOwnerType !== 'ficha_tecnico' && movement.fromOwnerType !== 'ficha_tecnico');
   const orders = await ServiceOrder.findAll({
     where: { technicianId: technician.id },
     include: [{ model: ServiceOrderMaterial, include: [Material, SerializedAsset] }],

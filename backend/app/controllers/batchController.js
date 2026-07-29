@@ -25,7 +25,9 @@ exports.list = asyncHandler(async (req, res) => {
       include: [
         { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
         Warehouse,
+        { model: StockBatchItem, include: [Material] },
       ],
+      distinct: true,
       order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
       limit,
       ...(pagination.enabled ? { offset: pagination.offset } : {}),

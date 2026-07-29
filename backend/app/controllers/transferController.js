@@ -73,6 +73,9 @@ async function estimateTransferValue(items = [], sourceWarehouseId) {
   for (const item of items) {
     const material = await Material.findByPk(item.materialId);
     if (!material) throw new Error('Material não encontrado.');
+    if (String(material.category || '').toLowerCase() === 'ferramenta') {
+      throw new Error(`A ferramenta ${material.name} deve ser entregue pela ficha do técnico, em Técnicos > Detalhes > Adicionar ferramentas.`);
+    }
     const unitCost = money(item.unitCost ?? material.unitCost);
     if (material.requiresSerial) {
       const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((value) => String(value).trim()).filter(Boolean) : [];
@@ -264,6 +267,9 @@ exports.create = asyncHandler(async (req, res) => {
     for (const item of items) {
       const material = await Material.findByPk(item.materialId, { transaction });
       if (!material) throw new Error('Material não encontrado.');
+      if (String(material.category || '').toLowerCase() === 'ferramenta') {
+        throw new Error(`A ferramenta ${material.name} não pode entrar na caixa técnica. Use Técnicos > Detalhes > Adicionar ferramentas na ficha.`);
+      }
       const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
       const requestedQuantity = qty(item.quantity);
       const quantity = qty(material.requiresSerial ? serials.length : item.quantity);
