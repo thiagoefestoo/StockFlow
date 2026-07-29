@@ -11,7 +11,7 @@ import { formatQuantity } from '../utils/formatQuantity';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial } from '../utils/serviceOrderRules';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 
-const osEmpty = { osNumber: '', customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', addressChangeType: '', notes: '', materials: [] };
+const osEmpty = { customerName: '', customerCpf: '', customerAddress: '', city: '', serviceType: 'instalacao', addressChangeType: '', notes: '', materials: [] };
 const reqEmpty = { priority: 'media', requesterNotes: '', items: [] };
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
@@ -193,7 +193,6 @@ export default function TechnicianInbox() {
   function removeRequestItem(i) { setRequestForm({ ...requestForm, items: requestForm.items.filter((_, index) => index !== i) }); }
 
   function validateOs() {
-    if (!String(osForm.osNumber || '').trim()) return 'Informe o número da OS.';
     if (!String(osForm.customerName || '').trim()) return 'Informe o nome do cliente.';
     if (!String(osForm.customerCpf || '').trim()) return 'Informe o número do contrato.';
     if (!linkedCity) return 'O técnico não possui cidade vinculada. Defina o estoque regional padrão no cadastro do técnico.';
@@ -247,7 +246,7 @@ export default function TechnicianInbox() {
     try {
       const payload = { ...osForm, city: String(osForm.city || '').trim(), notes: osForm.notes, technicianId: selectedTech, materials: osForm.materials.map((m) => ({ ...m, serialNumbers: Array.isArray(m.serialNumbers) ? m.serialNumbers.filter(Boolean) : [] })) };
       await api.post('/service-orders', payload);
-      setMessage('OS baixada com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
+      setMessage('Serviço baixado com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
       setOsReviewOpen(false);
       setOsForm({ ...osEmpty, city: linkedCity });
       setSerialSearches({});
@@ -360,10 +359,9 @@ export default function TechnicianInbox() {
 
       <section className="two-col technician-work-area">
         <article className={`panel os-work-card ${mobileSectionClass('baixa')}`}>
-          <div className="panel-title compact-title"><div><h3>Baixar material por OS</h3><p>Informe o serviço executado. Ativação, upgrade e mudança com troca exigem serial; reparo e mudança sem troca não exigem.</p></div></div>
-          <button type="button" className="ghost os-mobile-toggle" onClick={() => setOsFieldsOpen((open) => !open)}>{osFieldsOpen ? 'Ocultar dados da OS' : 'Preencher dados da OS'}</button>
+          <div className="panel-title compact-title"><div><h3>Baixar material por serviço</h3><p>Informe o serviço executado. Ativação, upgrade e mudança com troca exigem serial; reparo e mudança sem troca não exigem.</p></div></div>
+          <button type="button" className="ghost os-mobile-toggle" onClick={() => setOsFieldsOpen((open) => !open)}>{osFieldsOpen ? 'Ocultar dados do serviço' : 'Preencher dados do serviço'}</button>
           <div className={`form-grid os-mobile-fields ${osFieldsOpen ? 'open' : ''}`}>
-            <label>Nº da OS<input value={osForm.osNumber} onChange={(e) => setOsForm({ ...osForm, osNumber: e.target.value })} required /></label>
             <label>Número do contrato *<input value={osForm.customerCpf} onChange={(e) => setOsForm({ ...osForm, customerCpf: e.target.value })} required /></label>
             <label>Nome do cliente *<input value={osForm.customerName} onChange={(e) => setOsForm({ ...osForm, customerName: e.target.value })} required /></label>
             <label>Endereço<input value={osForm.customerAddress} onChange={(e) => setOsForm({ ...osForm, customerAddress: e.target.value })} /></label>
@@ -391,11 +389,11 @@ export default function TechnicianInbox() {
             </div>;
           })}
           {!osForm.materials.length && <div className="empty-state small">Clique em “Adicionar item” para informar o material usado na OS.</div>}
-          <button onClick={reviewOs} className="wide">Revisar baixa da OS</button>
+          <button onClick={reviewOs} className="wide">Revisar baixa do serviço</button>
         </article>
 
         <article className={`panel technician-box-card ${mobileSectionClass('caixa')}`}>
-          <div className="panel-title compact-title"><div><h3>Minha carga atual</h3><p>Resumo por material. Abra detalhes apenas quando precisar ver seriais e valores.</p></div></div>
+          <div className="panel-title compact-title"><div><h3>Minha carga atual</h3><p>Resumo por material. Abra detalhes apenas quando precisar ver seriais e valores.</p></div><button type="button" className="ghost" disabled={!selectedTech} onClick={() => window.open(`/carga-tecnico/${selectedTech}`, '_blank', 'noopener,noreferrer')}>🖨️ Imprimir carga atual</button></div>
           <div className="technician-card-list">
             {flatBoxRows.map((row) => <button type="button" className="tech-stock-card" key={`${row.group}-${row.materialId}`} onClick={() => setDetails({ type: 'group', item: row })}>
               <span><b>{row.material}</b><small>{row.group} • {row.requiresSerial ? 'Serializado' : 'Consumível'}</small></span>
@@ -424,14 +422,13 @@ export default function TechnicianInbox() {
 
       <OperationReviewModal
         open={osReviewOpen}
-        title="Revisar baixa da ordem de serviço"
+        title="Revisar baixa do serviço"
         description="Confira os dados do cliente, o serviço e todos os materiais antes de atualizar a caixa do técnico."
         onCancel={() => { if (!submittingOs) setOsReviewOpen(false); }}
         onConfirm={saveOs}
-        confirmLabel={submittingOs ? 'Confirmando...' : 'Confirmar baixa da OS'}
+        confirmLabel={submittingOs ? 'Confirmando...' : 'Confirmar baixa do serviço'}
         loading={submittingOs}
         metadata={[
-          { label: 'OS', value: osForm.osNumber || '-' },
           { label: 'Cliente', value: osForm.customerName || '-' },
           { label: 'Contrato', value: osForm.customerCpf || '-' },
           { label: 'Serviço', value: SERVICE_TYPE_OPTIONS.find((option) => option.value === osForm.serviceType)?.label || osForm.serviceType },
@@ -451,7 +448,7 @@ export default function TechnicianInbox() {
             totalValue: quantity * Number(material?.unitCost || 0),
           };
         })}
-        warning="Após a confirmação, os materiais serão baixados da caixa do técnico e vinculados à ordem de serviço."
+        warning="Após a confirmação, os materiais serão baixados da caixa do técnico e vinculados ao registro do serviço."
       />
 
       <DetailsModal open={!!details} title="Detalhes da caixa do técnico" onClose={() => setDetails(null)}>

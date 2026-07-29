@@ -16,6 +16,12 @@ function serviceRequiresSerial(serviceType, addressChangeType) {
     || (serviceType === 'outro' && addressChangeType === 'com_troca');
 }
 
+function nextAutomaticServiceOrderNumber(technicianId) {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `BAIXA-${technicianId}-${stamp}-${suffix}`;
+}
+
 function composeServiceNotes(notes, serviceType, addressChangeType) {
   const addressLabel = addressChangeType === 'com_troca'
     ? 'com troca de equipamento'
@@ -72,7 +78,8 @@ exports.create = asyncHandler(async (req, res) => {
   let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
-  if (!osNumber || !customerName || !customerCpf) return fail(res, 400, 'OS, nome do cliente e número do contrato são obrigatórios.');
+  if (!customerName || !customerCpf) return fail(res, 400, 'Nome do cliente e número do contrato são obrigatórios.');
+  osNumber = String(osNumber || '').trim() || nextAutomaticServiceOrderNumber(technicianId);
   let operationalLocation;
   try { operationalLocation = await resolveServiceOrderLocation(technicianId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   let serviceOrderCity;
@@ -144,11 +151,11 @@ exports.create = asyncHandler(async (req, res) => {
         await StockMovement.create({ type: 'baixa_os', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: osNumber, createdById: req.user.id }, { transaction });
       }
     }
-    await writeAudit({ req, action: 'create', entity: 'ServiceOrder', entityId: record.id, message: `OS ${osNumber} baixada pelo técnico.`, afterData: record.toJSON(), transaction });
+    await writeAudit({ req, action: 'create', entity: 'ServiceOrder', entityId: record.id, message: `Baixa de serviço ${osNumber} registrada pelo técnico.`, afterData: record.toJSON(), transaction });
     return record;
   });
 
-  return created(res, order, 'OS registrada e materiais baixados.');
+  return created(res, order, 'Serviço registrado e materiais baixados.');
 });
 
 

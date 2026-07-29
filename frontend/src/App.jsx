@@ -31,6 +31,7 @@ import TechnicianLosses from './pages/TechnicianLosses';
 import LossPrint from './pages/LossPrint';
 import TechnicianToolsPrint from './pages/TechnicianToolsPrint';
 import TechnicianReturns from './pages/TechnicianReturns';
+import TechnicianLoadPrint from './pages/TechnicianLoadPrint';
 import LossEvaluation from './pages/LossEvaluation';
 
 
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="caixa-tecnico" element={<PrivateRoute module="technicianInbox"><TechnicianInbox /></PrivateRoute>} />
             <Route path="central-caixa-tecnico" element={<PrivateRoute module="technicianBoxControl"><TechnicianBoxControl /></PrivateRoute>} />
             <Route path="retorno-caixa-estoque" element={<PrivateRoute module="technicianReturns"><TechnicianReturns /></PrivateRoute>} />
+            <Route path="carga-tecnico/:id" element={<TechnicianLoadPrint />} />
             <Route path="tecnicos" element={<PrivateRoute module="technicians"><Technicians /></PrivateRoute>} />
             <Route path="ferramentas-tecnico/:id" element={<PrivateRoute module="technicianTools"><TechnicianToolsPrint /></PrivateRoute>} />
             <Route path="usuarios" element={<PrivateRoute roles={['admin']} module="users"><Users /></PrivateRoute>} />

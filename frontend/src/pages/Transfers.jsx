@@ -42,7 +42,11 @@ function defaultQuantityForMaterial(material, serialAssets = []) {
 }
 
 function isReturnTransfer(transfer) {
-  return String(transfer?.transferNumber || '').toUpperCase().startsWith('RETORNO-');
+  const number = String(transfer?.transferNumber || '').toUpperCase();
+  const notes = String(transfer?.notes || '').toUpperCase();
+  return transfer?.transferType === 'retorno'
+    || number.startsWith('RETORNO-')
+    || notes.includes('RETORNO DA CAIXA DO TÉCNICO PARA ESTOQUE');
 }
 
 function isToolTransfer(transfer) {
@@ -51,7 +55,7 @@ function isToolTransfer(transfer) {
 
 function transferTypeLabel(transfer) {
   if (isToolTransfer(transfer)) return 'Ferramenta técnico → técnico';
-  return isReturnTransfer(transfer) ? 'Retorno técnico → estoque' : 'Entrega estoque → técnico';
+  return isReturnTransfer(transfer) ? 'Devolução de item' : 'Entrega estoque → técnico';
 }
 
 function transferWarehouseLabel(transfer) {
@@ -727,7 +731,7 @@ export default function Transfers() {
       <section className="panel filters">
         <div className="form-grid">
           <label>🔎 Pesquisar<input value={transferSearch} onChange={(e) => setTransferSearch(e.target.value)} placeholder="Guia, técnico, estoque, material ou serial" /></label>
-          <label>Tipo<select value={transferTypeFilter} onChange={(e) => setTransferTypeFilter(e.target.value)}><option value="">Todos</option><option value="entrega">Entrega para técnico</option><option value="retorno">Retorno para estoque</option><option value="ferramenta">Ferramenta entre técnicos</option></select></label>
+          <label>Tipo<select value={transferTypeFilter} onChange={(e) => setTransferTypeFilter(e.target.value)}><option value="">Todos</option><option value="entrega">Entrega para técnico</option><option value="retorno">Devolução de item</option><option value="ferramenta">Ferramenta entre técnicos</option></select></label>
           <label>Status<select value={transferStatusFilter} onChange={(e) => setTransferStatusFilter(e.target.value)}><option value="">Todos</option><option value="pendente_assinatura">Pendente de assinatura</option><option value="assinado">Assinado</option><option value="cancelado">Cancelado</option></select></label>
           <label className="filter-action"><span>&nbsp;</span><button type="button" className="ghost" onClick={() => { setTransferSearch(''); setTransferTypeFilter(''); setTransferStatusFilter(''); }}>Limpar filtros</button></label>
         </div>

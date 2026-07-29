@@ -38,6 +38,12 @@ function serviceRequiresSerial(serviceType, addressChangeType) {
     || (serviceType === 'outro' && addressChangeType === 'com_troca');
 }
 
+function nextAutomaticServiceOrderNumber(technicianId) {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `BAIXA-${technicianId}-${stamp}-${suffix}`;
+}
+
 function composeServiceNotes(notes, serviceType, addressChangeType) {
   const addressLabel = addressChangeType === 'com_troca'
     ? 'com troca de equipamento'
@@ -240,6 +246,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
       attachmentData: attachmentData || null,
       signatureResponsible: signatureResponsible || null,
       notes: `RETORNO DA CAIXA DO TÉCNICO PARA ESTOQUE. ${notes || ''}`.trim(),
+      transferType: 'retorno',
       stampText: 'Declaro que os materiais listados foram devolvidos pelo técnico e conferidos para retorno ao estoque informado.',
       createdById: req.user.id,
       warehouseId: targetWarehouseId,
@@ -373,24 +380,22 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
   const result = await sequelize.transaction(async (transaction) => {
     let totalQuantity = 0;
     let totalValue = 0;
-    const movementReference = osNumber || reference || `CLIENTE-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
-    let order = null;
-    if (osNumber) {
-      order = await ServiceOrder.create({
-        technicianId,
-        osNumber,
-        customerName,
-        customerCpf: normalizeDoc(customerCpf),
-        customerAddress,
-        city: serviceOrderCity,
-        warehouseId: operationalLocation.warehouse.id,
-        serviceType,
-        status: 'concluida',
-        completedAt: completedAt || new Date(),
-        notes: normalizedNotes,
-        createdById: req.user.id,
-      }, { transaction });
-    }
+    const serviceOrderNumber = String(osNumber || '').trim() || nextAutomaticServiceOrderNumber(technicianId);
+    const movementReference = reference || serviceOrderNumber;
+    const order = await ServiceOrder.create({
+      technicianId,
+      osNumber: serviceOrderNumber,
+      customerName,
+      customerCpf: normalizeDoc(customerCpf),
+      customerAddress,
+      city: serviceOrderCity,
+      warehouseId: operationalLocation.warehouse.id,
+      serviceType,
+      status: 'concluida',
+      completedAt: completedAt || new Date(),
+      notes: normalizedNotes,
+      createdById: req.user.id,
+    }, { transaction });
 
     const affected = [];
     for (const item of items) {
@@ -412,7 +417,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
           asset.lastMovementAt = new Date();
           asset.notes = [asset.notes, normalizedNotes ? `Transferido para cliente: ${normalizedNotes}` : null].filter(Boolean).join(' | ');
           await asset.save({ transaction });
-          if (order) await ServiceOrderMaterial.create({ serviceOrderId: order.id, materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, unitCost: cost, totalCost: cost }, { transaction });
+          await ServiceOrderMaterial.create({ serviceOrderId: order.id, materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, unitCost: cost, totalCost: cost }, { transaction });
           await StockMovement.create({ type: 'baixa_os', materialId: material.id, assetId: asset.id, quantity: 1, serialNumber, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: movementReference, notes: normalizedNotes || 'Movimentação administrativa da caixa do técnico para cliente.', createdById: req.user.id }, { transaction });
           totalQuantity += 1;
           totalValue += Number(cost);
@@ -423,7 +428,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
         if (quantity <= 0) continue;
         await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
         const totalCost = money(quantity * unitCost);
-        if (order) await ServiceOrderMaterial.create({ serviceOrderId: order.id, materialId: material.id, quantity, unitCost, totalCost }, { transaction });
+        await ServiceOrderMaterial.create({ serviceOrderId: order.id, materialId: material.id, quantity, unitCost, totalCost }, { transaction });
         await StockMovement.create({ type: 'baixa_os', materialId: material.id, quantity, fromOwnerType: 'tecnico', toOwnerType: 'cliente', fromTechnicianId: technicianId, reference: movementReference, notes: normalizedNotes || 'Movimentação administrativa da caixa do técnico para cliente.', createdById: req.user.id }, { transaction });
         totalQuantity += quantity;
         totalValue += totalCost;

@@ -21,7 +21,9 @@ export default function TransferPrint() {
   if (!transfer) return <div className="panel">Carregando guia...</div>;
 
   const number = String(transfer.transferNumber || '').toUpperCase();
-  const isReturn = number.startsWith('RETORNO-');
+  const isReturn = transfer.transferType === 'retorno'
+    || number.startsWith('RETORNO-')
+    || String(transfer.notes || '').toUpperCase().includes('RETORNO DA CAIXA DO TÉCNICO PARA ESTOQUE');
   const isToolTransfer = transfer.transferType === 'ferramenta' || number.startsWith('FERRAMENTA-');
   const items = transfer.TransferItems || [];
   const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -32,9 +34,9 @@ export default function TransferPrint() {
   const guideTitle = isToolTransfer
     ? 'GUIA DE TRANSFERÊNCIA DE FERRAMENTAS'
     : isReturn
-      ? 'GUIA DE RETORNO DE MATERIAL'
+      ? 'GUIA DE DEVOLUÇÃO DE MATERIAL'
       : 'GUIA DE ENTREGA DE MATERIAL';
-  const pageTitle = isToolTransfer ? 'Guia de ferramentas' : isReturn ? 'Guia de retorno' : 'Guia de entrega';
+  const pageTitle = isToolTransfer ? 'Guia de ferramentas' : isReturn ? 'Guia de devolução' : 'Guia de entrega';
   const guideDescription = isToolTransfer
     ? 'Documento para conferência e mudança de responsabilidade das ferramentas entre técnicos.'
     : isReturn

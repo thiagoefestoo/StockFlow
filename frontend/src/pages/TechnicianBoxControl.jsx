@@ -16,7 +16,6 @@ function parseSerialTerms(value) { return String(value || '').split(/[\n,;\t ]+/
 function assetSearchText(asset) { return [asset.serialNumber, asset.mac, asset.id, asset.brand, asset.model, asset.Material?.name].filter(Boolean).join(' ').toLowerCase(); }
 
 const emptyClientForm = {
-  osNumber: '',
   customerName: '',
   customerCpf: '',
   customerAddress: '',
@@ -273,7 +272,7 @@ export default function TechnicianBoxControl() {
         items: clientForm.items.map((item) => ({ ...item, quantity: Number(item.quantity || 0), serialNumbers: splitSerials(item.serialNumbersText) })),
       };
       await api.post('/stock/technician-box/move-to-client', payload);
-      setMessage('✅ Movimentação para cliente registrada. Caixa, OS, histórico, auditoria e BI foram atualizados.');
+      setMessage('✅ Baixa do serviço registrada. Caixa, histórico, auditoria e BI foram atualizados.');
       setReviewType('');
       setClientForm({ ...emptyClientForm, city: linkedClientCity });
       loadBox(selectedTech);
@@ -378,9 +377,12 @@ export default function TechnicianBoxControl() {
             <h3>📦 Custódia atual do técnico</h3>
             <p>Lista em tempo real de tudo que está na caixa do técnico selecionado: equipamentos com serial e consumíveis.</p>
           </div>
-          <div className="live-refresh-pill">
-            <span className={boxLoading ? 'loading-dot' : 'online-dot'}></span>
-            {boxLoading ? 'Atualizando...' : lastBoxRefresh ? `Atualizado ${lastBoxRefresh.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Aguardando técnico'}
+          <div className="row-actions">
+            <button type="button" className="ghost" disabled={!selectedTech} onClick={() => window.open(`/carga-tecnico/${selectedTech}`, '_blank', 'noopener,noreferrer')}>🖨️ Imprimir carga atual</button>
+            <div className="live-refresh-pill">
+              <span className={boxLoading ? 'loading-dot' : 'online-dot'}></span>
+              {boxLoading ? 'Atualizando...' : lastBoxRefresh ? `Atualizado ${lastBoxRefresh.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Aguardando técnico'}
+            </div>
           </div>
         </div>
 
@@ -457,7 +459,7 @@ export default function TechnicianBoxControl() {
 
       <section className="panel action-workbench">
         <div className="tabbar">
-          <button className={tab === 'cliente' ? 'active' : 'ghost'} onClick={() => setTab('cliente')}>📲 Baixar para cliente / OS</button>
+          <button className={tab === 'cliente' ? 'active' : 'ghost'} onClick={() => setTab('cliente')}>📲 Baixar serviço para cliente</button>
           <button className={tab === 'estoque' ? 'active' : 'ghost'} onClick={() => setTab('estoque')}>↩️ Devolver para estoque</button>
           <button className={tab === 'historico' ? 'active' : 'ghost'} onClick={() => setTab('historico')}>🧾 Histórico da caixa</button>
         </div>
@@ -466,9 +468,8 @@ export default function TechnicianBoxControl() {
           <div className="workbench-grid">
             <div>
               <h3>📲 Transferir material do técnico para cliente</h3>
-              <p className="muted">Use quando o técnico não conseguir dar baixa pelo celular. Se informar OS, o sistema cria a OS concluída e vincula os materiais.</p>
+              <p className="muted">Use quando o técnico não conseguir dar baixa pelo celular. O sistema cria automaticamente o registro interno do serviço e vincula os materiais.</p>
               <div className="form-grid">
-                <label>Nº da OS <input value={clientForm.osNumber} onChange={(e) => setClientForm({ ...clientForm, osNumber: e.target.value })} placeholder="Ex.: OS-12345" /></label>
                 <label>Tipo de serviço executado <select value={clientForm.serviceType} onChange={(e) => setClientForm({ ...clientForm, serviceType: e.target.value, addressChangeType: e.target.value === 'outro' ? clientForm.addressChangeType : '' })}>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>{clientForm.serviceType === 'outro' && <label>Troca de equipamento? <select value={clientForm.addressChangeType} onChange={(e) => setClientForm({ ...clientForm, addressChangeType: e.target.value })}><option value="">Selecione</option>{ADDRESS_CHANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
                 <label>Número do contrato <input value={clientForm.customerCpf} onChange={(e) => setClientForm({ ...clientForm, customerCpf: e.target.value })} /></label>
                 <label>Nome do cliente <input value={clientForm.customerName} onChange={(e) => setClientForm({ ...clientForm, customerName: e.target.value })} /></label>
@@ -478,7 +479,7 @@ export default function TechnicianBoxControl() {
               <label>Observação da baixa<textarea rows="3" value={clientForm.notes} onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })} placeholder="Motivo, atendimento, autorização, observações do supervisor..." /></label>
               <div className="subtoolbar"><h4>Itens usados no cliente</h4><button className="ghost" onClick={addClientItem}>➕ Adicionar item</button></div>
               {clientForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={clientForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateClientItem} remove={removeClientItem} toggleSerial={(serial) => toggleSerial('client', i, serial)} allowZero={false} />)}
-              <button className="wide" disabled={saving} onClick={openClientReview}>✅ Revisar baixa/movimentação para cliente</button>
+              <button className="wide" disabled={saving} onClick={openClientReview}>✅ Revisar baixa do serviço para cliente</button>
             </div>
             <PreviewBox title="Impacto desta operação" form={clientForm} materials={materialsInBox} box={box} target="cliente" />
           </div>
@@ -513,12 +514,11 @@ export default function TechnicianBoxControl() {
 
       <OperationReviewModal
         open={Boolean(reviewType)}
-        title={reviewType === 'client' ? 'Revisar baixa para cliente/OS' : 'Revisar devolução ao estoque'}
-        description={reviewType === 'client' ? 'Confira cliente, serviço, OS, itens e seriais antes de registrar a baixa.' : 'Confira técnico, estoque de destino, itens e seriais antes de registrar a devolução.'}
+        title={reviewType === 'client' ? 'Revisar baixa do serviço para cliente' : 'Revisar devolução ao estoque'}
+        description={reviewType === 'client' ? 'Confira cliente, serviço, itens e seriais antes de registrar a baixa.' : 'Confira técnico, estoque de destino, itens e seriais antes de registrar a devolução.'}
         metadata={reviewType === 'client' ? [
           { label: 'Técnico', value: selectedTechnician?.name },
           { label: 'Cliente', value: clientForm.customerName || 'Não informado', hint: clientForm.customerCpf || clientForm.customerAddress },
-          { label: 'OS', value: clientForm.osNumber || 'Sem número de OS' },
           { label: 'Tipo de serviço', value: serviceTypeLabel(clientForm.serviceType) },
           { label: 'Cidade', value: clientForm.city || '-' },
         ] : [
@@ -532,7 +532,7 @@ export default function TechnicianBoxControl() {
         totalValue={reviewValue}
         warning={reviewType === 'client' ? 'Ao confirmar, os itens sairão da caixa do técnico e serão vinculados ao cliente/OS.' : 'Itens com quantidade maior que 0 retornarão ao estoque. Linhas com quantidade 0 ficarão registradas na conferência, sem movimentar saldo.'}
         loading={saving}
-        confirmLabel={reviewType === 'client' ? 'Confirmar baixa para cliente' : 'Confirmar devolução ao estoque'}
+        confirmLabel={reviewType === 'client' ? 'Confirmar baixa do serviço' : 'Confirmar devolução ao estoque'}
         onCancel={() => setReviewType('')}
         onConfirm={reviewType === 'client' ? moveToClient : returnToStock}
       />
