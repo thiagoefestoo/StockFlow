@@ -19,6 +19,8 @@ function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-
 function categoryGroup(category) { const c = String(category || '').toLowerCase(); if (c.includes('onu') || c.includes('roteador')) return 'ONU e equipamentos'; if (c.includes('cabo') || c.includes('drop')) return 'Cabo/drop'; if (c.includes('conector') || c.includes('esticador')) return 'Conectores e fixação'; return 'Outros materiais'; }
 function statusLabel(value) { return ({ pendente_aprovacao: 'Pendente aprovação', aprovado: 'Aprovado', entregue: 'Entregue', reprovado: 'Reprovado', cancelado: 'Cancelado' }[value] || value || '-'); }
 function sectionLabel(key) { return ({ resumo: 'Resumo', baixa: 'Baixar OS', caixa: 'Minha carga', solicitacoes: 'Solicitações' }[key] || key); }
+function parseSerialTerms(value) { return String(value || '').split(/[\n,;\t ]+/).map((item) => item.trim().toLowerCase()).filter(Boolean); }
+function assetSearchText(asset) { return [asset.serialNumber, asset.mac, asset.id, asset.brand, asset.model, asset.Material?.name].filter(Boolean).join(' ').toLowerCase(); }
 
 export default function TechnicianInbox() {
   const navigate = useNavigate();
@@ -40,6 +42,7 @@ export default function TechnicianInbox() {
   const [osReviewOpen, setOsReviewOpen] = useState(false);
   const [submittingOs, setSubmittingOs] = useState(false);
   const [serialSearches, setSerialSearches] = useState({});
+  const [serialSearchesApplied, setSerialSearchesApplied] = useState({});
 
   async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []); }
   async function loadStock(id = selectedTech) {
@@ -159,6 +162,7 @@ export default function TechnicianInbox() {
     setOsForm({ ...osForm, materials });
     if (Object.prototype.hasOwnProperty.call(patch, 'materialId')) {
       setSerialSearches((current) => ({ ...current, [i]: '' }));
+      setSerialSearchesApplied((current) => ({ ...current, [i]: '' }));
     }
   }
 
@@ -246,6 +250,8 @@ export default function TechnicianInbox() {
       setMessage('OS baixada com sucesso. Sua caixa foi atualizada e o histórico foi gravado.');
       setOsReviewOpen(false);
       setOsForm({ ...osEmpty, city: linkedCity });
+      setSerialSearches({});
+      setSerialSearchesApplied({});
       setOsFieldsOpen(false);
       setActiveMobileSection('resumo');
       loadStock(selectedTech);
@@ -370,8 +376,8 @@ export default function TechnicianInbox() {
             const material = stockMaterials.find((x) => Number(x.id) === Number(m.materialId));
             const usedSerials = selectedSerialsExcept(osForm.materials, i);
             const serials = serialByMaterial(m.materialId).filter((asset) => !usedSerials.has(String(asset.serialNumber || '').trim().toUpperCase()));
-            const serialSearch = String(serialSearches[i] || '').trim().toLowerCase();
-            const filteredSerials = serials.filter((asset) => !serialSearch || [asset.serialNumber, asset.mac, asset.id, asset.Material?.name].some((value) => String(value || '').toLowerCase().includes(serialSearch)));
+            const serialTerms = parseSerialTerms(serialSearchesApplied[i] || '');
+            const filteredSerials = serials.filter((asset) => !serialTerms.length || serialTerms.some((term) => assetSearchText(asset).includes(term)));
             const availableBalance = technicianMaterialBalance(m.materialId);
             return <div className="item-card technician-os-item" key={i}>
               <div className="item-head"><strong>Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeOsMaterial(i)}>Remover</button></div>
@@ -381,7 +387,7 @@ export default function TechnicianInbox() {
                 <strong>{formatQuantity(availableBalance, material.unit)}</strong>
                 <small>{material.requiresSerial ? `${serials.length} serial(is) disponível(is) para baixa` : 'Quantidade máxima disponível para esta OS'}</small>
               </div>}
-              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head"><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small></div><input className="serial-search-input" value={serialSearches[i] || ''} onChange={(e) => setSerialSearches((current) => ({ ...current, [i]: e.target.value }))} placeholder="Buscar por serial, patrimônio ou MAC" /><div className="serial-list compact-serial-list">{filteredSerials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>Patrimônio #{asset.id} • {asset.Material?.name || material.name}{asset.mac ? ` • MAC ${asset.mac}` : ''}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!filteredSerials.length && <div className="empty-state small">{serialSearch ? 'Nenhum serial corresponde à busca.' : 'Nenhum serial deste material está na sua caixa.'}</div>}</div> : <label>Quantidade<input type="number" min="1" max={availableBalance || undefined} value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /><small>Saldo disponível: {formatQuantity(availableBalance, material?.unit)}</small></label>}
+              {material?.requiresSerial ? <div className="serial-picker"><div className="serial-picker-head serial-picker-head-stacked"><div><strong>Serial do equipamento</strong><small>{serialRequiredForService ? 'Obrigatório para este tipo de serviço. Selecione apenas 1 serial por OS.' : 'Opcional para o serviço, mas obrigatório se este equipamento for baixado.'}</small><span>{filteredSerials.length} filtrado(s) • {serials.length} disponível(is)</span></div><div className="serial-quick-filter"><label><span>🔎 Pesquisar ONU/serial (pode colar uma lista do Excel)</span><textarea rows="3" value={serialSearches[i] || ''} onChange={(e) => setSerialSearches((current) => ({ ...current, [i]: e.target.value }))} placeholder={'Digite ou cole serial, patrimônio ou MAC — um por linha'} /></label><div className="row-actions"><button type="button" onClick={() => setSerialSearchesApplied((current) => ({ ...current, [i]: serialSearches[i] || '' }))}>🔍 Filtrar</button><button type="button" className="ghost" onClick={() => { setSerialSearches((current) => ({ ...current, [i]: '' })); setSerialSearchesApplied((current) => ({ ...current, [i]: '' })); }}>Limpar pesquisa</button></div></div></div><div className="serial-list compact-serial-list">{filteredSerials.map((asset) => { const checked = (m.serialNumbers || []).includes(asset.serialNumber); return <button type="button" className={`serial-chip ${checked ? 'selected' : ''}`} key={asset.id || asset.serialNumber} onClick={() => toggleSingleSerial(i, asset.serialNumber)}><span><b>{asset.serialNumber}</b><small>Patrimônio #{asset.id} • {asset.Material?.name || material.name}{asset.mac ? ` • MAC ${asset.mac}` : ''}</small></span><em>{checked ? 'Selecionado' : 'Selecionar'}</em></button>; })}</div>{!filteredSerials.length && <div className="empty-state small">{serialTerms.length ? 'Nenhum serial corresponde à pesquisa.' : 'Nenhum serial deste material está na sua caixa.'}</div>}</div> : <label>Quantidade<input type="number" min="1" max={availableBalance || undefined} value={m.quantity} onChange={(e) => updateOsMaterial(i, { quantity: e.target.value })} /><small>Saldo disponível: {formatQuantity(availableBalance, material?.unit)}</small></label>}
             </div>;
           })}
           {!osForm.materials.length && <div className="empty-state small">Clique em “Adicionar item” para informar o material usado na OS.</div>}

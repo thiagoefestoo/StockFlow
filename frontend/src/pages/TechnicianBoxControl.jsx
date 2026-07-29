@@ -12,6 +12,8 @@ import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/op
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
+function parseSerialTerms(value) { return String(value || '').split(/[\n,;\t ]+/).map((item) => item.trim().toLowerCase()).filter(Boolean); }
+function assetSearchText(asset) { return [asset.serialNumber, asset.mac, asset.id, asset.brand, asset.model, asset.Material?.name].filter(Boolean).join(' ').toLowerCase(); }
 
 const emptyClientForm = {
   osNumber: '',
@@ -173,10 +175,10 @@ export default function TechnicianBoxControl() {
   }
 
   function addClientItem() {
-    setClientForm({ ...clientForm, items: [...clientForm.items, { materialId: '', quantity: '', serialNumbersText: '' }] });
+    setClientForm({ ...clientForm, items: [...clientForm.items, { materialId: '', quantity: '', serialNumbersText: '', assetSearch: '', assetSearchApplied: '' }] });
   }
   function addReturnItem() {
-    setReturnForm({ ...returnForm, items: [...returnForm.items, { materialId: '', quantity: '', serialNumbersText: '' }] });
+    setReturnForm({ ...returnForm, items: [...returnForm.items, { materialId: '', quantity: '', serialNumbersText: '', assetSearch: '', assetSearchApplied: '' }] });
   }
   function updateClientItem(i, patch) {
     const items = [...clientForm.items];
@@ -239,8 +241,8 @@ export default function TechnicianBoxControl() {
       const material = materialsInBox.find((row) => Number(row.id) === Number(item.materialId));
       if (!material) return 'Selecione o material em todos os itens adicionados.';
       const serials = splitSerials(item.serialNumbersText);
-      if (material.requiresSerial && !serials.length) return `Selecione ao menos um serial de ${material.name}.`;
-      if (!material.requiresSerial && Number(item.quantity || 0) <= 0) return `Informe uma quantidade válida para ${material.name}.`;
+      if (material.requiresSerial && !serials.length && Number(item.quantity || 0) !== 0) return `Selecione ao menos um serial de ${material.name} ou informe quantidade 0.`;
+      if (!material.requiresSerial && Number(item.quantity || 0) < 0) return `A quantidade de ${material.name} não pode ser negativa.`;
     }
     return '';
   }
@@ -475,7 +477,7 @@ export default function TechnicianBoxControl() {
               </div>
               <label>Observação da baixa<textarea rows="3" value={clientForm.notes} onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })} placeholder="Motivo, atendimento, autorização, observações do supervisor..." /></label>
               <div className="subtoolbar"><h4>Itens usados no cliente</h4><button className="ghost" onClick={addClientItem}>➕ Adicionar item</button></div>
-              {clientForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={clientForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateClientItem} remove={removeClientItem} toggleSerial={(serial) => toggleSerial('client', i, serial)} />)}
+              {clientForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={clientForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateClientItem} remove={removeClientItem} toggleSerial={(serial) => toggleSerial('client', i, serial)} allowZero={false} />)}
               <button className="wide" disabled={saving} onClick={openClientReview}>✅ Revisar baixa/movimentação para cliente</button>
             </div>
             <PreviewBox title="Impacto desta operação" form={clientForm} materials={materialsInBox} box={box} target="cliente" />
@@ -489,7 +491,7 @@ export default function TechnicianBoxControl() {
               <p className="muted">Use para recolhimento, conferência, ajuste operacional, troca de equipe ou material não utilizado.</p>
               <div className="form-grid"><label>Estoque de destino<select value={returnForm.warehouseId || ''} onChange={(e) => setReturnForm({ ...returnForm, warehouseId: e.target.value })}><option value="">Selecione</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code || 'sem código'}</option>)}</select></label><label>Referência<input list="box-return-reference-options" value={returnForm.reference} onChange={(e) => setReturnForm({ ...returnForm, reference: e.target.value })} placeholder="Selecione ou digite uma referência" /><datalist id="box-return-reference-options">{RETURN_REFERENCE_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label><label>Motivo<input list="box-return-reason-options" value={returnForm.notes} onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Selecione ou digite o motivo do retorno" /><datalist id="box-return-reason-options">{RETURN_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label></div>
               <div className="subtoolbar"><h4>Itens para retornar ao estoque</h4><button className="ghost" onClick={addReturnItem}>➕ Adicionar item</button></div>
-              {returnForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={returnForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateReturnItem} remove={removeReturnItem} toggleSerial={(serial) => toggleSerial('return', i, serial)} />)}
+              {returnForm.items.map((item, i) => <MovementItem key={i} item={item} index={i} items={returnForm.items} materials={materialsInBox} assetsByMaterial={assetsByMaterial} balanceFor={balanceFor} update={updateReturnItem} remove={removeReturnItem} toggleSerial={(serial) => toggleSerial('return', i, serial)} allowZero />)}
               <button className="wide" disabled={saving} onClick={openReturnReview}>↩️ Revisar devolução ao estoque</button>
             </div>
             <PreviewBox title="Impacto da devolução" form={returnForm} materials={materialsInBox} box={box} target="estoque" />
@@ -528,7 +530,7 @@ export default function TechnicianBoxControl() {
         items={reviewItems}
         totalQuantity={reviewQuantity}
         totalValue={reviewValue}
-        warning={reviewType === 'client' ? 'Ao confirmar, os itens sairão da caixa do técnico e serão vinculados ao cliente/OS.' : 'Ao confirmar, os itens sairão da caixa do técnico e retornarão ao estoque selecionado.'}
+        warning={reviewType === 'client' ? 'Ao confirmar, os itens sairão da caixa do técnico e serão vinculados ao cliente/OS.' : 'Itens com quantidade maior que 0 retornarão ao estoque. Linhas com quantidade 0 ficarão registradas na conferência, sem movimentar saldo.'}
         loading={saving}
         confirmLabel={reviewType === 'client' ? 'Confirmar baixa para cliente' : 'Confirmar devolução ao estoque'}
         onCancel={() => setReviewType('')}
@@ -545,33 +547,50 @@ export default function TechnicianBoxControl() {
   );
 }
 
-function MovementItem({ item, index, items, materials, assetsByMaterial, balanceFor, update, remove, toggleSerial }) {
+function MovementItem({ item, index, items, materials, assetsByMaterial, balanceFor, update, remove, toggleSerial, allowZero = false }) {
   const material = materials.find((m) => Number(m.id) === Number(item.materialId));
   const availableMaterials = optionsWithoutSelected(materials, items, index);
   const serialsSelectedElsewhere = selectedSerialsExcept(items, index, (row) => splitSerials(row.serialNumbersText));
-  const assets = assetsByMaterial(item.materialId).filter((asset) => !serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
+  const allAssets = assetsByMaterial(item.materialId).filter((asset) => !serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
+  const terms = parseSerialTerms(item.assetSearchApplied || '');
+  const assets = allAssets.filter((asset) => !terms.length || terms.some((term) => assetSearchText(asset).includes(term)));
   const selectedSerials = splitSerials(item.serialNumbersText);
   const balance = balanceFor(item.materialId);
+  const quantity = Number(item.quantity || 0);
   return (
     <div className="item-card movement-item-card">
       <div className="item-head"><strong>📦 Item {index + 1}</strong><button className="ghost danger-outline" onClick={() => remove(index)}>Remover</button></div>
       <div className="form-grid">
         <label>Material
-          <select value={item.materialId} onChange={(e) => update(index, { materialId: e.target.value, quantity: 1, serialNumbersText: '' })}>
+          <select value={item.materialId} onChange={(e) => update(index, { materialId: e.target.value, quantity: allowZero ? 0 : 1, serialNumbersText: '', assetSearch: '', assetSearchApplied: '' })}>
             <option value="">Selecione o material</option>{availableMaterials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
           </select>
         </label>
-        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity) + ' ' + (material?.unit || 'un')}<input type="number" min="0" step="1" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} /></label>}
+        {!material?.requiresSerial && <label>Quantidade disponível: {formatQuantity(balance?.quantity) + ' ' + (material?.unit || 'un')}<input type="number" min={allowZero ? 0 : 1} step="1" value={item.quantity} onChange={(e) => update(index, { quantity: e.target.value })} />{allowZero && quantity === 0 && <small>Quantidade 0 aceita: este item ficará registrado na conferência, sem movimentar saldo.</small>}</label>}
       </div>
       {material?.requiresSerial && (
         <div className="serial-picker compact-serial-picker">
-          <div className="serial-picker-head"><div><strong>🏷️ Seriais em nome do técnico</strong><span>{assets.length} disponível(is) • {selectedSerials.length} selecionado(s)</span></div></div>
+          <div className="serial-picker-head serial-picker-head-stacked">
+            <div><strong>🏷️ Seriais em nome do técnico</strong><span>{assets.length} filtrado(s) • {allAssets.length} disponível(is) • {selectedSerials.length} selecionado(s)</span></div>
+            <div className="serial-quick-filter">
+              <label>
+                <span>🔎 Pesquisar ONU/serial (pode colar uma lista do Excel)</span>
+                <textarea rows="3" value={item.assetSearch || ''} onChange={(e) => update(index, { assetSearch: e.target.value })} placeholder={'Digite ou cole serial, patrimônio ou MAC — um por linha'} />
+              </label>
+              <div className="row-actions">
+                <button type="button" onClick={() => update(index, { assetSearchApplied: item.assetSearch || '' })}>🔍 Filtrar</button>
+                <button type="button" className="ghost" onClick={() => update(index, { assetSearch: '', assetSearchApplied: '' })}>Limpar pesquisa</button>
+              </div>
+            </div>
+            {allowZero && selectedSerials.length === 0 && <small>Sem serial selecionado, o item será considerado com quantidade 0 e não movimentará o estoque.</small>}
+          </div>
           <div className="serial-grid">
             {assets.map((asset) => {
               const checked = selectedSerials.includes(asset.serialNumber);
               return <button type="button" key={asset.id} className={`serial-chip ${checked ? 'selected' : ''}`} onClick={() => toggleSerial(asset.serialNumber)}><b>{checked ? '✅' : '🏷️'} {asset.serialNumber}</b><span>{asset.Material?.name} • {asset.brand || '-'} {asset.model || ''}</span><small>{asset.mac || 'sem MAC'} • {brl(asset.acquisitionCost || asset.Material?.unitCost)}</small></button>;
             })}
           </div>
+          {!assets.length && <div className="empty-state small">{terms.length ? 'Nenhum serial corresponde à pesquisa.' : 'Nenhum serial disponível para este material.'}</div>}
         </div>
       )}
     </div>

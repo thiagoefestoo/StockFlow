@@ -108,11 +108,11 @@ export default function TechnicianReturns() {
       const material = materialsInBox.find((m) => Number(m.id) === Number(item.materialId));
       if (!material) return 'Selecione o material em todos os itens adicionados.';
       if (material.requiresSerial) {
-        if (!Array.isArray(item.serialNumbers) || item.serialNumbers.length === 0) return `Selecione pelo menos um serial de ${material.name}.`;
+        if ((!Array.isArray(item.serialNumbers) || item.serialNumbers.length === 0) && quantityNumber(item.quantity) !== 0) return `Selecione pelo menos um serial de ${material.name} ou informe quantidade 0.`;
       } else {
         const quantity = quantityNumber(item.quantity);
         const available = Number(balanceFor(material.id)?.quantity || 0);
-        if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
+        if (quantity < 0) return `A quantidade de ${material.name} não pode ser negativa.`;
         if (quantity > available) return `Saldo insuficiente para ${material.name}. Disponível: ${qtyLabel(available, material.unit)}.`;
       }
     }
@@ -232,14 +232,15 @@ export default function TechnicianReturns() {
               <div className="item-head"><strong>📦 Item {index + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(index)}>Remover</button></div>
               <div className="form-grid">
                 <label>Material
-                  <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '1', serialNumbers: [], search: '' })}>
+                  <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '0', serialNumbers: [], search: '' })}>
                     <option value="">Selecione o material</option>
                     {availableMaterials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name} — disponível {qtyLabel(mat.availableQty, mat.unit)}</option>)}
                   </select>
                 </label>
                 {!material?.requiresSerial && <label>Quantidade
-                  <input type="number" min="1" step="1" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} placeholder="Ex.: 30, 40, 50" />
+                  <input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} placeholder="Ex.: 30, 40, 50" />
                   <small>Disponível na caixa: {qtyLabel(balanceFor(material?.id)?.quantity, material?.unit)}</small>
+                  {quantityNumber(item.quantity) === 0 && <small>Quantidade 0 aceita: o item será registrado na conferência, sem movimentar saldo.</small>}
                 </label>}
               </div>
               {material?.requiresSerial && (
@@ -248,6 +249,7 @@ export default function TechnicianReturns() {
                     <div><strong>🏷️ Seriais na caixa do técnico</strong><span>{visibleAssets.length} filtrado(s) • {item.serialNumbers?.length || 0} selecionado(s)</span></div>
                     <div className="serial-actions-row"><input value={item.search || ''} onChange={(e) => updateItem(index, { search: e.target.value })} placeholder="Buscar serial ou MAC" /><button type="button" className="ghost" onClick={() => selectVisibleSerials(index, visibleAssets)}>Selecionar tudo filtrado</button><button type="button" className="ghost" onClick={() => updateItem(index, { serialNumbers: [], quantity: '' })}>Limpar</button></div>
                   </div>
+                  {(item.serialNumbers || []).length === 0 && <small>Sem serial selecionado, este item será registrado com quantidade 0 e não movimentará o estoque.</small>}
                   <div className="serial-grid">
                     {visibleAssets.map((asset) => {
                       const checked = (item.serialNumbers || []).includes(asset.serialNumber);
@@ -275,7 +277,7 @@ export default function TechnicianReturns() {
         items={reviewItems}
         totalQuantity={totalQty}
         totalValue={reviewValue}
-        warning="Ao confirmar, os itens sairão da caixa do técnico, entrarão no estoque selecionado e uma guia de retorno será gerada."
+        warning="Itens com quantidade maior que 0 sairão da caixa e entrarão no estoque. Linhas com quantidade 0 serão registradas na guia sem movimentar saldo."
         loading={loading}
         confirmLabel="Confirmar retorno ao estoque"
         onCancel={() => setReviewOpen(false)}

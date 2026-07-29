@@ -228,6 +228,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
     let totalValue = 0;
     const movementReference = reference || nextReturnNumber();
     const affected = [];
+    let zeroQuantityLines = 0;
 
     const transfer = await Transfer.create({
       transferNumber: movementReference,
@@ -252,7 +253,12 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
       const unitCost = money(item.unitCost ?? material.unitCost);
       if (material.requiresSerial) {
         const serials = parseSerials(item.serialNumbers);
-        if (!serials.length) continue;
+        if (!serials.length) {
+          await TransferItem.create({ transferId: transfer.id, materialId: material.id, itemDescription: material.name, quantity: 0, unitCost, totalCost: 0 }, { transaction });
+          zeroQuantityLines += 1;
+          affected.push({ materialId: material.id, materialName: material.name, quantity: 0, notReturned: true });
+          continue;
+        }
         for (const serialNumber of serials) {
           const serialKey = String(serialNumber).trim().toUpperCase();
           if (usedSerials.has(serialKey)) throw new Error(`Serial repetido no retorno: ${serialNumber}.`);
@@ -278,7 +284,13 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
         }
       } else {
         const quantity = qty(item.quantity);
-        if (quantity <= 0) continue;
+        if (quantity < 0) throw new Error(`A quantidade de ${material.name} não pode ser negativa.`);
+        if (quantity === 0) {
+          await TransferItem.create({ transferId: transfer.id, materialId: material.id, itemDescription: material.name, quantity: 0, unitCost, totalCost: 0 }, { transaction });
+          zeroQuantityLines += 1;
+          affected.push({ materialId: material.id, materialName: material.name, quantity: 0, notReturned: true });
+          continue;
+        }
         await adjustBalance({ materialId: material.id, ownerType: 'tecnico', technicianId, delta: -quantity, transaction });
         await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: targetWarehouseId, delta: quantity, transaction });
         const totalCost = money(quantity * unitCost);
@@ -290,7 +302,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
       }
     }
 
-    if (!affected.length || totalQuantity <= 0) throw new Error('Nenhum item válido foi selecionado para retorno ao estoque.');
+    if (!affected.length) throw new Error('Nenhum item válido foi selecionado para retorno ao estoque.');
 
     transfer.totalQuantity = qty(totalQuantity);
     transfer.totalValue = money(totalValue);
@@ -301,7 +313,7 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
       type: 'estoque',
       severity: 'info',
       title: `Retorno registrado ${transfer.transferNumber}`,
-      message: `${qty(totalQuantity)} item(ns) retornaram da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.`,
+      message: `${qty(totalQuantity)} item(ns) retornaram da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.${zeroQuantityLines ? ` ${zeroQuantityLines} linha(s) foi(ram) registrada(s) com quantidade 0, sem movimentação de saldo.` : ''}`,
       route: '/transferencias',
       metadata: { transferId: transfer.id, technicianId: Number(technicianId), warehouseId: targetWarehouseId, totalQuantity: qty(totalQuantity) },
     }, { transaction });
@@ -311,11 +323,11 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
       action: 'return_to_stock',
       entity: 'Transfer',
       entityId: transfer.id,
-      message: `Guia ${transfer.transferNumber} retornou ${qty(totalQuantity)} item(ns) da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.`,
-      afterData: { ...transfer.toJSON(), warehouse: targetWarehouse.toJSON(), totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
+      message: `Guia ${transfer.transferNumber} retornou ${qty(totalQuantity)} item(ns) da caixa de ${technician.name} para o estoque ${targetWarehouse.name}.${zeroQuantityLines ? ` ${zeroQuantityLines} linha(s) registrada(s) com quantidade 0.` : ''}`,
+      afterData: { ...transfer.toJSON(), warehouse: targetWarehouse.toJSON(), totalQuantity: qty(totalQuantity), totalValue: money(totalValue), zeroQuantityLines, affected },
       transaction,
     });
-    return { ...transfer.toJSON(), reference: movementReference, transferId: transfer.id, affectedCount: affected.length };
+    return { ...transfer.toJSON(), reference: movementReference, transferId: transfer.id, affectedCount: affected.length, zeroQuantityLines };
   });
 
   return created(res, result, 'Material devolvido da caixa do técnico para o estoque e guia de retorno gerada em Transferências.');
