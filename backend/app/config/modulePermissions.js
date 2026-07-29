@@ -12,6 +12,7 @@ const MODULES = [
   { key: 'technicianReturns', label: 'Retorno caixa para estoque', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/retorno-caixa-estoque'] },
   { key: 'stock', label: 'Materiais/Estoque', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/estoque'] },
   { key: 'materialManage', label: 'Cadastrar/editar materiais', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
+  { key: 'stockBatchEdit', label: 'Editar entradas de material', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'patrimony', label: 'Patrimônio', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/patrimonio'] },
   { key: 'serialLife', label: 'Vida do serial', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/vida-serial'] },
   { key: 'technicians', label: 'Técnicos', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/tecnicos'] },

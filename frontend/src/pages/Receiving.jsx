@@ -10,6 +10,7 @@ import FloatingAlert from '../components/FloatingAlert';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, optionsWithoutSelected } from '../utils/operationSelections';
 import { formatQuantity } from '../utils/formatQuantity';
+import { useAuth } from '../contexts/AuthContext';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function splitSerials(value) { return String(value || '').split(/[\r\n\t,;]+/).map((s) => s.trim()).filter(Boolean); }
@@ -33,6 +34,27 @@ function emptyForm() {
     proofAttachmentData: '',
     notes: '',
     items: [],
+  };
+}
+
+function editFormFromBatch(batch) {
+  return {
+    id: batch.id,
+    receiptNumber: batch.receiptNumber || '',
+    sourceCompany: batch.sourceCompany || '',
+    receivedAt: batch.receivedAt || '',
+    cycle: batch.cycle || 'quinzenal',
+    fiscalDocumentType: batch.fiscalDocumentType || 'nota_fiscal',
+    fiscalDocumentNumber: batch.fiscalDocumentNumber || '',
+    fiscalDocumentDate: batch.fiscalDocumentDate || '',
+    fiscalIssuer: batch.fiscalIssuer || '',
+    invoiceAccessKey: batch.invoiceAccessKey || '',
+    receivedByName: batch.receivedByName || '',
+    conferenceStatus: batch.conferenceStatus || 'conferido',
+    warehouseLocation: batch.warehouseLocation || '',
+    proofAttachmentName: batch.proofAttachmentName || '',
+    proofAttachmentData: batch.proofAttachmentData || '',
+    notes: batch.notes || '',
   };
 }
 
@@ -74,6 +96,8 @@ function serialStatus(item) {
 }
 
 export default function Receiving() {
+  const { canAccessModule } = useAuth();
+  const canEditEntries = canAccessModule('stockBatchEdit');
   const [materials, setMaterials] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [batches, setBatches] = useState([]);
@@ -81,6 +105,9 @@ export default function Receiving() {
   const [modal, setModal] = useState(false);
   const [details, setDetails] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [editModal, setEditModal] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -124,6 +151,75 @@ export default function Receiving() {
       setMessage(error.response?.data?.message || 'Não foi possível carregar os detalhes da entrada.');
     } finally {
       setDetailsLoading(false);
+    }
+  }
+
+  function openEditBatch() {
+    if (!details || !canEditEntries) return;
+    setEditForm(editFormFromBatch(details));
+    setEditModal(true);
+    setMessage('');
+  }
+
+  function onEditFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setEditForm((current) => ({
+      ...current,
+      proofAttachmentName: file.name,
+      proofAttachmentData: reader.result,
+    }));
+    reader.readAsDataURL(file);
+  }
+
+  function editValidationMessage() {
+    if (!editForm?.receiptNumber?.trim()) return 'Informe o número da entrada.';
+    if (!editForm?.sourceCompany?.trim()) return 'Informe a origem/fornecedor.';
+    if (!editForm?.receivedAt) return 'Informe a data de recebimento.';
+    if (!editForm?.fiscalDocumentNumber?.trim() && !editForm?.invoiceAccessKey?.trim()) return 'Informe o número do documento ou a chave da NF-e.';
+    if (!editForm?.proofAttachmentName || !editForm?.proofAttachmentData) return 'A entrada deve permanecer vinculada a um comprovante.';
+    return '';
+  }
+
+  async function saveBatchEdit() {
+    if (!editForm || editSaving) return;
+    const validation = editValidationMessage();
+    if (validation) {
+      setMessage(validation);
+      return;
+    }
+
+    setEditSaving(true);
+    setMessage('');
+    try {
+      const response = await api.put(`/batches/${editForm.id}`, {
+        receiptNumber: editForm.receiptNumber,
+        sourceCompany: editForm.sourceCompany,
+        receivedAt: editForm.receivedAt,
+        cycle: editForm.cycle,
+        fiscalDocumentType: editForm.fiscalDocumentType,
+        fiscalDocumentNumber: editForm.fiscalDocumentNumber,
+        fiscalDocumentDate: editForm.fiscalDocumentDate || null,
+        fiscalIssuer: editForm.fiscalIssuer,
+        invoiceAccessKey: editForm.invoiceAccessKey,
+        receivedByName: editForm.receivedByName,
+        conferenceStatus: editForm.conferenceStatus,
+        warehouseLocation: editForm.warehouseLocation,
+        proofAttachmentName: editForm.proofAttachmentName,
+        proofAttachmentData: editForm.proofAttachmentData,
+        notes: editForm.notes,
+      });
+      const updated = response.data.data;
+      setDetails(updated);
+      setEditForm(null);
+      setEditModal(false);
+      setMessage(response.data.message || 'Entrada atualizada com auditoria.');
+      await load(page, false);
+    } catch (error) {
+      setMessage(error.response?.data?.message || error.message || 'Não foi possível atualizar a entrada.');
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -351,7 +447,7 @@ export default function Receiving() {
 
   return <div className="page-grid erp-page">
     <section className="toolbar"><div><span className="eyebrow">Entrada fiscal e logística</span><h2>Entrada completa de material</h2><p>Registre materiais diretamente no estoque regional de destino, com documento fiscal, valor obrigatório e seriais conferidos.</p></div><button onClick={() => { setForm({ ...emptyForm(), warehouseId: warehouses[0]?.id || '' }); setModal(true); }}>Nova entrada</button></section>
-    <FloatingAlert message={message} type={message.startsWith('Entrada registrada') || message.includes('serial(is) colado(s)') ? 'success' : 'danger'} onClose={() => setMessage('')} />
+    <FloatingAlert message={message} type={message.startsWith('Entrada registrada') || message.startsWith('Entrada atualizada') || message.includes('atualizada com auditoria') || message.includes('serial(is) colado(s)') ? 'success' : 'danger'} onClose={() => setMessage('')} />
     <div className="kpi-grid small"><KpiCard label="Entradas nesta página" value={operationalBatches.length} /><KpiCard label="Itens nesta página" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor desta página" value={brl(totals.totalValue)} /><KpiCard label="Total de entradas" value={pagination.total || 0} /></div>
     <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens recebidos</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td><strong>Total: {formatQuantity(b.totalItems)}</strong><div className="receiving-items-summary">{(b.StockBatchItems || []).map((item) => <small key={item.id} style={{ display: 'block', marginTop: '0.2rem' }}>{entryItemLabel(item)}</small>)}</div></td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <span className="badge info">Anexo disponível</span> : '-'}</td><td><button className="info" disabled={detailsLoading} onClick={() => openBatchDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div><Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
 
@@ -466,6 +562,72 @@ export default function Receiving() {
       onCancel={() => setReviewOpen(false)}
       onConfirm={save}
     />
-    <DetailsModal open={!!details} title={`Entrada ${details?.receiptNumber || ''}`} onClose={() => setDetails(null)}>{details && <><DetailGrid fields={[["Entrada", details.receiptNumber], ["Estoque/região", details.Warehouse?.name || details.warehouseLocation], ["Origem", details.sourceCompany], ["Documento", details.fiscalDocumentNumber || details.invoiceAccessKey], ["Comprovante", details.proofAttachmentName || 'Sem anexo'], ["Itens", formatQuantity(details.totalItems)], ["Valor", brl(details.totalValue)], ["Conferência", details.conferenceStatus]]} /><AttachmentPreview name={details.proofAttachmentName} data={details.proofAttachmentData} label="Comprovante da entrada" /><DetailList title="Todos os itens da entrada" items={details.StockBatchItems || []} render={(item) => <><b>{item.Material?.name} {isToolMaterial(item.Material) && <span className="badge info">Ferramenta</span>}</b><span>{formatQuantity(item.quantity)} {item.Material?.unit || 'un'} • {brl(item.totalCost)} • {item.condition}</span><small>{(item.serialNumbers || []).slice(0, 12).join(', ') || 'Controle por quantidade'}</small></>} /></>}</DetailsModal>
+    <DetailsModal
+      open={!!details}
+      title={`Entrada ${details?.receiptNumber || ''}`}
+      onClose={() => setDetails(null)}
+      footer={<>
+        <button className="ghost" onClick={() => setDetails(null)}>Fechar</button>
+        {canEditEntries && <button onClick={openEditBatch}>Editar entrada</button>}
+      </>}
+    >
+      {details && <>
+        <DetailGrid fields={[
+          ['Entrada', details.receiptNumber],
+          ['Estoque/região', details.Warehouse?.name || details.warehouseLocation],
+          ['Origem', details.sourceCompany],
+          ['Documento', details.fiscalDocumentNumber || details.invoiceAccessKey],
+          ['Comprovante', details.proofAttachmentName || 'Sem anexo'],
+          ['Itens', formatQuantity(details.totalItems)],
+          ['Valor', brl(details.totalValue)],
+          ['Conferência', details.conferenceStatus],
+        ]} />
+        <AttachmentPreview name={details.proofAttachmentName} data={details.proofAttachmentData} label="Comprovante da entrada" />
+        <DetailList title="Todos os itens da entrada" items={details.StockBatchItems || []} render={(item) => <>
+          <b>{item.Material?.name} {isToolMaterial(item.Material) && <span className="badge info">Ferramenta</span>}</b>
+          <span>{formatQuantity(item.quantity)} {item.Material?.unit || 'un'} • {brl(item.totalCost)} • {item.condition}</span>
+          <small>{(item.serialNumbers || []).slice(0, 12).join(', ') || 'Controle por quantidade'}</small>
+        </>} />
+      </>}
+    </DetailsModal>
+
+    <Modal
+      open={editModal}
+      title={`Editar entrada ${editForm?.receiptNumber || ''}`}
+      onClose={() => !editSaving && setEditModal(false)}
+      footer={<>
+        <button className="ghost" disabled={editSaving} onClick={() => setEditModal(false)}>Cancelar</button>
+        <button disabled={editSaving} onClick={saveBatchEdit}>{editSaving ? 'Salvando...' : 'Salvar correções'}</button>
+      </>}
+    >
+      {editForm && <div className="form-stack receiving-form">
+        <div className="alert info">
+          Esta edição corrige somente os dados documentais. O estoque de destino, os itens, as quantidades, os seriais e os valores já movimentados permanecem inalterados.
+        </div>
+        <DetailGrid fields={[
+          ['Estoque/região bloqueado', details?.Warehouse?.name || details?.warehouseLocation],
+          ['Itens registrados', formatQuantity(details?.totalItems)],
+          ['Valor registrado', brl(details?.totalValue)],
+        ]} />
+        <div className="form-grid">
+          <label>Número da entrada<input value={editForm.receiptNumber} maxLength="80" onChange={(e) => setEditForm({ ...editForm, receiptNumber: e.target.value })} /></label>
+          <label>Estoque/região<input value={details?.Warehouse?.name || details?.warehouseLocation || ''} disabled /></label>
+          <label>Data de recebimento<input type="date" value={editForm.receivedAt} onChange={(e) => setEditForm({ ...editForm, receivedAt: e.target.value })} /></label>
+          <label>Ciclo<select value={editForm.cycle} onChange={(e) => setEditForm({ ...editForm, cycle: e.target.value })}><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option><option value="extra">Extra</option></select></label>
+          <label>Origem/fornecedor<input value={editForm.sourceCompany} onChange={(e) => setEditForm({ ...editForm, sourceCompany: e.target.value })} /></label>
+          <label>Status da conferência<select value={editForm.conferenceStatus} onChange={(e) => setEditForm({ ...editForm, conferenceStatus: e.target.value })}><option value="conferido">Conferido</option><option value="pendente_conferencia">Pendente</option><option value="divergente">Divergente</option></select></label>
+          <label>Tipo de documento<select value={editForm.fiscalDocumentType} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentType: e.target.value })}><option value="nota_fiscal">Nota fiscal</option><option value="termo_entrega">Termo de entrega</option><option value="romaneio">Romaneio</option><option value="recibo">Recibo</option><option value="outro">Outro</option></select></label>
+          <label>Número do documento<input value={editForm.fiscalDocumentNumber} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentNumber: e.target.value })} /></label>
+          <label>Data do documento<input type="date" value={editForm.fiscalDocumentDate || ''} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentDate: e.target.value })} /></label>
+          <label>Emissor do documento<input value={editForm.fiscalIssuer} onChange={(e) => setEditForm({ ...editForm, fiscalIssuer: e.target.value })} /></label>
+          <label>Chave da NF-e<input value={editForm.invoiceAccessKey} onChange={(e) => setEditForm({ ...editForm, invoiceAccessKey: e.target.value })} /></label>
+          <label>Recebido/conferido por<input value={editForm.receivedByName} onChange={(e) => setEditForm({ ...editForm, receivedByName: e.target.value })} /></label>
+          <label>Localização interna<input value={editForm.warehouseLocation} onChange={(e) => setEditForm({ ...editForm, warehouseLocation: e.target.value })} /></label>
+          <label className="full-span">Substituir comprovante<input type="file" accept="image/*,.pdf" onChange={onEditFile} /><small>Deixe sem selecionar para manter o comprovante atual.</small></label>
+        </div>
+        {editForm.proofAttachmentName && <AttachmentPreview compact name={editForm.proofAttachmentName} data={editForm.proofAttachmentData} label="Comprovante vinculado" />}
+        <label>Observações<textarea rows="3" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} /></label>
+      </div>}
+    </Modal>
   </div>;
 }
