@@ -6,6 +6,7 @@ import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import { formatQuantity } from '../utils/formatQuantity';
+import { prepareAuthSessionHandoff } from '../utils/authSession';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial, serviceTypeLabel } from '../utils/serviceOrderRules';
 import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/operationOptions';
 
@@ -378,7 +379,7 @@ export default function TechnicianBoxControl() {
             <p>Lista em tempo real de tudo que está na caixa do técnico selecionado: equipamentos com serial e consumíveis.</p>
           </div>
           <div className="row-actions">
-            <button type="button" className="ghost" disabled={!selectedTech} onClick={() => window.open(`/carga-tecnico/${selectedTech}`, '_blank', 'noopener,noreferrer')}>🖨️ Imprimir carga atual</button>
+            <button type="button" className="ghost" disabled={!selectedTech} onClick={() => { prepareAuthSessionHandoff(); window.open(`/carga-tecnico/${selectedTech}`, '_blank', 'noopener,noreferrer'); }}>🖨️ Imprimir carga atual</button>
             <div className="live-refresh-pill">
               <span className={boxLoading ? 'loading-dot' : 'online-dot'}></span>
               {boxLoading ? 'Atualizando...' : lastBoxRefresh ? `Atualizado ${lastBoxRefresh.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Aguardando técnico'}

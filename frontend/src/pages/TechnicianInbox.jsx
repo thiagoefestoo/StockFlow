@@ -8,6 +8,7 @@ import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { formatQuantity } from '../utils/formatQuantity';
+import { prepareAuthSessionHandoff } from '../utils/authSession';
 import { ADDRESS_CHANGE_OPTIONS, SERVICE_TYPE_OPTIONS, serviceRequiresSerial } from '../utils/serviceOrderRules';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 
@@ -393,7 +394,7 @@ export default function TechnicianInbox() {
         </article>
 
         <article className={`panel technician-box-card ${mobileSectionClass('caixa')}`}>
-          <div className="panel-title compact-title"><div><h3>Minha carga atual</h3><p>Resumo por material. Abra detalhes apenas quando precisar ver seriais e valores.</p></div><button type="button" className="ghost" disabled={!selectedTech} onClick={() => window.open(`/carga-tecnico/${selectedTech}`, '_blank', 'noopener,noreferrer')}>🖨️ Imprimir carga atual</button></div>
+          <div className="panel-title compact-title"><div><h3>Minha carga atual</h3><p>Resumo por material. Abra detalhes apenas quando precisar ver seriais e valores.</p></div><button type="button" className="ghost" disabled={!selectedTech} onClick={() => { prepareAuthSessionHandoff(); window.open(`/carga-tecnico/${selectedTech}`, '_blank', 'noopener,noreferrer'); }}>🖨️ Imprimir carga atual</button></div>
           <div className="technician-card-list">
             {flatBoxRows.map((row) => <button type="button" className="tech-stock-card" key={`${row.group}-${row.materialId}`} onClick={() => setDetails({ type: 'group', item: row })}>
               <span><b>{row.material}</b><small>{row.group} • {row.requiresSerial ? 'Serializado' : 'Consumível'}</small></span>
