@@ -11,6 +11,7 @@ const {
   StockMovement,
   Transfer,
   TransferItem,
+  MaterialRequest,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -545,8 +546,13 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
   if (!warehouse) return fail(res, 404, 'Estoque de origem não encontrado.');
 
   const consolidationFlag = 'CONSOLIDADA-UMA-GUIA';
-  const result = await sequelize.transaction(async (transaction) => {
-    const transfers = await Transfer.findAll({
+  let consolidationStep = 'inicialização';
+  let result;
+
+  try {
+    result = await sequelize.transaction(async (transaction) => {
+      consolidationStep = 'localização e bloqueio das guias antigas';
+      const transfers = await Transfer.findAll({
       where: {
         technicianId: technician.id,
         warehouseId,
@@ -587,13 +593,17 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
 
     const oldTransferIds = transfers.map((transfer) => Number(transfer.id));
     const oldTransferNumbers = transfers.map((transfer) => String(transfer.transferNumber));
-    const transferItems = await TransferItem.findAll({
-      where: { transferId: { [Op.in]: oldTransferIds } },
-      include: [Material],
-      order: [['id', 'ASC']],
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
+      consolidationStep = 'bloqueio dos itens das guias antigas';
+      // Não usar include junto com FOR UPDATE no PostgreSQL. O include gera
+      // LEFT OUTER JOIN e pode causar: "FOR UPDATE cannot be applied to the
+      // nullable side of an outer join". Os materiais são carregados apenas
+      // na consulta final, fora da transação.
+      const transferItems = await TransferItem.findAll({
+        where: { transferId: { [Op.in]: oldTransferIds } },
+        order: [['id', 'ASC']],
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
     if (!transferItems.length) {
       throw Object.assign(new Error('As transferências antigas não possuem itens. Nenhum registro foi alterado.'), { statusCode: 409 });
@@ -605,7 +615,8 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       throw Object.assign(new Error(`As guias somam ${totalQuantity} unidades, mas eram esperadas exatamente ${expectedTotalQuantity}. Nenhum registro foi alterado.`), { statusCode: 409 });
     }
 
-    const tools = await TechnicianTool.findAll({
+      consolidationStep = 'conferência e bloqueio das ferramentas na ficha';
+      const tools = await TechnicianTool.findAll({
       where: {
         technicianId: technician.id,
         sourceWarehouseId: warehouseId,
@@ -620,7 +631,8 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       throw Object.assign(new Error(`A ficha possui ${tools.length} ferramentas ligadas à importação, mas as guias somam ${totalQuantity}. Nenhum registro foi alterado.`), { statusCode: 409 });
     }
 
-    const movements = await StockMovement.findAll({
+      consolidationStep = 'conferência e bloqueio das movimentações de estoque';
+      const movements = await StockMovement.findAll({
       where: {
         type: 'transferencia_tecnico',
         fromWarehouseId: warehouseId,
@@ -636,7 +648,8 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       throw Object.assign(new Error(`As movimentações de estoque somam ${movementQuantity} unidades, mas as guias somam ${totalQuantity}. Nenhum registro foi alterado.`), { statusCode: 409 });
     }
 
-    const transferNumber = nextStockToolTransferNumber();
+      consolidationStep = 'criação da guia consolidada';
+      const transferNumber = nextStockToolTransferNumber();
     const consolidatedNotes = [
       marker,
       consolidationFlag,
@@ -658,12 +671,23 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       createdById: req.user?.id || null,
     }, { transaction });
 
-    await TransferItem.update(
-      { transferId: consolidated.id },
-      { where: { transferId: { [Op.in]: oldTransferIds } }, transaction },
-    );
+      consolidationStep = 'vinculação dos itens à nova guia';
+      await TransferItem.update(
+        { transferId: consolidated.id },
+        { where: { transferId: { [Op.in]: oldTransferIds } }, transaction },
+      );
 
-    for (const movement of movements) {
+      consolidationStep = 'reatribuição de solicitações eventualmente vinculadas';
+      // Normalmente as entregas de ferramenta não possuem solicitação, mas
+      // esta atualização evita violação de chave estrangeira caso alguma guia
+      // antiga tenha sido vinculada administrativamente a uma solicitação.
+      await MaterialRequest.update(
+        { transferId: consolidated.id },
+        { where: { transferId: { [Op.in]: oldTransferIds } }, transaction },
+      );
+
+      consolidationStep = 'atualização das referências das movimentações';
+      for (const movement of movements) {
       const previousReference = String(movement.reference || '');
       movement.reference = transferNumber;
       movement.notes = [
@@ -673,7 +697,8 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       await movement.save({ transaction });
     }
 
-    for (const tool of tools) {
+      consolidationStep = 'atualização das referências na ficha do técnico';
+      for (const tool of tools) {
       let notes = String(tool.notes || '');
       for (const oldNumber of oldTransferNumbers) {
         notes = notes.split(oldNumber).join(transferNumber);
@@ -686,12 +711,14 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       await tool.save({ transaction });
     }
 
-    await Transfer.destroy({
+      consolidationStep = 'exclusão das guias antigas';
+      await Transfer.destroy({
       where: { id: { [Op.in]: oldTransferIds } },
       transaction,
     });
 
-    await writeAudit({
+      consolidationStep = 'gravação da auditoria';
+      await writeAudit({
       req,
       action: 'consolidate_stock_tool_transfers',
       entity: 'Transfer',
@@ -720,8 +747,27 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
       transaction,
     });
 
-    return { transferId: consolidated.id, alreadyConsolidated: false };
-  });
+      consolidationStep = 'finalização da transação';
+      return { transferId: consolidated.id, alreadyConsolidated: false };
+    });
+  } catch (error) {
+    console.error('Falha ao consolidar transferências de ferramentas:', {
+      technicianId: technician.id,
+      warehouseId,
+      marker,
+      step: consolidationStep,
+      message: error.message,
+      name: error.name,
+      parentMessage: error.parent?.message || null,
+      originalMessage: error.original?.message || null,
+    });
+
+    if (!error.statusCode) {
+      error.statusCode = 500;
+      error.message = `Não foi possível consolidar as guias na etapa "${consolidationStep}": ${error.parent?.message || error.original?.message || error.message}`;
+    }
+    throw error;
+  }
 
   const consolidatedTransfer = await Transfer.findByPk(result.transferId, {
     include: [
