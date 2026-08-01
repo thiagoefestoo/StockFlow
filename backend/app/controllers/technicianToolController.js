@@ -177,6 +177,194 @@ exports.create = asyncHandler(async (req, res) => {
   const technician = await loadTechnicianOrFail(res, req.params.technicianId);
   if (!technician) return;
 
+  const requestedItems = Array.isArray(req.body.items) ? req.body.items : [];
+  if (requestedItems.length) {
+    const warehouseId = Number(req.body.warehouseId || technician.defaultWarehouseId || 0);
+    if (!warehouseId) return fail(res, 400, 'Vincule um estoque padrão ao técnico antes de adicionar ferramentas.');
+
+    const groupedItems = new Map();
+    for (const rawItem of requestedItems) {
+      const materialId = Number(rawItem?.materialId || 0);
+      const quantity = Number(rawItem?.quantity || 0);
+      if (!Number.isInteger(materialId) || materialId <= 0) {
+        return fail(res, 400, 'A lista contém uma ferramenta inválida.');
+      }
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        return fail(res, 400, 'Todas as quantidades devem ser números inteiros maiores que zero.');
+      }
+      groupedItems.set(materialId, (groupedItems.get(materialId) || 0) + quantity);
+    }
+
+    const normalizedItems = [...groupedItems.entries()].map(([materialId, quantity]) => ({ materialId, quantity }));
+    if (!normalizedItems.length) return fail(res, 400, 'Informe ao menos uma ferramenta para a transferência.');
+
+    try {
+      assertWarehouseAccess(req.user, warehouseId, 'Você não tem acesso ao estoque de origem das ferramentas.');
+    } catch (error) {
+      return fail(res, error.statusCode || 403, error.message);
+    }
+
+    const result = await sequelize.transaction(async (transaction) => {
+      const warehouse = await Warehouse.findByPk(warehouseId, { transaction });
+      if (!warehouse || warehouse.status !== 'ativo' || warehouse.isReverseLogistics) {
+        throw Object.assign(new Error('O estoque de origem não está disponível para entrega de ferramentas.'), { statusCode: 400 });
+      }
+
+      const materialIds = normalizedItems.map((item) => item.materialId);
+      const materials = await Material.findAll({
+        where: { id: { [Op.in]: materialIds } },
+        transaction,
+      });
+      const materialMap = new Map(materials.map((material) => [Number(material.id), material]));
+
+      const preparedItems = [];
+      let totalQuantity = 0;
+      let totalValue = 0;
+
+      for (const item of normalizedItems) {
+        const material = materialMap.get(item.materialId);
+        if (!material || material.category !== 'ferramenta' || !material.active) {
+          throw Object.assign(new Error(`Ferramenta de ID ${item.materialId} não encontrada no catálogo ativo.`), { statusCode: 404 });
+        }
+        if (material.requiresSerial) {
+          throw Object.assign(new Error(`${material.name} exige serial e não pode usar o fluxo de ferramenta controlada por quantidade.`), { statusCode: 400 });
+        }
+
+        const balance = await StockBalance.findOne({
+          where: {
+            materialId: item.materialId,
+            ownerType: 'estoque',
+            technicianId: null,
+            warehouseId,
+          },
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+        const available = qty(balance?.quantity || 0);
+        if (available < item.quantity) {
+          throw Object.assign(new Error(`Saldo insuficiente para ${material.name}. Disponível: ${available} ${material.unit || 'un'}.`), { statusCode: 409 });
+        }
+
+        const entryExists = await StockMovement.findOne({
+          where: { type: 'entrada', materialId: item.materialId, toWarehouseId: warehouseId },
+          transaction,
+        });
+        if (!entryExists) {
+          throw Object.assign(new Error(`${material.name} ainda não possui entrada registrada no estoque selecionado.`), { statusCode: 400 });
+        }
+
+        const unitCost = money(material.unitCost || 0);
+        const itemTotal = money(item.quantity * unitCost);
+        totalQuantity += item.quantity;
+        totalValue += Number(itemTotal);
+        preparedItems.push({ ...item, material, unitCost, itemTotal });
+      }
+
+      const transferNumber = nextStockToolTransferNumber();
+      const deliveredAt = req.body.deliveredAt || new Date();
+      const notes = String(req.body.notes || '').trim() || `Entrega de ${totalQuantity} ferramenta(s) para a ficha de ${technician.name}.`;
+      const transfer = await Transfer.create({
+        transferNumber,
+        transferType: 'ferramenta',
+        technicianId: technician.id,
+        warehouseId,
+        deliveredAt,
+        totalQuantity,
+        totalValue: money(totalValue),
+        notes,
+        stampText: 'Declaro que as ferramentas relacionadas foram conferidas e entregues ao técnico indicado, permanecendo sob sua responsabilidade até devolução ou baixa formal.',
+        createdById: req.user?.id || null,
+      }, { transaction });
+
+      const createdTools = [];
+      const auditItems = [];
+
+      for (const item of preparedItems) {
+        await adjustBalance({
+          materialId: item.materialId,
+          ownerType: 'estoque',
+          technicianId: null,
+          warehouseId,
+          delta: -item.quantity,
+          transaction,
+        });
+
+        await TransferItem.create({
+          transferId: transfer.id,
+          materialId: item.materialId,
+          itemType: 'ferramenta',
+          itemDescription: item.material.name,
+          quantity: item.quantity,
+          unitCost: item.unitCost,
+          totalCost: item.itemTotal,
+        }, { transaction });
+
+        const rows = Array.from({ length: item.quantity }, (_, index) => ({
+          technicianId: technician.id,
+          materialId: item.materialId,
+          sourceWarehouseId: warehouseId,
+          name: item.material.name,
+          serialNumber: internalToolSerial(item.material, index),
+          brand: item.material.brand || item.material.manufacturer || null,
+          referenceValue: item.unitCost,
+          deliveredAt,
+          notes: [
+            notes,
+            `Entregue pelo estoque ${warehouse.name} na guia ${transferNumber}. Controle por quantidade.`,
+          ].filter(Boolean).join(' | '),
+          status: 'com_tecnico',
+          createdById: req.user?.id || null,
+        }));
+        const tools = await TechnicianTool.bulkCreate(rows, { transaction, returning: true });
+        createdTools.push(...tools);
+
+        await StockMovement.create({
+          type: 'transferencia_tecnico',
+          materialId: item.materialId,
+          quantity: item.quantity,
+          fromOwnerType: 'estoque',
+          toOwnerType: 'ficha_tecnico',
+          fromWarehouseId: warehouseId,
+          toTechnicianId: technician.id,
+          reference: transferNumber,
+          notes: 'Ferramenta destinada exclusivamente à ficha do técnico; não compõe a caixa de materiais consumíveis.',
+          createdById: req.user?.id || null,
+        }, { transaction });
+
+        auditItems.push({
+          materialId: item.materialId,
+          materialName: item.material.name,
+          quantity: item.quantity,
+          unitCost: item.unitCost,
+          totalValue: item.itemTotal,
+          toolIds: tools.map((tool) => tool.id),
+        });
+      }
+
+      await writeAudit({
+        req,
+        action: 'assign_stock_tools_batch',
+        entity: 'Transfer',
+        entityId: transfer.id,
+        message: `${totalQuantity} ferramenta(s), em ${preparedItems.length} item(ns), transferida(s) do estoque ${warehouse.name} para a ficha de ${technician.name} na guia ${transferNumber}.`,
+        afterData: {
+          transferId: transfer.id,
+          transferNumber,
+          technicianId: technician.id,
+          warehouseId,
+          totalQuantity,
+          totalValue: money(totalValue),
+          items: auditItems,
+        },
+        transaction,
+      });
+
+      return { transfer, tools: createdTools };
+    });
+
+    return created(res, result, 'Ferramentas transferidas em uma única guia para a ficha do técnico.');
+  }
+
   const materialId = Number(req.body.materialId || 0);
   if (materialId) {
     const quantity = Number(req.body.quantity || 0);
