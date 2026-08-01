@@ -515,6 +515,228 @@ exports.create = asyncHandler(async (req, res) => {
   return created(res, withIncludes, 'Ferramenta registrada na ficha do técnico.');
 });
 
+
+exports.consolidateTransfers = asyncHandler(async (req, res) => {
+  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  if (!technician) return;
+
+  const marker = String(req.body.marker || '').trim();
+  const warehouseId = Number(req.body.warehouseId || 0);
+  const expectedTransferCount = Number(req.body.expectedTransferCount || 0);
+  const expectedTotalQuantity = Number(req.body.expectedTotalQuantity || 0);
+  const deliveredAt = req.body.deliveredAt || null;
+
+  if (marker.length < 12) return fail(res, 400, 'Informe o identificador exato da importação que será consolidada.');
+  if (!Number.isInteger(warehouseId) || warehouseId <= 0) return fail(res, 400, 'Informe o estoque de origem das ferramentas.');
+  if (expectedTransferCount && (!Number.isInteger(expectedTransferCount) || expectedTransferCount <= 1)) {
+    return fail(res, 400, 'A quantidade esperada de transferências precisa ser um inteiro maior que um.');
+  }
+  if (expectedTotalQuantity && (!Number.isInteger(expectedTotalQuantity) || expectedTotalQuantity <= 0)) {
+    return fail(res, 400, 'A quantidade total esperada precisa ser um inteiro maior que zero.');
+  }
+
+  try {
+    assertWarehouseAccess(req.user, warehouseId, 'Você não tem acesso ao estoque de origem das ferramentas.');
+  } catch (error) {
+    return fail(res, error.statusCode || 403, error.message);
+  }
+
+  const warehouse = await Warehouse.findByPk(warehouseId);
+  if (!warehouse) return fail(res, 404, 'Estoque de origem não encontrado.');
+
+  const consolidationFlag = 'CONSOLIDADA-UMA-GUIA';
+  const result = await sequelize.transaction(async (transaction) => {
+    const transfers = await Transfer.findAll({
+      where: {
+        technicianId: technician.id,
+        warehouseId,
+        transferType: 'ferramenta',
+        notes: { [Op.iLike]: `%${marker}%` },
+      },
+      order: [['id', 'ASC']],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!transfers.length) {
+      throw Object.assign(new Error('Nenhuma transferência de ferramenta foi encontrada com o identificador informado.'), { statusCode: 404 });
+    }
+
+    const consolidatedTransfers = transfers.filter((transfer) => String(transfer.notes || '').includes(consolidationFlag));
+    if (transfers.length === 1 && consolidatedTransfers.length === 1) {
+      return { transferId: transfers[0].id, alreadyConsolidated: true };
+    }
+    if (consolidatedTransfers.length) {
+      throw Object.assign(new Error('Foi encontrada uma guia já consolidada junto com guias antigas. A operação foi interrompida para evitar duplicidade.'), { statusCode: 409 });
+    }
+
+    if (expectedTransferCount && transfers.length !== expectedTransferCount) {
+      throw Object.assign(new Error(`Foram encontradas ${transfers.length} transferências, mas eram esperadas exatamente ${expectedTransferCount}. Nenhum registro foi alterado.`), { statusCode: 409 });
+    }
+
+    const unsafeTransfers = transfers.filter((transfer) => (
+      transfer.status === 'assinado'
+      || transfer.signedAt
+      || transfer.attachmentData
+      || transfer.attachmentName
+    ));
+    if (unsafeTransfers.length) {
+      const numbers = unsafeTransfers.map((transfer) => transfer.transferNumber).join(', ');
+      throw Object.assign(new Error(`Existem guias assinadas ou com anexos (${numbers}). A consolidação automática foi bloqueada para preservar os documentos.`), { statusCode: 409 });
+    }
+
+    const oldTransferIds = transfers.map((transfer) => Number(transfer.id));
+    const oldTransferNumbers = transfers.map((transfer) => String(transfer.transferNumber));
+    const transferItems = await TransferItem.findAll({
+      where: { transferId: { [Op.in]: oldTransferIds } },
+      include: [Material],
+      order: [['id', 'ASC']],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!transferItems.length) {
+      throw Object.assign(new Error('As transferências antigas não possuem itens. Nenhum registro foi alterado.'), { statusCode: 409 });
+    }
+
+    const totalQuantity = transferItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const totalValue = transferItems.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
+    if (expectedTotalQuantity && Number(totalQuantity) !== expectedTotalQuantity) {
+      throw Object.assign(new Error(`As guias somam ${totalQuantity} unidades, mas eram esperadas exatamente ${expectedTotalQuantity}. Nenhum registro foi alterado.`), { statusCode: 409 });
+    }
+
+    const tools = await TechnicianTool.findAll({
+      where: {
+        technicianId: technician.id,
+        sourceWarehouseId: warehouseId,
+        status: 'com_tecnico',
+        notes: { [Op.iLike]: `%${marker}%` },
+      },
+      order: [['id', 'ASC']],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (tools.length !== Number(totalQuantity)) {
+      throw Object.assign(new Error(`A ficha possui ${tools.length} ferramentas ligadas à importação, mas as guias somam ${totalQuantity}. Nenhum registro foi alterado.`), { statusCode: 409 });
+    }
+
+    const movements = await StockMovement.findAll({
+      where: {
+        type: 'transferencia_tecnico',
+        fromWarehouseId: warehouseId,
+        toTechnicianId: technician.id,
+        reference: { [Op.in]: oldTransferNumbers },
+      },
+      order: [['id', 'ASC']],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const movementQuantity = movements.reduce((sum, movement) => sum + Number(movement.quantity || 0), 0);
+    if (Number(movementQuantity) !== Number(totalQuantity)) {
+      throw Object.assign(new Error(`As movimentações de estoque somam ${movementQuantity} unidades, mas as guias somam ${totalQuantity}. Nenhum registro foi alterado.`), { statusCode: 409 });
+    }
+
+    const transferNumber = nextStockToolTransferNumber();
+    const consolidatedNotes = [
+      marker,
+      consolidationFlag,
+      `Consolidação administrativa de ${transfers.length} guias anteriores em uma única transferência.`,
+      `Técnico: ${technician.name}.`,
+      `Estoque: ${warehouse.name}.`,
+    ].join(' | ');
+
+    const consolidated = await Transfer.create({
+      transferNumber,
+      transferType: 'ferramenta',
+      technicianId: technician.id,
+      warehouseId,
+      deliveredAt: deliveredAt || transfers[0].deliveredAt || new Date(),
+      totalQuantity: qty(totalQuantity),
+      totalValue: money(totalValue),
+      notes: consolidatedNotes,
+      stampText: 'Declaro que todas as ferramentas relacionadas nesta guia única foram conferidas e entregues ao técnico indicado, permanecendo sob sua responsabilidade até devolução ou baixa formal.',
+      createdById: req.user?.id || null,
+    }, { transaction });
+
+    await TransferItem.update(
+      { transferId: consolidated.id },
+      { where: { transferId: { [Op.in]: oldTransferIds } }, transaction },
+    );
+
+    for (const movement of movements) {
+      const previousReference = String(movement.reference || '');
+      movement.reference = transferNumber;
+      movement.notes = [
+        String(movement.notes || '').trim() || null,
+        `Movimentação vinculada à guia consolidada ${transferNumber}; referência anterior: ${previousReference}.`,
+      ].filter(Boolean).join(' | ');
+      await movement.save({ transaction });
+    }
+
+    for (const tool of tools) {
+      let notes = String(tool.notes || '');
+      for (const oldNumber of oldTransferNumbers) {
+        notes = notes.split(oldNumber).join(transferNumber);
+      }
+      if (!notes.includes(consolidationFlag)) {
+        notes = [notes, `${consolidationFlag}: ${transferNumber}`].filter(Boolean).join(' | ');
+      }
+      tool.notes = notes;
+      if (deliveredAt) tool.deliveredAt = deliveredAt;
+      await tool.save({ transaction });
+    }
+
+    await Transfer.destroy({
+      where: { id: { [Op.in]: oldTransferIds } },
+      transaction,
+    });
+
+    await writeAudit({
+      req,
+      action: 'consolidate_stock_tool_transfers',
+      entity: 'Transfer',
+      entityId: consolidated.id,
+      message: `${transfers.length} guias de ferramentas de ${technician.name} foram consolidadas na guia única ${transferNumber}, sem nova movimentação de saldo.`,
+      beforeData: {
+        technicianId: technician.id,
+        warehouseId,
+        marker,
+        transferIds: oldTransferIds,
+        transferNumbers: oldTransferNumbers,
+        transferCount: transfers.length,
+        totalQuantity,
+        totalValue: money(totalValue),
+      },
+      afterData: {
+        transferId: consolidated.id,
+        transferNumber,
+        transferCount: 1,
+        itemCount: transferItems.length,
+        totalQuantity,
+        totalValue: money(totalValue),
+        movementIds: movements.map((movement) => movement.id),
+        toolIds: tools.map((tool) => tool.id),
+      },
+      transaction,
+    });
+
+    return { transferId: consolidated.id, alreadyConsolidated: false };
+  });
+
+  const consolidatedTransfer = await Transfer.findByPk(result.transferId, {
+    include: [
+      Technician,
+      Warehouse,
+      { model: TransferItem, include: [Material, TechnicianTool] },
+    ],
+  });
+
+  if (result.alreadyConsolidated) {
+    return ok(res, consolidatedTransfer, 'As ferramentas já estão consolidadas em uma única guia.');
+  }
+  return created(res, consolidatedTransfer, 'As 33 transferências foram substituídas por uma única guia, sem movimentar o saldo novamente.');
+});
+
 exports.update = asyncHandler(async (req, res) => {
   const tool = await TechnicianTool.findOne({ where: { id: req.params.id, technicianId: req.params.technicianId }, include: toolInclude });
   if (!tool) return fail(res, 404, 'Ferramenta não encontrada nesta ficha.');

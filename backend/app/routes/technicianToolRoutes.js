@@ -1,6 +1,6 @@
 const router = require('express').Router({ mergeParams: true });
 const controller = require('../controllers/technicianToolController');
-const { authenticate, requireModule } = require('../middlewares/authMiddleware');
+const { authenticate, requireRoles, requireModule } = require('../middlewares/authMiddleware');
 
 router.use(authenticate);
 router.get('/', requireModule('technicians', 'technicianTools', 'technicianLosses'), controller.list);
@@ -11,6 +11,7 @@ router.get('/documents/:documentId', requireModule('technicians', 'technicianToo
 router.post('/documents', requireModule('technicianToolsEdit'), controller.uploadDocument);
 router.delete('/documents/:documentId', requireModule('technicianToolsEdit'), controller.deleteDocument);
 router.post('/', requireModule('technicianToolsEdit'), controller.create);
+router.post('/consolidate-transfers', requireRoles('admin'), requireModule('technicianToolsEdit'), controller.consolidateTransfers);
 router.put('/:id', requireModule('technicianToolsEdit'), controller.update);
 router.post('/:id/remove', requireModule('technicianToolsEdit'), controller.remove);
 
