@@ -8,6 +8,7 @@ const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
+const { assertTechnicianAccess, filterTechniciansForUser } = require('../utils/technicianAccess');
 const { hasModuleAccess } = require('../config/modulePermissions');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 
@@ -99,6 +100,8 @@ function nextNumber() {
 exports.list = asyncHandler(async (req, res) => {
   const transferNumberWhere = { transferNumber: { [Op.notILike]: 'PERDA-%' } };
   const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
+  const allTechnicians = await Technician.findAll({ attributes: ['id', 'defaultWarehouseId', 'serviceCities'] });
+  const visibleTechnicianIds = filterTechniciansForUser(req.user, allTechnicians).map((technician) => Number(technician.id));
   let where;
 
   if (req.user?.role === 'tecnico') {
@@ -113,14 +116,12 @@ exports.list = asyncHandler(async (req, res) => {
   } else if (isPrivileged(req.user)) {
     where = { ...warehouseScope, ...transferNumberWhere };
   } else {
-    // Transferências de ferramentas não pertencem a um estoque específico.
-    // Usuários operacionais com acesso ao módulo devem visualizá-las, enquanto
-    // as transferências de materiais continuam limitadas aos estoques liberados.
     where = {
       ...transferNumberWhere,
       [Op.or]: [
         warehouseScope,
-        { transferType: 'ferramenta' },
+        { technicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 },
+        { fromTechnicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 },
       ],
     };
   }
@@ -140,12 +141,25 @@ exports.list = asyncHandler(async (req, res) => {
     : ok(res, transfers);
 });
 
+function canAccessTransfer(user, transfer) {
+  if (isPrivileged(user)) return true;
+  if (user?.role === 'tecnico') {
+    const technicianId = Number(user.technicianId || 0);
+    return Number(transfer.technicianId || 0) === technicianId || Number(transfer.fromTechnicianId || 0) === technicianId;
+  }
+  if (transfer.warehouseId) {
+    try { assertWarehouseAccess(user, transfer.warehouseId); return true; } catch (_) { /* segue pela cidade do técnico */ }
+  }
+  return [transfer.Technician, transfer.fromTechnician].filter(Boolean).some((technician) => filterTechniciansForUser(user, [technician]).length > 0);
+}
+
 exports.get = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id, {
     attributes: { exclude: ['attachmentData'] },
     include: transferInclude,
   });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
+  if (!canAccessTransfer(req.user, transfer)) return fail(res, 403, 'Você não tem acesso à cidade desta transferência.');
 
   const payload = transfer.toJSON();
   const summary = String(payload.attachmentName || '').trim();
@@ -161,9 +175,11 @@ exports.get = asyncHandler(async (req, res) => {
 
 exports.getAttachment = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id, {
-    attributes: ['id', 'transferNumber', 'attachmentName', 'attachmentData', 'signedAt', 'createdAt', 'updatedAt'],
+    attributes: ['id', 'transferNumber', 'warehouseId', 'technicianId', 'fromTechnicianId', 'attachmentName', 'attachmentData', 'signedAt', 'createdAt', 'updatedAt'],
+    include: [Technician, { model: Technician, as: 'fromTechnician' }],
   });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
+  if (!canAccessTransfer(req.user, transfer)) return fail(res, 403, 'Você não tem acesso à cidade desta transferência.');
 
   const attachments = readTransferAttachments(transfer);
   const index = Number(req.params.index);
@@ -181,9 +197,12 @@ exports.create = asyncHandler(async (req, res) => {
   if (!technicianId) return fail(res, 400, 'Selecione o técnico de destino.');
   if (!items.length && !materialRequestId) return fail(res, 400, 'Adicione pelo menos um item à transferência.');
   try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
-  const technician = await Technician.findByPk(technicianId);
+  const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
-  const sourceWarehouseId = warehouseId || technician.defaultWarehouseId || null;
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+  if (!technician.defaultWarehouseId) return fail(res, 400, 'O técnico não possui estoque/cidade padrão vinculado.');
+  if (warehouseId && Number(warehouseId) !== Number(technician.defaultWarehouseId)) return fail(res, 400, 'A transferência deve sair do estoque da cidade vinculada ao técnico.');
+  const sourceWarehouseId = Number(technician.defaultWarehouseId);
   if (!sourceWarehouseId) return fail(res, 400, 'Selecione o estoque de origem da transferência.');
   if (sourceWarehouseId) {
     try { assertWarehouseAccess(req.user, sourceWarehouseId, 'Você não tem acesso ao estoque de origem.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
@@ -424,6 +443,10 @@ exports.transferTools = asyncHandler(async (req, res) => {
   ]);
   if (!sourceTechnician) return fail(res, 404, 'Técnico de origem não encontrado.');
   if (!destinationTechnician) return fail(res, 404, 'Técnico de destino não encontrado.');
+  try {
+    assertTechnicianAccess(req.user, sourceTechnician, 'Você não tem acesso à cidade do técnico de origem.');
+    assertTechnicianAccess(req.user, destinationTechnician, 'Você não tem acesso à cidade do técnico de destino.');
+  } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
   const result = await sequelize.transaction(async (transaction) => {
     const tools = await TechnicianTool.findAll({
@@ -522,6 +545,7 @@ exports.transferTools = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const transfer = await Transfer.findByPk(req.params.id, { include: transferInclude });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
+  if (!canAccessTransfer(req.user, transfer)) return fail(res, 403, 'Você não tem acesso à cidade desta transferência.');
   const before = { ...transfer.toJSON(), attachmentData: undefined };
   const { notes, status, deliveredAt, signatureResponsible } = req.body;
   if (notes !== undefined) transfer.notes = notes;
@@ -535,8 +559,11 @@ exports.update = asyncHandler(async (req, res) => {
 });
 
 exports.sign = asyncHandler(async (req, res) => {
-  const transfer = await Transfer.findByPk(req.params.id);
+  const transfer = await Transfer.findByPk(req.params.id, {
+    include: [Technician, { model: Technician, as: 'fromTechnician' }],
+  });
   if (!transfer) return fail(res, 404, 'Transferência não encontrada.');
+  if (!canAccessTransfer(req.user, transfer)) return fail(res, 403, 'Você não tem acesso à cidade desta transferência.');
 
   const before = transferWithAttachments(transfer, false);
   const requestedAttachments = Array.isArray(req.body.attachments)

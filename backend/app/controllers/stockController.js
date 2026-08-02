@@ -23,7 +23,8 @@ const { daysBetween, qty, money, normalizeDoc } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
-const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { stockWhereForUser, movementWhereForUser, assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
+const { assertTechnicianAccess, filterTechniciansForUser } = require('../utils/technicianAccess');
 const { reverseWarehouseIds, movementOutsideReverse } = require('../utils/reverseLogistics');
 const { normalizeServiceOrderCity, resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
 
@@ -56,18 +57,34 @@ function composeServiceNotes(notes, serviceType, addressChangeType) {
 
 exports.overview = asyncHandler(async (req, res) => {
   const materials = await Material.findAll({ order: [['name', 'ASC']] });
-  const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
+  const requestedWarehouseId = Number(req.query.warehouseId || 0);
+  const warehouseScope = stockWhereForUser(req.user, requestedWarehouseId || null);
+  const allTechnicians = await Technician.findAll({ attributes: ['id', 'defaultWarehouseId', 'serviceCities'] });
+  const visibleTechnicians = filterTechniciansForUser(req.user, allTechnicians)
+    .filter((technician) => !requestedWarehouseId || Number(technician.defaultWarehouseId || 0) === requestedWarehouseId);
+  const visibleTechnicianIds = visibleTechnicians.map((technician) => Number(technician.id));
+  const restrictTechnicianStock = !isPrivileged(req.user) || requestedWarehouseId > 0;
+  const technicianScope = restrictTechnicianStock
+    ? { technicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 }
+    : {};
   const reverseIds = await reverseWarehouseIds();
   const operationalWarehouseScope = reverseIds.length ? { warehouseId: { [Op.notIn]: reverseIds } } : {};
   const rows = [];
   for (const material of materials) {
     const balanceWhere = { materialId: material.id, ownerType: 'estoque', technicianId: null, [Op.and]: [warehouseScope, operationalWarehouseScope] };
-    const assetWhere = { materialId: material.id, ownerType: 'estoque', [Op.and]: [warehouseScope, operationalWarehouseScope] };
+    const assetWhere = { materialId: material.id, ownerType: 'estoque', status: 'em_estoque', [Op.and]: [warehouseScope, operationalWarehouseScope] };
     const mainBalance = await StockBalance.sum('quantity', { where: balanceWhere });
     const mainAssets = await SerializedAsset.count({ where: assetWhere });
-    const techAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'tecnico' } });
-    const installedAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'cliente' } });
-    const techBalances = await StockBalance.sum('quantity', { where: { materialId: material.id, ownerType: 'tecnico' } });
+    const techAssets = await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'tecnico', ...technicianScope } });
+    const installedAssets = isPrivileged(req.user) && !requestedWarehouseId
+      ? await SerializedAsset.count({ where: { materialId: material.id, ownerType: 'cliente' } })
+      : await ServiceOrderMaterial.count({
+        where: { materialId: material.id, assetId: { [Op.ne]: null } },
+        include: [{ model: ServiceOrder, required: true, where: warehouseScope }],
+        distinct: true,
+        col: 'assetId',
+      });
+    const techBalances = await StockBalance.sum('quantity', { where: { materialId: material.id, ownerType: 'tecnico', ...technicianScope } });
     rows.push({
       ...material.toJSON(),
       mainStock: material.requiresSerial ? mainAssets : Number(mainBalance || 0),
@@ -80,17 +97,71 @@ exports.overview = asyncHandler(async (req, res) => {
 
 exports.assets = asyncHandler(async (req, res) => {
   const where = {};
+  const and = [];
   const reverseIds = await reverseWarehouseIds();
+  const requestedOwnerType = String(req.query.ownerType || '').trim().toLowerCase();
   if (req.query.status) where.status = req.query.status;
-  if (req.query.ownerType) where.ownerType = req.query.ownerType;
+  if (requestedOwnerType) where.ownerType = requestedOwnerType;
   if (req.query.materialId) where.materialId = req.query.materialId;
-  if (req.query.technicianId) where.technicianId = req.query.technicianId;
-  if ((req.query.ownerType || 'estoque') === 'estoque') {
-    const scopes = [stockWhereForUser(req.user, req.query.warehouseId)];
-    if (reverseIds.length) scopes.push({ warehouseId: { [Op.notIn]: reverseIds } });
-    where[Op.and] = scopes;
-  }
   if (req.query.serial) where.serialNumber = { [Op.iLike]: `%${req.query.serial}%` };
+
+  const allTechnicians = await Technician.findAll({
+    attributes: ['id', 'defaultWarehouseId', 'serviceCities'],
+    include: [{ model: Warehouse, as: 'defaultWarehouse', attributes: ['id', 'city'] }],
+  });
+  const visibleTechnicianIds = filterTechniciansForUser(req.user, allTechnicians).map((technician) => Number(technician.id));
+
+  if (req.query.technicianId) {
+    const requestedTechnicianId = Number(req.query.technicianId);
+    if (!isPrivileged(req.user) && !visibleTechnicianIds.includes(requestedTechnicianId)) {
+      and.push({ technicianId: -1 });
+    } else {
+      and.push({ technicianId: requestedTechnicianId });
+    }
+  }
+
+  const warehouseScopes = [stockWhereForUser(req.user, req.query.warehouseId)];
+  if (reverseIds.length) warehouseScopes.push({ warehouseId: { [Op.notIn]: reverseIds } });
+  const warehouseAssetScope = { [Op.and]: warehouseScopes };
+  const technicianAssetScope = { technicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 };
+
+  let clientAssetIds = [];
+  if (!isPrivileged(req.user) && (!requestedOwnerType || requestedOwnerType === 'cliente')) {
+    const serviceOrderRows = await ServiceOrderMaterial.findAll({
+      attributes: ['assetId'],
+      where: { assetId: { [Op.ne]: null } },
+      include: [{
+        model: ServiceOrder,
+        attributes: [],
+        required: true,
+        where: stockWhereForUser(req.user, req.query.warehouseId),
+      }],
+      raw: true,
+      limit: 5000,
+    });
+    clientAssetIds = [...new Set(serviceOrderRows.map((row) => Number(row.assetId)).filter(Boolean))];
+  }
+  const clientAssetScope = isPrivileged(req.user)
+    ? {}
+    : { id: clientAssetIds.length ? { [Op.in]: clientAssetIds } : -1 };
+
+  if (requestedOwnerType === 'estoque' || (!requestedOwnerType && req.query.warehouseId)) {
+    and.push(warehouseAssetScope);
+  } else if (requestedOwnerType === 'tecnico') {
+    and.push(technicianAssetScope);
+  } else if (requestedOwnerType === 'cliente') {
+    and.push(clientAssetScope);
+  } else if (!requestedOwnerType && !isPrivileged(req.user)) {
+    and.push({
+      [Op.or]: [
+        { ownerType: 'estoque', ...warehouseAssetScope },
+        { ownerType: 'tecnico', ...technicianAssetScope },
+        { ownerType: 'cliente', ...clientAssetScope },
+      ],
+    });
+  }
+
+  if (and.length) where[Op.and] = and;
   const pagination = paginationFromQuery(req.query);
   const limit = pagination.enabled ? pagination.limit : Math.min(Number(req.query.limit || 800), 2000);
   const [assets, total] = await Promise.all([
@@ -110,7 +181,23 @@ exports.movements = asyncHandler(async (req, res) => {
   if (req.query.materialId) where.materialId = req.query.materialId;
   if (req.query.technicianId) and.push({ [Op.or]: [{ fromTechnicianId: req.query.technicianId }, { toTechnicianId: req.query.technicianId }] });
   const movementScope = movementWhereForUser(req.user, req.query.warehouseId);
-  if (movementScope) and.push(movementScope);
+  if (isPrivileged(req.user)) {
+    if (movementScope) and.push(movementScope);
+  } else {
+    const allTechnicians = await Technician.findAll({
+      attributes: ['id', 'defaultWarehouseId', 'serviceCities'],
+      include: [{ model: Warehouse, as: 'defaultWarehouse', attributes: ['id', 'city'] }],
+    });
+    const visibleTechnicianIds = filterTechniciansForUser(req.user, allTechnicians).map((technician) => Number(technician.id));
+    const accessOptions = [];
+    if (movementScope?.[Op.or]) accessOptions.push(...movementScope[Op.or]);
+    else if (movementScope) accessOptions.push(movementScope);
+    accessOptions.push(
+      { fromTechnicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 },
+      { toTechnicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 },
+    );
+    and.push({ [Op.or]: accessOptions });
+  }
   const reverseIds = await reverseWarehouseIds();
   and.push(movementOutsideReverse(reverseIds));
   if (req.query.search) {
@@ -144,8 +231,9 @@ exports.movements = asyncHandler(async (req, res) => {
 });
 
 exports.technicianBox = asyncHandler(async (req, res) => {
-  const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany] });
+  const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   const rawAssets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material, Warehouse],
@@ -225,8 +313,9 @@ exports.returnFromTechnician = asyncHandler(async (req, res) => {
   if (!targetWarehouseId) return fail(res, 400, 'Selecione o estoque de destino para retorno do material.');
   if (!items.length) return fail(res, 400, 'Selecione pelo menos um item da caixa do técnico para retornar ao estoque.');
   try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
-  const technician = await Technician.findByPk(technicianId);
+  const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   const targetWarehouse = await Warehouse.findByPk(targetWarehouseId);
   if (!targetWarehouse) return fail(res, 404, 'Estoque de destino não encontrado.');
   if (targetWarehouse.status && targetWarehouse.status !== 'ativo') return fail(res, 400, 'O estoque de destino precisa estar ativo.');
@@ -359,6 +448,7 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
   if (serviceType === 'outro' && !['com_troca', 'sem_troca'].includes(addressChangeType)) return fail(res, 400, 'Informe se a mudança de endereço terá troca de equipamento.');
   let operationalLocation;
   try { operationalLocation = await resolveServiceOrderLocation(technicianId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+  try { assertTechnicianAccess(req.user, operationalLocation.technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   let serviceOrderCity;
   try { serviceOrderCity = normalizeServiceOrderCity(city); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
   const technician = operationalLocation.technician;
@@ -478,7 +568,10 @@ exports.losses = asyncHandler(async (req, res) => {
     order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC']],
     limit: 400,
   });
-  return ok(res, rows);
+  const visibleRows = isPrivileged(req.user)
+    ? rows
+    : rows.filter((row) => row.Technician && filterTechniciansForUser(req.user, [row.Technician]).length > 0);
+  return ok(res, visibleRows);
 });
 
 exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
@@ -507,8 +600,9 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
     return fail(res, 400, 'Selecione ao menos uma ferramenta da ficha do técnico.');
   }
 
-  const technician = await Technician.findByPk(technicianId);
+  const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
   const result = await sequelize.transaction(async (transaction) => {
     const reference = nextLossNumber();
@@ -712,6 +806,29 @@ exports.serialLife = asyncHandler(async (req, res) => {
   if (!serial) return fail(res, 400, 'Informe o serial para consulta.');
   const asset = await SerializedAsset.findOne({ where: { serialNumber: serial }, include: [Material, Technician, Warehouse] });
   if (!asset) return fail(res, 404, 'Serial não encontrado no patrimônio.');
+
+  if (!isPrivileged(req.user)) {
+    try {
+      if (asset.ownerType === 'estoque') {
+        assertWarehouseAccess(req.user, asset.warehouseId, 'Você não tem acesso à cidade deste equipamento.');
+      } else if (asset.ownerType === 'tecnico') {
+        const technician = await Technician.findByPk(asset.technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
+        assertTechnicianAccess(req.user, technician, 'Você não tem acesso à cidade deste equipamento.');
+      } else if (asset.ownerType === 'cliente') {
+        const installedItem = await ServiceOrderMaterial.findOne({
+          where: { assetId: asset.id },
+          include: [{ model: ServiceOrder, include: [Warehouse] }],
+          order: [['createdAt', 'DESC']],
+        });
+        assertWarehouseAccess(req.user, installedItem?.ServiceOrder?.warehouseId, 'Você não tem acesso à cidade deste equipamento.');
+      } else {
+        throw Object.assign(new Error('Você não tem acesso à cidade deste equipamento.'), { statusCode: 403 });
+      }
+    } catch (error) {
+      return fail(res, error.statusCode || 403, error.message);
+    }
+  }
+
   const [movements, transferItems, osItems] = await Promise.all([
     StockMovement.findAll({ where: { serialNumber: serial }, include: [Material, SerializedAsset, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }, { model: Warehouse, as: 'fromWarehouse' }, { model: Warehouse, as: 'toWarehouse' }, { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }], order: [['movementAt', 'ASC']] }),
     TransferItem.findAll({ where: { serialNumber: serial }, include: [{ model: Transfer, include: [Technician, Warehouse] }, Material], order: [['createdAt', 'ASC']] }),

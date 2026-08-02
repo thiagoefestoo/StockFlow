@@ -1,0 +1,118 @@
+ATUALIZAÇÃO 59 — COMANDOS POWERSHELL
+
+PROJETO:
+C:\Users\TH\Documents\GitHub\estoque-superinfra
+
+PACOTE RECOMENDADO:
+$HOME\Downloads\atualizacao-59-segregacao-cidade-estoque-filtros.zip
+
+============================================================
+1. APLICAR E VALIDAR
+============================================================
+
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-59.ps1"
+
+if (!(Test-Path -LiteralPath $aplicador)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+& $aplicador `
+    -Repo "C:\Users\TH\Documents\GitHub\estoque-superinfra" `
+    -Zip "$HOME\Downloads\atualizacao-59-segregacao-cidade-estoque-filtros.zip"
+
+============================================================
+2. REVISAR ALTERAÇÕES
+============================================================
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+git status --short
+git diff --check
+git diff --stat
+
+============================================================
+3. COMMIT E PUSH
+============================================================
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/utils/technicianAccess.js",
+    "backend/app/middlewares/authMiddleware.js",
+    "backend/app/controllers/authController.js",
+    "backend/app/controllers/materialController.js",
+    "backend/app/controllers/materialRequestController.js",
+    "backend/app/services/materialRequestApprovalService.js",
+    "backend/app/controllers/technicianController.js",
+    "backend/app/controllers/technicianToolController.js",
+    "backend/app/controllers/stockController.js",
+    "backend/app/controllers/transferController.js",
+    "backend/app/controllers/serviceOrderController.js",
+    "backend/app/controllers/approvalController.js",
+    "backend/app/controllers/warehouseController.js",
+    "backend/app/controllers/biController.js",
+    "frontend/src/pages/MaterialRequests.jsx",
+    "frontend/src/pages/Stock.jsx",
+    "frontend/src/styles.css",
+    "frontend/build",
+    "ATUALIZACAO-59-SEGREGACAO-CIDADE-ESTOQUE.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-59.txt",
+    "COMANDOS-ATUALIZACAO-59-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-59.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+git status --short
+
+git commit -m "Segrega materiais, técnicos e estoque por cidade"
+git push origin main
+
+============================================================
+4. REDEPLOY — ORDEM OBRIGATÓRIA
+============================================================
+
+1. Faça o redeploy do BACKEND no Render primeiro.
+2. Aguarde o deploy terminar.
+3. Teste a saúde da API:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. Faça login e valide uma consulta regional.
+5. Só depois faça o redeploy do FRONTEND na Vercel.
+6. Saia e entre novamente nas contas de teste.
+
+============================================================
+5. TESTES DE PRODUÇÃO RECOMENDADOS
+============================================================
+
+CONTA VILA VELHA:
+- Central da Caixa mostra somente técnicos autorizados de Vila Velha.
+- Caixa do Técnico não abre técnico de São Pedro da Aldeia.
+- Solicitação para técnico de Vila Velha mostra somente saldo de Vila Velha.
+- Materiais / Estoque, filtro Vila Velha, confere saldo local.
+
+CONTA SÃO PEDRO DA ALDEIA:
+- Central da Caixa mostra somente técnicos autorizados de São Pedro da Aldeia.
+- Solicitação mostra somente materiais com saldo local positivo.
+- ONU FiberHome aparece com o saldo real de São Pedro da Aldeia.
+- Materiais / Estoque não soma saldo de Vila Velha.
+
+ADMINISTRADOR:
+- Continua visualizando todas as cidades.
+- Filtro de cidade/estoque altera os totais corretamente.
+
+============================================================
+6. ATENÇÃO
+============================================================
+
+- Não existe migration nesta atualização.
+- Não execute scripts de alteração de banco.
+- Não substitua o arquivo .env.
+- Render deve ser publicado antes da Vercel.
+- Técnico sem estoque padrão precisa ser corrigido em Administração.

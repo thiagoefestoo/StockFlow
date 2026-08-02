@@ -1,4 +1,5 @@
 const sequelize = require('../../config/db');
+const { Op } = require('sequelize');
 const { Material, StockBalance, SerializedAsset, StockMovement, Warehouse } = require('../models');
 const { crudController } = require('./crudHelpers');
 const asyncHandler = require('../utils/asyncHandler');
@@ -37,21 +38,55 @@ function normalizeSerials(value) {
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const records = await Material.findAll({ order: [['name', 'ASC']] });
-  const warehouseScope = stockWhereForUser(req.user, req.query.warehouseId);
-  const visibleWarehouses = await Warehouse.findAll({
-    where: { ...warehouseListWhere(req.user), isReverseLogistics: false },
-    attributes: ['id', 'name', 'code', 'city', 'region', 'status'],
-    order: [['city', 'ASC'], ['name', 'ASC']],
-  });
+  const materialWhere = {};
+  if (req.query.category) materialWhere.category = req.query.category;
+  if (String(req.query.activeOnly || '').toLowerCase() === 'true') materialWhere.active = true;
+  if (req.query.search) {
+    const search = `%${String(req.query.search).trim()}%`;
+    materialWhere[Op.or] = [
+      { sku: { [Op.iLike]: search } },
+      { name: { [Op.iLike]: search } },
+      { commercialName: { [Op.iLike]: search } },
+    ];
+  }
+
+  const requestedWarehouseId = Number(req.query.warehouseId || 0);
+  const warehouseScope = stockWhereForUser(req.user, requestedWarehouseId || null);
+  const warehouseFilters = [warehouseListWhere(req.user), { isReverseLogistics: false }];
+  if (requestedWarehouseId > 0) warehouseFilters.push({ id: requestedWarehouseId });
+  if (req.query.city) warehouseFilters.push({ city: { [Op.iLike]: String(req.query.city).trim() } });
+  const visibleWarehouseWhere = { [Op.and]: warehouseFilters };
+
+  const [records, visibleWarehouses] = await Promise.all([
+    Material.findAll({ where: materialWhere, order: [['name', 'ASC']] }),
+    Warehouse.findAll({
+      where: visibleWarehouseWhere,
+      attributes: ['id', 'name', 'code', 'city', 'region', 'state', 'status'],
+      order: [['city', 'ASC'], ['name', 'ASC']],
+    }),
+  ]);
+
+  const visibleWarehouseIds = visibleWarehouses.map((warehouse) => Number(warehouse.id));
+  const stockAnd = [warehouseScope];
+  if (visibleWarehouseIds.length) stockAnd.push({ warehouseId: { [Op.in]: visibleWarehouseIds } });
+  else stockAnd.push({ warehouseId: -1 });
 
   const [balances, assets] = await Promise.all([
     StockBalance.findAll({
-      where: { ownerType: 'estoque', technicianId: null, ...warehouseScope },
+      where: {
+        ownerType: 'estoque',
+        technicianId: null,
+        quantity: { [Op.gt]: 0 },
+        [Op.and]: stockAnd,
+      },
       attributes: ['materialId', 'warehouseId', 'quantity'],
     }),
     SerializedAsset.findAll({
-      where: { ownerType: 'estoque', ...warehouseScope },
+      where: {
+        ownerType: 'estoque',
+        status: 'em_estoque',
+        [Op.and]: stockAnd,
+      },
       attributes: ['materialId', 'warehouseId'],
     }),
   ]);
@@ -60,26 +95,45 @@ exports.list = asyncHandler(async (req, res) => {
   const assetsByMaterialWarehouse = new Map();
   for (const balance of balances) {
     const key = `${balance.materialId}:${balance.warehouseId || 0}`;
-    balancesByMaterialWarehouse.set(key, Number(balance.quantity || 0));
+    balancesByMaterialWarehouse.set(key, Number(balancesByMaterialWarehouse.get(key) || 0) + Number(balance.quantity || 0));
   }
   for (const asset of assets) {
     const key = `${asset.materialId}:${asset.warehouseId || 0}`;
     assetsByMaterialWarehouse.set(key, Number(assetsByMaterialWarehouse.get(key) || 0) + 1);
   }
 
-  const enriched = records.map((material) => {
+  let enriched = records.map((material) => {
     const serialized = isTrue(material.requiresSerial);
+    const stockMap = serialized ? assetsByMaterialWarehouse : balancesByMaterialWarehouse;
     const warehouseStocks = visibleWarehouses.map((warehouse) => ({
       warehouseId: warehouse.id,
       warehouseName: warehouse.name,
       warehouseCode: warehouse.code,
       city: warehouse.city,
+      state: warehouse.state,
       region: warehouse.region,
-      quantity: Number((serialized ? assetsByMaterialWarehouse : balancesByMaterialWarehouse).get(`${material.id}:${warehouse.id}`) || 0),
+      quantity: Number(stockMap.get(`${material.id}:${warehouse.id}`) || 0),
     }));
     const mainStock = warehouseStocks.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-    return { ...material.toJSON(), mainStock, warehouseStocks };
+    return { ...material.toJSON(), mainStock, availableQuantity: mainStock, warehouseStocks };
   });
+
+  if (String(req.query.transferableOnly || '').toLowerCase() === 'true') {
+    enriched = enriched.filter((material) => (
+      String(material.category || '').toLowerCase() !== 'ferramenta'
+      && material.active !== false
+      && material.allowTechnicianTransfer !== false
+      && String(material.movementPolicy || 'livre').toLowerCase() !== 'bloqueado'
+    ));
+  }
+  if (String(req.query.availableOnly || '').toLowerCase() === 'true') {
+    enriched = enriched.filter((material) => Number(material.mainStock || 0) > 0);
+  }
+  if (req.query.stockStatus === 'positive') enriched = enriched.filter((material) => Number(material.mainStock || 0) > 0);
+  if (req.query.stockStatus === 'zero') enriched = enriched.filter((material) => Number(material.mainStock || 0) <= 0);
+  if (req.query.stockStatus === 'low') {
+    enriched = enriched.filter((material) => Number(material.minStock || 0) > 0 && Number(material.mainStock || 0) <= Number(material.minStock || 0));
+  }
 
   return ok(res, enriched);
 });

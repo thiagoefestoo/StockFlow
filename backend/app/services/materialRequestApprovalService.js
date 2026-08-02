@@ -69,8 +69,8 @@ function validateApprover({ user, request }) {
     throw error;
   }
 
-  if (request.requestType === 'recarga_estoque' && request.warehouseId) {
-    assertWarehouseAccess(user, request.warehouseId, 'Você só pode aprovar recargas dos estoques autorizados ao seu usuário.');
+  if (request.warehouseId) {
+    assertWarehouseAccess(user, request.warehouseId, 'Você só pode aprovar solicitações dos estoques/cidades autorizados ao seu usuário.');
   }
 }
 

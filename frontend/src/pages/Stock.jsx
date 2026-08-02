@@ -100,6 +100,7 @@ export default function Stock() {
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [filters, setFilters] = useState({ search: '', city: '', warehouseId: '', category: '', stockStatus: '' });
 
   async function load() {
     const [materialsResponse, warehousesResponse] = await Promise.all([
@@ -157,6 +158,60 @@ export default function Stock() {
   const valueEquation = warehouseTotals.length
     ? `${warehouseTotals.map((warehouse) => `${warehouse.name}: ${brl(warehouse.value)}`).join(' + ')} = ${brl(valorCatalogo)}`
     : 'Nenhum estoque autorizado para calcular.';
+
+  const cities = useMemo(() => Array.from(new Set(warehouses.map((warehouse) => warehouse.city).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
+
+  const warehousesForCity = useMemo(() => warehouses.filter((warehouse) => !filters.city || warehouse.city === filters.city), [warehouses, filters.city]);
+
+  function quantityForFilter(material) {
+    const stocks = material.warehouseStocks || [];
+    if (filters.warehouseId) {
+      return Number(stocks.find((stock) => String(stock.warehouseId) === String(filters.warehouseId))?.quantity || 0);
+    }
+    if (filters.city) {
+      return stocks.filter((stock) => stock.city === filters.city).reduce((sum, stock) => sum + Number(stock.quantity || 0), 0);
+    }
+    return materialAuthorizedQuantity(material);
+  }
+
+  const filteredMaterials = useMemo(() => {
+    const search = String(filters.search || '').trim().toLowerCase();
+    return materials.filter((material) => {
+      if (search && ![material.sku, material.name, material.commercialName, material.category].filter(Boolean).join(' ').toLowerCase().includes(search)) return false;
+      if (filters.category && material.category !== filters.category) return false;
+      const quantity = quantityForFilter(material);
+      if (filters.stockStatus === 'positive' && quantity <= 0) return false;
+      if (filters.stockStatus === 'zero' && quantity > 0) return false;
+      if (filters.stockStatus === 'low' && !(Number(material.minStock || 0) > 0 && quantity <= Number(material.minStock || 0))) return false;
+      return true;
+    });
+  }, [materials, filters]);
+
+  const visibleWarehouseTotals = useMemo(() => {
+    const allowedIds = filters.warehouseId
+      ? new Set([Number(filters.warehouseId)])
+      : new Set(warehousesForCity.map((warehouse) => Number(warehouse.id)));
+    return warehouses
+      .filter((warehouse) => allowedIds.has(Number(warehouse.id)))
+      .map((warehouse) => {
+        const quantity = filteredMaterials.reduce((sum, material) => {
+          const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
+          return sum + Number(stock?.quantity || 0);
+        }, 0);
+        const value = filteredMaterials.reduce((sum, material) => {
+          const stock = (material.warehouseStocks || []).find((row) => Number(row.warehouseId) === Number(warehouse.id));
+          return sum + (Number(stock?.quantity || 0) * Number(material.unitCost || 0));
+        }, 0);
+        return { ...warehouse, quantity, value };
+      });
+  }, [filteredMaterials, warehouses, warehousesForCity, filters.warehouseId]);
+
+  const filteredTotalStock = visibleWarehouseTotals.reduce((sum, warehouse) => sum + Number(warehouse.quantity || 0), 0);
+  const filteredTotalValue = visibleWarehouseTotals.reduce((sum, warehouse) => sum + Number(warehouse.value || 0), 0);
+
+  function clearFilters() {
+    setFilters({ search: '', city: '', warehouseId: '', category: '', stockStatus: '' });
+  }
 
   const preview = useMemo(() => {
     const estoqueMinimo = asNumber(form.minStock);
@@ -268,16 +323,28 @@ export default function Stock() {
         {canManageMaterials && <button onClick={openCreate}>➕ Novo material</button>}
       </div>
 
+      <section className="panel filters stock-filter-panel">
+        <div className="subtoolbar"><div><h3>Filtros de materiais e estoque</h3><small>Os resultados respeitam somente as cidades e estoques vinculados à sua conta.</small></div><button type="button" className="ghost" onClick={clearFilters}>Limpar filtros</button></div>
+        <div className="form-grid stock-filter-grid">
+          <label>🔎 Pesquisar<input value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="SKU, material, categoria..." /></label>
+          <label>Cidade<select value={filters.city} onChange={(e) => { const city = e.target.value; setFilters({ ...filters, city, warehouseId: '' }); }}><option value="">Todas autorizadas</option>{cities.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
+          <label>Estoque<select value={filters.warehouseId} onChange={(e) => setFilters({ ...filters, warehouseId: e.target.value })}><option value="">Todos da cidade</option>{warehousesForCity.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} • {warehouse.code}</option>)}</select></label>
+          <label>Categoria<select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}><option value="">Todas</option>{categories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Situação do saldo<select value={filters.stockStatus} onChange={(e) => setFilters({ ...filters, stockStatus: e.target.value })}><option value="">Todos</option><option value="positive">Com saldo</option><option value="zero">Sem saldo</option><option value="low">Abaixo do mínimo</option></select></label>
+        </div>
+        <div className="stock-filter-summary"><strong>{filteredMaterials.length}</strong> material(is) encontrado(s) • <strong>{formatQuantity(filteredTotalStock)}</strong> item(ns) • <strong>{brl(filteredTotalValue)}</strong></div>
+      </section>
+
       <div className="kpi-grid small">
-        <KpiCard label="Quantidade total — todos os estoques" value={formatQuantity(totalEstoque)} hint="Soma das quantidades de todos os estoques autorizados" />
-        <KpiCard label="Valor total — todos os estoques" value={brl(valorCatalogo)} hint="Soma financeira dos estoques autorizados" />
-        <KpiCard label="Alertas de mínimo" value={low} tone={low ? 'warning' : 'success'} />
+        <KpiCard label="Quantidade conforme filtro" value={formatQuantity(filteredTotalStock)} hint="Saldo da cidade/estoque selecionado" />
+        <KpiCard label="Valor conforme filtro" value={brl(filteredTotalValue)} hint="Valor calculado sobre os resultados filtrados" />
+        <KpiCard label="Materiais exibidos" value={filteredMaterials.length} />
       </div>
 
       <section className="panel stock-calculation-panel">
         <div className="subtoolbar"><div><h3>Cálculo separado e total consolidado</h3><small>Cada estoque é calculado separadamente e, abaixo, o sistema apresenta a soma geral conferida.</small></div></div>
         <div className="stock-calculation-grid">
-          {warehouseTotals.map((warehouse) => (
+          {visibleWarehouseTotals.map((warehouse) => (
             <article className="stock-calculation-card" key={warehouse.id}>
               <span>{warehouse.name}</span>
               <strong>{formatQuantity(warehouse.quantity)}</strong>
@@ -286,11 +353,11 @@ export default function Stock() {
               <small>Valor estimado neste estoque</small>
             </article>
           ))}
-          {warehouseTotals.length === 0 && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
+          {visibleWarehouseTotals.length === 0 && <div className="empty-state">Nenhum estoque foi liberado para este usuário.</div>}
         </div>
-        {warehouseTotals.length > 0 && <div className="stock-calculation-reconciliation">
-          <div><span>Soma das quantidades</span><strong>{quantityEquation}</strong></div>
-          <div><span>Soma dos valores</span><strong>{valueEquation}</strong></div>
+        {visibleWarehouseTotals.length > 0 && <div className="stock-calculation-reconciliation">
+          <div><span>Soma das quantidades filtradas</span><strong>{visibleWarehouseTotals.map((warehouse) => `${warehouse.name}: ${formatQuantity(warehouse.quantity)}`).join(' + ')} = ${formatQuantity(filteredTotalStock)}</strong></div>
+          <div><span>Soma dos valores filtrados</span><strong>{visibleWarehouseTotals.map((warehouse) => `${warehouse.name}: ${brl(warehouse.value)}`).join(' + ')} = ${brl(filteredTotalValue)}</strong></div>
         </div>}
       </section>
 
@@ -301,16 +368,16 @@ export default function Stock() {
               <tr><th>SKU</th><th>Material</th><th>Categoria</th><th>Serial</th><th>Total em todos os estoques</th><th>Quantidade separada por estoque</th><th>Mínimo</th><th>Valor</th><th>Política</th><th className="action-cell">Opções</th></tr>
             </thead>
             <tbody>
-              {materials.map((m) => (
+              {filteredMaterials.map((m) => (
                 <tr key={m.id}>
                   <td>{m.sku}</td>
                   <td><b>{m.name}</b><br /><small>{m.storageLocation || m.category || 'Sem dados complementares'}</small></td>
                   <td>{m.category}</td>
                   <td>{booleanValue(m.requiresSerial) ? 'Sim' : 'Não'}</td>
-                  <td><strong>{formatQuantity(materialAuthorizedQuantity(m), m.unit)}</strong></td>
+                  <td><strong>{formatQuantity(quantityForFilter(m), m.unit)}</strong></td>
                   <td>
                     <div className="warehouse-stock-list">
-                      {warehouseRowsForMaterial(m).map((stock) => (
+                      {warehouseRowsForMaterial(m).filter((stock) => (!filters.city || stock.city === filters.city) && (!filters.warehouseId || String(stock.warehouseId) === String(filters.warehouseId))).map((stock) => (
                         <div className="warehouse-stock-row" key={stock.warehouseId}>
                           <span>{stock.warehouseName}</span>
                           <strong>{formatQuantity(stock.quantity, m.unit)}</strong>
@@ -325,6 +392,7 @@ export default function Stock() {
                   <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>Detalhes</button>{canManageMaterials && <button className="ghost" onClick={() => openEdit(m)}>Editar</button>}</div></td>
                 </tr>
               ))}
+              {filteredMaterials.length === 0 && <tr><td colSpan="10"><div className="empty-state">Nenhum material corresponde aos filtros selecionados.</div></td></tr>}
             </tbody>
           </table>
         </div>

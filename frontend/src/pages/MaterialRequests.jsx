@@ -57,6 +57,8 @@ export default function MaterialRequests() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
+  const [requestWarehouse, setRequestWarehouse] = useState(null);
 
   async function load(targetPage = page, refreshReferences = false) {
     setLoading(true);
@@ -64,14 +66,13 @@ export default function MaterialRequests() {
       setMessage({ text: '', type: 'danger' });
       const listRequest = api.get('/material-requests', { params: { status: statusFilter || undefined, page: targetPage, pageSize: 15 } });
       const requestsToRun = [listRequest, api.get('/material-requests/summary')];
-      if (refreshReferences || !materials.length || !warehouses.length) {
-        requestsToRun.push(api.get('/materials'), api.get('/warehouses?operationalOnly=true'));
+      if (refreshReferences || !warehouses.length) {
+        requestsToRun.push(api.get('/warehouses?operationalOnly=true'));
       }
-      const [reqRes, sumRes, matRes, whRes] = await Promise.all(requestsToRun);
+      const [reqRes, sumRes, whRes] = await Promise.all(requestsToRun);
       setRequests(reqRes.data.data || []);
       setPagination(reqRes.data.pagination || { page: targetPage, pageSize: 15, total: reqRes.data.data?.length || 0, totalPages: 1 });
       setSummary(sumRes.data.data || {});
-      if (matRes) setMaterials(matRes.data.data || []);
       if (whRes) setWarehouses(whRes.data.data || []);
       if ((refreshReferences || !technicians.length) && isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []);
       setPage(targetPage);
@@ -118,15 +119,47 @@ export default function MaterialRequests() {
     };
   }, [form, materials, warehouses, technicians, isTechnician, user?.name]);
 
-  function openCreate() {
+  async function loadAvailableMaterials(technicianId = '') {
+    const selectedTechnician = isTechnician
+      ? { defaultWarehouseId: user?.technician?.defaultWarehouseId || user?.warehouseIds?.[0] }
+      : technicians.find((technician) => String(technician.id) === String(technicianId));
+    const warehouseId = Number(selectedTechnician?.defaultWarehouseId || 0);
+
+    if (!warehouseId) {
+      setMaterials([]);
+      setRequestWarehouse(null);
+      setMessage({ text: 'O técnico selecionado não possui estoque/cidade padrão vinculado.', type: 'danger' });
+      return;
+    }
+
+    setMaterialsLoading(true);
+    try {
+      const [materialsResponse, warehouseResponse] = await Promise.all([
+        api.get('/materials', { params: { warehouseId, availableOnly: true, transferableOnly: true, activeOnly: true } }),
+        api.get(`/warehouses/${warehouseId}`).catch(() => null),
+      ]);
+      setMaterials(materialsResponse.data.data || []);
+      setRequestWarehouse(warehouseResponse?.data?.data || warehouses.find((warehouse) => Number(warehouse.id) === warehouseId) || null);
+    } catch (error) {
+      setMaterials([]);
+      setRequestWarehouse(null);
+      setMessage({ text: error.response?.data?.message || 'Não foi possível carregar o saldo da cidade do técnico.', type: 'danger' });
+    } finally {
+      setMaterialsLoading(false);
+    }
+  }
+
+  async function openCreate() {
+    const technicianId = !isTechnician ? technicians[0]?.id || '' : '';
     setForm({
       ...baseForm,
       requestType: 'reposicao_carga',
-      technicianId: !isTechnician ? technicians[0]?.id || '' : '',
+      technicianId,
       warehouseId: '',
       items: [{ materialId: '', quantity: 1, serialNumbersText: '' }],
     });
     setModal(true);
+    await loadAvailableMaterials(technicianId);
   }
 
   function addItem() {
@@ -162,6 +195,15 @@ export default function MaterialRequests() {
   async function save(e) {
     e.preventDefault();
     const invalidItem = form.items.find((item) => !item.materialId || Number(item.quantity || 0) <= 0);
+    const quantityAboveStock = form.items.find((item) => {
+      const material = materials.find((row) => Number(row.id) === Number(item.materialId));
+      return material && Number(item.quantity || 0) > Number(material.mainStock || 0);
+    });
+    if (quantityAboveStock) {
+      const material = materials.find((row) => Number(row.id) === Number(quantityAboveStock.materialId));
+      setMessage({ text: `A quantidade de ${material?.name || 'material'} ultrapassa o saldo disponível na cidade do técnico.`, type: 'danger' });
+      return;
+    }
     const repeatedMaterials = duplicateItemIds(form.items);
     if (repeatedMaterials.length) {
       setMessage({ text: 'O mesmo material não pode ser selecionado mais de uma vez na solicitação.', type: 'danger' });
@@ -302,15 +344,17 @@ export default function MaterialRequests() {
           <div className="form-grid">
             {!isTechnician && <div className="mini-card"><small>Tipo de solicitação</small><strong>Carga para técnico</strong><span>A recarga de estoque regional não é criada nesta tela.</span></div>}
             {isTechnician && <div className="mini-card"><small>Solicitante</small><strong>{user?.name}</strong><span>Reposição da minha caixa</span></div>}
-            {!isTechnician && <label>Técnico<select value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
+            {!isTechnician && <label>Técnico<select value={form.technicianId} onChange={async (e) => { const technicianId = e.target.value; setForm({ ...form, technicianId, items: [{ materialId: '', quantity: 1, serialNumbersText: '' }] }); await loadAvailableMaterials(technicianId); }}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} • {t.defaultWarehouse?.city || t.serviceCities?.[0] || 'sem cidade'}</option>)}</select></label>}
             <label>Prioridade<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
             <label>Necessário até<input type="date" value={form.neededBy} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} /></label>
           </div>
+          <div className="viz-callout">Estoque da solicitação: <strong>{requestWarehouse ? `${requestWarehouse.name} • ${requestWarehouse.city || requestWarehouse.region || requestWarehouse.code}` : materialsLoading ? 'Carregando saldo da cidade...' : 'Selecione um técnico com estoque vinculado'}</strong>. A lista abaixo mostra somente materiais com saldo disponível nesse estoque.</div>
           <label>Justificativa<select value={form.requesterNotes} onChange={(e) => setForm({ ...form, requesterNotes: e.target.value })} required><option value="">Selecione uma justificativa</option>{justificationOptions(form.requestType).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
           <div className="subtoolbar"><h4>Itens solicitados</h4><button type="button" className="ghost" onClick={addItem}>Adicionar item</button></div>
           {form.items.map((item, i) => {
             const availableMaterials = optionsWithoutSelected(materials, form.items, i);
-            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '' })}><option value="">Selecionar item</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
+            const selectedMaterial = materials.find((material) => Number(material.id) === Number(item.materialId));
+            return <div className="item-card" key={i}><div className="form-grid"><label>Material<select disabled={materialsLoading || !requestWarehouse} value={item.materialId} onChange={(e) => updateItem(i, { materialId: e.target.value, serialNumbersText: '', quantity: 1 })}><option value="">{materialsLoading ? 'Carregando saldo...' : 'Selecionar item disponível'}</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • saldo {formatQuantity(m.mainStock, m.unit)} • {m.category}</option>)}</select></label><label>Quantidade<input type="number" step="1" min="1" max={selectedMaterial?.mainStock || undefined} value={item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /><small>Disponível: {selectedMaterial ? formatQuantity(selectedMaterial.mainStock, selectedMaterial.unit) : '-'}</small></label></div><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>Remover item</button></div>;
           })}
           {form.items.length === 0 && <div className="empty-state">Adicione materiais para enviar a solicitação.</div>}
         </form>

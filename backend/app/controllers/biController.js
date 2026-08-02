@@ -22,7 +22,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
 const { money, daysBetween } = require('../utils/number');
 const { reverseWarehouseIds, warehouseOutsideReverse, movementOutsideReverse } = require('../utils/reverseLogistics');
-const { warehouseListWhere } = require('../utils/warehouseAccess');
+const { warehouseListWhere, isPrivileged } = require('../utils/warehouseAccess');
 
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
@@ -106,16 +106,23 @@ function buildFilters(query = {}) {
 }
 
 
-async function resolveCityScope(filters = {}) {
+async function resolveCityScope(filters = {}, user = null) {
   const city = String(filters.city || '').trim();
-  if (!city) return { ...filters, warehouseIds: [], technicianCityIds: [], cityOsNumbers: [] };
+  const restrictedByAccount = !isPrivileged(user);
+  const cityRestricted = restrictedByAccount || Boolean(city);
+
+  if (!cityRestricted) {
+    return { ...filters, cityRestricted: false, warehouseIds: [], technicianCityIds: [], cityOsNumbers: [] };
+  }
+
+  const warehouseClauses = [
+    { isReverseLogistics: false, status: 'ativo' },
+  ];
+  if (restrictedByAccount) warehouseClauses.push(warehouseListWhere(user));
+  if (city) warehouseClauses.push({ city: { [Op.iLike]: city } });
 
   const warehouses = await Warehouse.findAll({
-    where: {
-      isReverseLogistics: false,
-      status: 'ativo',
-      city: { [Op.iLike]: city },
-    },
+    where: { [Op.and]: warehouseClauses },
     attributes: ['id'],
     raw: true,
   });
@@ -128,34 +135,32 @@ async function resolveCityScope(filters = {}) {
       })
     : [];
   const technicianCityIds = technicians.map((row) => Number(row.id)).filter(Number.isFinite);
-  const orders = await ServiceOrder.findAll({
-    where: {
-      [Op.or]: [
-        { city: { [Op.iLike]: city } },
-        ...(warehouseIds.length ? [{ warehouseId: { [Op.in]: warehouseIds } }] : []),
-      ],
-    },
-    attributes: ['osNumber'],
-    raw: true,
-  });
+  const orders = warehouseIds.length
+    ? await ServiceOrder.findAll({
+        where: { warehouseId: { [Op.in]: warehouseIds } },
+        attributes: ['osNumber'],
+        raw: true,
+      })
+    : [];
   const cityOsNumbers = orders.map((row) => String(row.osNumber || '').trim()).filter(Boolean);
-  return { ...filters, warehouseIds, technicianCityIds, cityOsNumbers };
+  return { ...filters, cityRestricted: true, warehouseIds, technicianCityIds, cityOsNumbers };
 }
 
 function cityMatchesTechnician(technician, filters) {
-  if (!filters.city) return true;
+  if (!filters.cityRestricted) return true;
   return filters.technicianCityIds.includes(Number(technician?.id));
 }
 
 function cityMatchesWarehouseId(warehouseId, filters) {
-  if (!filters.city) return true;
+  if (!filters.cityRestricted) return true;
   return filters.warehouseIds.includes(Number(warehouseId));
 }
 
 function cityMatchesOrder(order, filters) {
-  if (!filters.city) return true;
-  return String(order?.city || '').trim().toLowerCase() === String(filters.city).trim().toLowerCase()
-    || cityMatchesWarehouseId(order?.warehouseId, filters);
+  if (!filters.cityRestricted) return true;
+  if (cityMatchesWarehouseId(order?.warehouseId, filters)) return true;
+  return Boolean(filters.city)
+    && String(order?.city || '').trim().toLowerCase() === String(filters.city).trim().toLowerCase();
 }
 
 function matchesSelected(value, selected = []) {
@@ -235,7 +240,7 @@ function filterBatches(batches, filters) {
 
 function filterTransfers(transfers, filters) {
   return transfers.filter((transfer) => {
-    if (filters.city && !cityMatchesWarehouseId(transfer.warehouseId, filters) && !filters.technicianCityIds.includes(Number(transfer.technicianId))) return false;
+    if (filters.cityRestricted && !cityMatchesWarehouseId(transfer.warehouseId, filters) && !filters.technicianCityIds.includes(Number(transfer.technicianId))) return false;
     const dateField = filters.calculationMode === 'movimento' ? (transfer.signedAt || transfer.deliveredAt || transfer.createdAt) : (transfer.deliveredAt || transfer.createdAt);
     if (!inDateRange(dateField, filters)) return false;
     if (!matchesSelected(transfer.status, filters.transferStatuses)) return false;
@@ -264,7 +269,7 @@ function filterOrders(orders, filters) {
 
 function filterMovements(movements, filters) {
   return movements.filter((movement) => {
-    if (filters.city) {
+    if (filters.cityRestricted) {
       const warehouseMatch = cityMatchesWarehouseId(movement.fromWarehouseId, filters) || cityMatchesWarehouseId(movement.toWarehouseId, filters);
       const technicianMatch = filters.technicianCityIds.includes(Number(movement.fromTechnicianId)) || filters.technicianCityIds.includes(Number(movement.toTechnicianId));
       const osMatch = filters.cityOsNumbers.includes(String(movement.reference || '').trim());
@@ -284,14 +289,32 @@ function filterMovements(movements, filters) {
   });
 }
 
-async function getFilterOptions() {
+async function getFilterOptions(user) {
   const reverseIds = await reverseWarehouseIds();
-  const [materials, technicians, companies, batches, warehouses] = await Promise.all([
+  const warehouses = await Warehouse.findAll({
+    where: { [Op.and]: [warehouseListWhere(user), { isReverseLogistics: false, status: 'ativo' }] },
+    attributes: ['id', 'city'],
+    order: [['city', 'ASC']],
+  });
+  const warehouseIds = warehouses.map((warehouse) => Number(warehouse.id));
+  const technicians = warehouseIds.length
+    ? await Technician.findAll({
+        where: { defaultWarehouseId: { [Op.in]: warehouseIds } },
+        include: [ContractorCompany],
+        order: [['name', 'ASC']],
+      })
+    : [];
+  const companyIds = [...new Set(technicians.map((technician) => Number(technician.companyId)).filter(Boolean))];
+  const [materials, companies, batches] = await Promise.all([
     Material.findAll({ order: [['name', 'ASC']] }),
-    Technician.findAll({ include: [ContractorCompany], order: [['name', 'ASC']] }),
-    ContractorCompany.findAll({ order: [['name', 'ASC']] }),
-    StockBatch.findAll({ where: warehouseOutsideReverse(reverseIds), attributes: ['sourceCompany'], order: [['sourceCompany', 'ASC']] }),
-    Warehouse.findAll({ where: { isReverseLogistics: false, status: 'ativo' }, attributes: ['city'], order: [['city', 'ASC']] }),
+    companyIds.length ? ContractorCompany.findAll({ where: { id: { [Op.in]: companyIds } }, order: [['name', 'ASC']] }) : Promise.resolve([]),
+    warehouseIds.length
+      ? StockBatch.findAll({
+          where: { [Op.and]: [warehouseOutsideReverse(reverseIds), { warehouseId: { [Op.in]: warehouseIds } }] },
+          attributes: ['sourceCompany'],
+          order: [['sourceCompany', 'ASC']],
+        })
+      : Promise.resolve([]),
   ]);
   return {
     materials: materials.map((m) => ({ id: m.id, name: `${m.name} (${m.sku})`, category: m.category, requiresSerial: m.requiresSerial })),
@@ -311,7 +334,7 @@ async function getFilterOptions() {
   };
 }
 
-exports.filterOptions = asyncHandler(async (req, res) => ok(res, await getFilterOptions()));
+exports.filterOptions = asyncHandler(async (req, res) => ok(res, await getFilterOptions(req.user)));
 
 exports.warehouseValues = asyncHandler(async (req, res) => {
   const warehouses = await Warehouse.findAll({
@@ -339,7 +362,7 @@ exports.warehouseValues = asyncHandler(async (req, res) => {
       where: {
         ownerType: 'estoque',
         warehouseId: { [Op.in]: warehouseIds },
-        status: { [Op.notIn]: ['perdido', 'baixado'] },
+        status: 'em_estoque',
       },
       attributes: ['id', 'warehouseId', 'materialId', 'acquisitionCost', 'status'],
       include: [{ model: Material, attributes: ['id', 'unitCost'] }],
@@ -485,9 +508,9 @@ async function calculateStockPosition(materials, filters = {}) {
   const reverseIds = await reverseWarehouseIds();
   const reverseSet = new Set(reverseIds.map(Number));
   const installedSerialsForCity = new Set();
-  if (filters.city) {
+  if (filters.cityRestricted) {
     const cityOrders = await ServiceOrder.findAll({
-      where: { [Op.or]: [{ city: { [Op.iLike]: filters.city } }, ...(filters.warehouseIds.length ? [{ warehouseId: { [Op.in]: filters.warehouseIds } }] : [])] },
+      where: filters.warehouseIds.length ? { warehouseId: { [Op.in]: filters.warehouseIds } } : { id: -1 },
       attributes: ['id'],
       include: [{ model: ServiceOrderMaterial, attributes: ['serialNumber'] }],
     });
@@ -537,7 +560,7 @@ async function calculateStockPosition(materials, filters = {}) {
     if (material.requiresSerial) {
       const assets = (assetsByMaterial.get(Number(material.id)) || []).filter((asset) => {
         if (asset.ownerType === 'estoque' && reverseSet.has(Number(asset.warehouseId))) return false;
-        if (filters.city) {
+        if (filters.cityRestricted) {
           if (asset.ownerType === 'estoque' && !cityMatchesWarehouseId(asset.warehouseId, filters)) return false;
           if (asset.ownerType === 'tecnico' && !filters.technicianCityIds.includes(Number(asset.technicianId))) return false;
           if (asset.ownerType === 'cliente' && !installedSerialsForCity.has(String(asset.serialNumber || '').trim().toUpperCase())) return false;
@@ -567,7 +590,7 @@ async function calculateStockPosition(materials, filters = {}) {
     } else {
       const balances = (balancesByMaterial.get(Number(material.id)) || []).filter((row) => {
         if (row.ownerType === 'estoque' && reverseSet.has(Number(row.warehouseId))) return false;
-        if (filters.city) {
+        if (filters.cityRestricted) {
           if (row.ownerType === 'estoque' && !cityMatchesWarehouseId(row.warehouseId, filters)) return false;
           if (row.ownerType === 'tecnico' && !filters.technicianCityIds.includes(Number(row.technicianId))) return false;
         }
@@ -725,7 +748,7 @@ async function loadBiData(filters, requested = {}) {
     needs('approvalRequests')
       ? ApprovalRequest.findAll({
           where: dateWhere('createdAt', filters),
-          attributes: ['id', 'workflowCode', 'entityType', 'entityId', 'title', 'status', 'priority', 'amount', 'createdAt', 'requestedAt', 'decidedAt'],
+          attributes: ['id', 'workflowCode', 'entityType', 'entityId', 'title', 'status', 'priority', 'amount', 'payload', 'createdAt', 'requestedAt', 'decidedAt'],
           order: [['createdAt', 'DESC']],
           limit: 1000,
         })
@@ -738,16 +761,29 @@ async function loadBiData(filters, requested = {}) {
   orders = filterOrders(orders, filters);
   movements = filterMovements(movements, filters);
   technicians = technicians.filter((tech) => cityMatchesTechnician(tech, filters) && technicianMatches(tech, filters) && textIncludes([tech.name, tech.document, tech.email, tech.ContractorCompany?.name], filters.search || ''));
-  materialRequests = materialRequests.filter((request) => (!filters.city || cityMatchesWarehouseId(request.warehouseId, filters) || filters.technicianCityIds.includes(Number(request.technicianId))) && technicianMatches(request.Technician, filters) && inDateRange(request.createdAt, filters));
-  approvalRequests = approvalRequests.filter((approval) => inDateRange(approval.createdAt, filters));
+  materialRequests = materialRequests.filter((request) => (!filters.cityRestricted || cityMatchesWarehouseId(request.warehouseId, filters) || filters.technicianCityIds.includes(Number(request.technicianId))) && technicianMatches(request.Technician, filters) && inDateRange(request.createdAt, filters));
+  const visibleMaterialRequestIds = new Set(materialRequests.map((request) => String(request.id)));
+  approvalRequests = approvalRequests.filter((approval) => {
+    if (!inDateRange(approval.createdAt, filters)) return false;
+    if (!filters.cityRestricted) return true;
+    if (approval.entityType === 'material_request') return visibleMaterialRequestIds.has(String(approval.entityId));
+    const payload = approval.payload || {};
+    if (approval.entityType === 'warehouse_transfer') {
+      return cityMatchesWarehouseId(payload.fromWarehouseId, filters) || cityMatchesWarehouseId(payload.toWarehouseId, filters);
+    }
+    if (approval.entityType === 'warehouse_delete') return cityMatchesWarehouseId(payload.warehouseId || payload.warehouse?.id, filters);
+    return false;
+  });
 
   return { materials, batches, transfers, orders, movements, technicians, materialRequests, approvalRequests };
 }
 
 async function installedQuantitiesByMaterial(materials = [], stockPosition = null, filters = {}) {
-  if (filters.city) {
+  if (filters.cityRestricted) {
     const orders = await ServiceOrder.findAll({
-      where: { [Op.or]: [{ city: { [Op.iLike]: filters.city } }, ...(filters.warehouseIds.length ? [{ warehouseId: { [Op.in]: filters.warehouseIds } }] : [])], status: 'concluida' },
+      where: filters.warehouseIds.length
+        ? { warehouseId: { [Op.in]: filters.warehouseIds }, status: 'concluida' }
+        : { id: -1, status: 'concluida' },
       attributes: ['id'],
       include: [{ model: ServiceOrderMaterial, attributes: ['materialId', 'quantity'] }],
     });
@@ -807,7 +843,7 @@ async function summarizeMaterials(filters, materials = null, stockPosition = nul
 }
 
 exports.executive = asyncHandler(async (req, res) => {
-  const filters = await resolveCityScope(buildFilters(req.query));
+  const filters = await resolveCityScope(buildFilters(req.query), req.user);
   const { materials, transfers, orders, movements, technicians } = await loadBiData(filters, {
     all: false,
     materials: true,
@@ -932,7 +968,7 @@ exports.executive = asyncHandler(async (req, res) => {
 });
 
 exports.technicians = asyncHandler(async (req, res) => {
-  const filters = await resolveCityScope(buildFilters(req.query));
+  const filters = await resolveCityScope(buildFilters(req.query), req.user);
   const { technicians, transfers, orders } = await loadBiData(filters, {
     all: false,
     technicians: true,
@@ -1003,7 +1039,7 @@ exports.technicians = asyncHandler(async (req, res) => {
 });
 
 exports.audit = asyncHandler(async (req, res) => {
-  const filters = await resolveCityScope(buildFilters(req.query));
+  const filters = await resolveCityScope(buildFilters(req.query), req.user);
   const { transfers, movements } = await loadBiData(filters, {
     all: false,
     transfers: true,
@@ -1101,7 +1137,7 @@ exports.audit = asyncHandler(async (req, res) => {
 });
 
 exports.financial = asyncHandler(async (req, res) => {
-  const filters = await resolveCityScope(buildFilters(req.query));
+  const filters = await resolveCityScope(buildFilters(req.query), req.user);
   const { materials, batches, transfers, orders, movements, technicians, materialRequests, approvalRequests } = await loadBiData(filters);
   const stockPosition = await calculateStockPosition(materials, filters);
   const confirmedBatches = batches.filter((batch) => batch.status !== 'cancelado');

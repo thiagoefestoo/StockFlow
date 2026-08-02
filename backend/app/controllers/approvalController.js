@@ -6,6 +6,8 @@ const { executeWarehouseTransferPlan } = require('../services/warehouseTransferS
 const { writeAudit } = require('../services/auditService');
 const { approveMaterialRequest, validateApprover } = require('../services/materialRequestApprovalService');
 const { paginationFromQuery, paginationMeta } = require('../utils/pagination');
+const { isPrivileged, warehouseIdAllowed } = require('../utils/warehouseAccess');
+const { technicianAllowed } = require('../utils/technicianAccess');
 
 const { Op } = require('sequelize');
 
@@ -77,6 +79,30 @@ async function executeWarehouseDelete(payload, { req, approvalId }) {
   });
 
   return result;
+}
+
+function approvalAllowed(user, approval) {
+  if (isPrivileged(user)) return true;
+  if (!approval) return false;
+
+  if (approval.entityType === 'material_request') {
+    const request = approval.requestDetails;
+    if (!request) return false;
+    if (request.warehouseId && warehouseIdAllowed(user, request.warehouseId)) return true;
+    return request.Technician ? technicianAllowed(user, request.Technician) : false;
+  }
+
+  const payload = approval.payload || {};
+  if (approval.entityType === 'warehouse_transfer') {
+    return [payload.fromWarehouseId, payload.toWarehouseId]
+      .filter(Boolean)
+      .some((warehouseId) => warehouseIdAllowed(user, warehouseId));
+  }
+  if (approval.entityType === 'warehouse_delete') {
+    return warehouseIdAllowed(user, payload.warehouseId || payload.warehouse?.id);
+  }
+
+  return false;
 }
 
 async function enrichApproval(approval) {
@@ -165,22 +191,43 @@ exports.list = asyncHandler(async (req, res) => {
   if (req.query.status) where.status = req.query.status;
   if (req.query.entityType) where.entityType = req.query.entityType;
   const pagination = paginationFromQuery(req.query);
-  const [approvals, total] = await Promise.all([
-    ApprovalRequest.findAll({
-      where,
-      include: [
-        { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
-        { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
-      ],
-      order: [['requestedAt', 'DESC']],
-      ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 500 }),
-    }),
-    pagination.enabled ? ApprovalRequest.count({ where }) : Promise.resolve(0),
-  ]);
-  const data = await Promise.all(approvals.map(enrichApproval));
-  return pagination.enabled
-    ? okPaginated(res, data, paginationMeta(total, pagination.page, pagination.pageSize))
-    : ok(res, data);
+
+  if (isPrivileged(req.user)) {
+    const [approvals, total] = await Promise.all([
+      ApprovalRequest.findAll({
+        where,
+        include: [
+          { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
+          { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
+        ],
+        order: [['requestedAt', 'DESC']],
+        ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 500 }),
+      }),
+      pagination.enabled ? ApprovalRequest.count({ where }) : Promise.resolve(0),
+    ]);
+    const data = await Promise.all(approvals.map(enrichApproval));
+    return pagination.enabled
+      ? okPaginated(res, data, paginationMeta(total, pagination.page, pagination.pageSize))
+      : ok(res, data);
+  }
+
+  // Para perfis regionais, enriquece antes de paginar para que o total e as páginas
+  // reflitam somente aprovações dos estoques/cidades autorizados.
+  const approvals = await ApprovalRequest.findAll({
+    where,
+    include: [
+      { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
+      { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
+    ],
+    order: [['requestedAt', 'DESC']],
+    limit: 2000,
+  });
+  const enriched = await Promise.all(approvals.map(enrichApproval));
+  const visible = enriched.filter((approval) => approvalAllowed(req.user, approval));
+  if (!pagination.enabled) return ok(res, visible);
+  const start = pagination.offset;
+  const pageRows = visible.slice(start, start + pagination.limit);
+  return okPaginated(res, pageRows, paginationMeta(visible.length, pagination.page, pagination.pageSize));
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -191,7 +238,9 @@ exports.get = asyncHandler(async (req, res) => {
     ],
   });
   if (!approval) return fail(res, 404, 'Aprovação não encontrada.');
-  return ok(res, await enrichApproval(approval));
+  const enriched = await enrichApproval(approval);
+  if (!approvalAllowed(req.user, enriched)) return fail(res, 403, 'Você não tem acesso à cidade desta aprovação.');
+  return ok(res, enriched);
 });
 
 

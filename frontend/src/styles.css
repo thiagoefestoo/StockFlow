@@ -2871,3 +2871,11 @@ input[readonly], textarea[readonly] {
   .city-selector { min-width: 100%; }
   .command-center .row-actions, .hero-panel .row-actions { width: 100%; }
 }
+
+
+/* Atualização 58 — filtros e segregação de estoque por cidade */
+.stock-filter-panel { border-color: #bfdbfe; background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(239,246,255,.94)); }
+.stock-filter-grid { grid-template-columns: minmax(240px, 1.4fr) repeat(4, minmax(160px, 1fr)); align-items: end; }
+.stock-filter-summary { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
+@media (max-width: 1180px) { .stock-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .stock-filter-grid { grid-template-columns: 1fr; } }

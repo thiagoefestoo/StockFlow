@@ -1,0 +1,43 @@
+RELATÓRIO DE VALIDAÇÃO — ATUALIZAÇÃO 59
+Data: 02/08/2026
+Base: estoque-superinfra(69).zip
+
+1. BACKEND
+- npm run check --prefix backend
+- Resultado: Sintaxe validada em 103 arquivos JS.
+- Controllers modificados carregados sem erro de sintaxe.
+
+2. FRONTEND
+- npm run build --prefix frontend
+- Resultado: Compiled successfully.
+- JavaScript principal: main.1e3f0816.js
+- CSS principal: main.4fcda747.css
+
+3. TESTES DE ESCOPO
+- Conta de Vila Velha aceita técnico de Vila Velha.
+- Conta de Vila Velha bloqueia técnico de São Pedro da Aldeia.
+- Conta de São Pedro da Aldeia aceita técnico de São Pedro da Aldeia.
+- Estoque fora dos IDs autorizados gera escopo vazio.
+- Nomes de cidade com e sem acento são normalizados.
+- Resultado: Teste de segregação por cidade/estoque: OK.
+
+4. AUDITORIA DOS FLUXOS SOLICITADOS
+- Material serializado contado somente em_estoque e ownerType estoque.
+- Resposta de materiais contém warehouseStocks e availableQuantity.
+- Solicitação usa defaultWarehouseId do técnico.
+- Solicitação valida saldo disponível antes de gravar.
+- Frontend solicita availableOnly e transferableOnly.
+- Página Materiais / Estoque contém filtros por cidade, estoque, categoria e situação.
+- Movimentações administrativas respeitam filtro de warehouseId.
+- Resultado: Auditoria dos fluxos solicitados: OK.
+
+5. BANCO E CONFIGURAÇÃO
+- Migration necessária: não.
+- Alteração automática de saldo: não.
+- Arquivos .env incluídos no pacote: não.
+- Pasta .git incluída no pacote: não.
+- node_modules incluído no pacote: não.
+- Uploads/documentos do sistema incluídos no pacote: não.
+
+6. LIMITAÇÃO DA VALIDAÇÃO
+A validação foi realizada sobre o código e a compilação local do pacote enviado. Não houve acesso ao banco de produção nem execução de operações reais no Render/Vercel. O teste final deve ser feito após o redeploy, usando contas com cidades diferentes.

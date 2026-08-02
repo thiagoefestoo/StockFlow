@@ -19,6 +19,7 @@ const { writeAudit } = require('../services/auditService');
 const { money, qty, daysBetween } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { assertTechnicianAccess } = require('../utils/technicianAccess');
 
 const toolInclude = [
   Material,
@@ -57,10 +58,16 @@ async function activeSerialExists(serialNumber, excludeId = null) {
   return TechnicianTool.findOne({ where });
 }
 
-async function loadTechnicianOrFail(res, technicianId) {
-  const technician = await Technician.findByPk(technicianId);
+async function loadTechnicianOrFail(req, res, technicianId) {
+  const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) {
     fail(res, 404, 'Técnico não encontrado.');
+    return null;
+  }
+  try {
+    assertTechnicianAccess(req.user, technician);
+  } catch (error) {
+    fail(res, error.statusCode || 403, error.message);
     return null;
   }
   return technician;
@@ -81,7 +88,7 @@ function internalToolSerial(material, index) {
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
   if (req.user?.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
     return fail(res, 403, 'Você só pode acessar as ferramentas do próprio cadastro.');
@@ -108,7 +115,7 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.availableStock = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
 
   const warehouseId = Number(req.query.warehouseId || technician.defaultWarehouseId || 0);
@@ -175,7 +182,7 @@ exports.availableStock = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
 
   const requestedItems = Array.isArray(req.body.items) ? req.body.items : [];
@@ -518,7 +525,7 @@ exports.create = asyncHandler(async (req, res) => {
 
 
 exports.consolidateTransfers = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
 
   const marker = String(req.body.marker || '').trim();
@@ -784,7 +791,9 @@ exports.consolidateTransfers = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
-  const tool = await TechnicianTool.findOne({ where: { id: req.params.id, technicianId: req.params.technicianId }, include: toolInclude });
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
+  if (!technician) return;
+  const tool = await TechnicianTool.findOne({ where: { id: req.params.id, technicianId: technician.id }, include: toolInclude });
   if (!tool) return fail(res, 404, 'Ferramenta não encontrada nesta ficha.');
   if (tool.status !== 'com_tecnico') return fail(res, 400, 'Só é possível editar ferramentas que ainda estão com o técnico.');
 
@@ -817,7 +826,9 @@ exports.update = asyncHandler(async (req, res) => {
 });
 
 exports.remove = asyncHandler(async (req, res) => {
-  const tool = await TechnicianTool.findOne({ where: { id: req.params.id, technicianId: req.params.technicianId }, include: toolInclude });
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
+  if (!technician) return;
+  const tool = await TechnicianTool.findOne({ where: { id: req.params.id, technicianId: technician.id }, include: toolInclude });
   if (!tool) return fail(res, 404, 'Ferramenta não encontrada nesta ficha.');
   if (tool.status !== 'com_tecnico') return fail(res, 400, 'Esta ferramenta já foi baixada da ficha.');
 
@@ -908,7 +919,7 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.termData = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
 
   const tools = await TechnicianTool.findAll({
@@ -927,7 +938,7 @@ exports.termData = asyncHandler(async (req, res) => {
 });
 
 exports.listDocuments = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
   if (req.user?.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
     return fail(res, 403, 'Você só pode acessar os documentos do próprio cadastro.');
@@ -948,7 +959,7 @@ exports.listDocuments = asyncHandler(async (req, res) => {
 });
 
 exports.getDocument = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
   if (req.user?.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
     return fail(res, 403, 'Você só pode acessar os documentos do próprio cadastro.');
@@ -963,7 +974,7 @@ exports.getDocument = asyncHandler(async (req, res) => {
 });
 
 exports.uploadDocument = asyncHandler(async (req, res) => {
-  const technician = await loadTechnicianOrFail(res, req.params.technicianId);
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
   if (!technician) return;
 
   const documentName = String(req.body.documentName || '').trim();
@@ -1025,6 +1036,8 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
 });
 
 exports.deleteDocument = asyncHandler(async (req, res) => {
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
+  if (!technician) return;
   const document = await TechnicianToolDocument.findOne({
     where: { id: req.params.documentId, technicianId: req.params.technicianId },
   });

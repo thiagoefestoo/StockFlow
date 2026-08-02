@@ -21,6 +21,8 @@ const { writeAudit } = require('../services/auditService');
 const { money, daysBetween } = require('../utils/number');
 const { hasModuleAccess } = require('../config/modulePermissions');
 const { assertUserAccountCapacity } = require('../services/userAccountLimitService');
+const { assertWarehouseAccess, isPrivileged } = require('../utils/warehouseAccess');
+const { filterTechniciansForUser, assertTechnicianAccess } = require('../utils/technicianAccess');
 
 const technicianInclude = [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }];
 
@@ -184,7 +186,8 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const technicians = await Technician.findAll({ include: technicianInclude, order: [['name', 'ASC']] });
+  const allTechnicians = await Technician.findAll({ include: technicianInclude, order: [['name', 'ASC']] });
+  const technicians = filterTechniciansForUser(req.user, allTechnicians);
   const data = [];
   for (const technician of technicians) {
     const assetCount = await SerializedAsset.count({ where: { technicianId: technician.id, ownerType: 'tecnico' } });
@@ -222,6 +225,7 @@ exports.list = asyncHandler(async (req, res) => {
 exports.get = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   const portalUser = await findPortalUserForTechnician(technician);
   const toolDocumentCount = hasModuleAccess(req.user, 'technicianTools')
     ? await TechnicianToolDocument.count({ where: { technicianId: technician.id } }).catch(() => 0)
@@ -236,6 +240,9 @@ exports.create = asyncHandler(async (req, res) => {
   const payload = technicianPayload(req.body);
   if (!payload.name || payload.name.length < 3) return fail(res, 400, 'Informe o nome do técnico.');
   try { await validateOperationalDefaultWarehouse(payload.defaultWarehouseId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+  if (!isPrivileged(req.user)) {
+    try { assertWarehouseAccess(req.user, payload.defaultWarehouseId, 'Você só pode cadastrar técnicos nas cidades vinculadas à sua conta.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+  }
   const wantsPortalUser = req.body.createPortalUser === true || req.body.createPortalUser === 'true' || !!String(req.body.portalPassword || '').trim();
   if (wantsPortalUser) await assertUserAccountCapacity();
   const technician = await Technician.create(payload);
@@ -262,6 +269,7 @@ exports.update = asyncHandler(async (req, res) => {
 
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
   const currentTransferApprovalLimit = money(technician.transferApprovalLimit ?? 500);
   const requestedTransferApprovalLimit = hasOwnTransferApprovalLimit(req.body)
@@ -280,6 +288,9 @@ exports.update = asyncHandler(async (req, res) => {
   const before = technician.toJSON();
   const updatePayload = technicianPayload({ ...technician.toJSON(), ...req.body });
   try { await validateOperationalDefaultWarehouse(updatePayload.defaultWarehouseId); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+  if (!isPrivileged(req.user)) {
+    try { assertWarehouseAccess(req.user, updatePayload.defaultWarehouseId, 'Você só pode vincular o técnico a cidades autorizadas para sua conta.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+  }
   await technician.update(updatePayload);
 
   if (wantsPortalUser) {
@@ -317,6 +328,7 @@ exports.update = asyncHandler(async (req, res) => {
 exports.stock = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: technicianInclude });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   if (req.user?.role === 'tecnico' && Number(req.user.technicianId) !== Number(technician.id)) {
     return fail(res, 403, 'Você só pode acessar a própria caixa técnica.');
   }

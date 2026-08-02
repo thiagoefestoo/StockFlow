@@ -22,6 +22,7 @@ const {
   assertWarehouseAccess,
   movementWhereForUser,
   isPrivileged,
+  userCities,
 } = require('../utils/warehouseAccess');
 
 function nextWarehouseDeleteNumber() {
@@ -34,7 +35,7 @@ async function warehouseInventorySnapshot(warehouseId, options = {}) {
   const transaction = options.transaction || null;
   const [balances, assets] = await Promise.all([
     StockBalance.findAll({ where: { warehouseId, ownerType: 'estoque' }, include: [Material], transaction }),
-    SerializedAsset.findAll({ where: { warehouseId, ownerType: 'estoque' }, include: [Material], transaction }),
+    SerializedAsset.findAll({ where: { warehouseId, ownerType: 'estoque', status: 'em_estoque' }, include: [Material], transaction }),
   ]);
 
   const positiveBalances = balances.filter((balance) => Number(balance.quantity || 0) > 0);
@@ -147,7 +148,7 @@ exports.get = asyncHandler(async (req, res) => {
   const movementScope = movementWhereForUser(req.user, warehouse.id);
   const [balancesRaw, assets, users, technicians, movements] = await Promise.all([
     StockBalance.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material], order: [[Material, 'name', 'ASC']] }),
-    SerializedAsset.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material], order: [['serialNumber', 'ASC']], limit: 2500 }),
+    SerializedAsset.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque', status: 'em_estoque' }, include: [Material], order: [['serialNumber', 'ASC']], limit: 2500 }),
     User.findAll({ where: { warehouseIds: { [Op.contains]: [warehouse.id] } }, attributes: ['id', 'name', 'email', 'role', 'status', 'warehouseIds', 'approvalLimit'], order: [['role', 'ASC'], ['name', 'ASC']] }).catch(() => []),
     Technician.findAll({ where: { defaultWarehouseId: warehouse.id }, limit: 500, order: [['name', 'ASC']] }),
     StockMovement.findAll({
@@ -218,6 +219,12 @@ exports.reverseExport = asyncHandler(async (req, res) => {
 exports.create = asyncHandler(async (req, res) => {
   const { name, code, region, city, state, address, responsibleName, status = 'ativo', approvalLimit = 0, notes } = req.body;
   if (!name || !code) return fail(res, 400, 'Nome e número/código do estoque são obrigatórios.');
+  if (!isPrivileged(req.user)) {
+    const allowedCities = userCities(req.user).map((value) => String(value).trim().toLowerCase());
+    if (!city || !allowedCities.includes(String(city).trim().toLowerCase())) {
+      return fail(res, 403, 'Você só pode criar estoques nas cidades vinculadas à sua conta.');
+    }
+  }
   const isReverseLogistics = normalizeBoolean(req.body.isReverseLogistics, false);
   const record = await Warehouse.create({
     name,
@@ -246,6 +253,13 @@ exports.create = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const record = await Warehouse.findByPk(req.params.id);
   if (!record) return fail(res, 404, 'Estoque não encontrado.');
+  try { assertWarehouseAccess(req.user, record.id); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+  if (!isPrivileged(req.user) && req.body.city !== undefined) {
+    const allowedCities = userCities(req.user).map((value) => String(value).trim().toLowerCase());
+    if (!allowedCities.includes(String(req.body.city || '').trim().toLowerCase())) {
+      return fail(res, 403, 'Você não pode mover o estoque para uma cidade fora do vínculo da sua conta.');
+    }
+  }
   const before = record.toJSON();
   if (req.body.isReverseLogistics !== undefined) {
     const requestedType = normalizeBoolean(req.body.isReverseLogistics, record.isReverseLogistics);
@@ -265,6 +279,7 @@ exports.update = asyncHandler(async (req, res) => {
 exports.requestDelete = asyncHandler(async (req, res) => {
   const warehouse = await Warehouse.findByPk(req.params.id);
   if (!warehouse) return fail(res, 404, 'Estoque não encontrado.');
+  try { assertWarehouseAccess(req.user, warehouse.id); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
 
   const inventory = warehouse.isReverseLogistics
     ? await reverseWarehouseSnapshot(warehouse.id)
@@ -321,7 +336,10 @@ exports.transferStock = asyncHandler(async (req, res) => {
   }
 
   try {
-    if (!isPrivileged(req.user)) assertWarehouseAccess(req.user, toWarehouseId, 'Você só pode solicitar reposição para um estoque vinculado ao seu usuário.');
+    if (!isPrivileged(req.user)) {
+      assertWarehouseAccess(req.user, fromWarehouseId, 'Você não tem acesso ao estoque de origem desta transferência.');
+      assertWarehouseAccess(req.user, toWarehouseId, 'Você só pode solicitar reposição para um estoque vinculado ao seu usuário.');
+    }
   } catch (error) {
     return fail(res, error.statusCode || 403, error.message);
   }

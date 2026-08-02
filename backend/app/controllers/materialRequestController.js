@@ -12,6 +12,7 @@ const {
   Notification,
   User,
   Warehouse,
+  StockBalance,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, okPaginated, created, fail } = require('../utils/response');
@@ -20,7 +21,8 @@ const { money, qty } = require('../utils/number');
 const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
-const { userWarehouseIds, assertWarehouseAccess } = require('../utils/warehouseAccess');
+const { userWarehouseIds, assertWarehouseAccess, stockWhereForUser, isPrivileged } = require('../utils/warehouseAccess');
+const { assertTechnicianAccess } = require('../utils/technicianAccess');
 const { approveMaterialRequest, validateApprover } = require('../services/materialRequestApprovalService');
 const { Op } = require('sequelize');
 const { hasModuleAccess } = require('../config/modulePermissions');
@@ -98,16 +100,30 @@ async function resolveRequestWarehouse({ req, warehouseId, technicianId, request
       error.statusCode = 400;
       throw error;
     }
-  }
-
-  if (!selectedWarehouseId && technicianId) {
-    const technician = await Technician.findByPk(technicianId);
-    selectedWarehouseId = technician?.defaultWarehouseId || null;
+  } else {
+    const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
+    if (!technician) {
+      const error = new Error('Técnico não encontrado.');
+      error.statusCode = 404;
+      throw error;
+    }
+    assertTechnicianAccess(req.user, technician);
+    if (!technician.defaultWarehouseId) {
+      const error = new Error('O técnico não possui estoque/cidade padrão vinculado. Atualize o cadastro antes de solicitar material.');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (selectedWarehouseId && Number(selectedWarehouseId) !== Number(technician.defaultWarehouseId)) {
+      const error = new Error('A solicitação deve usar exclusivamente o estoque da cidade vinculada ao técnico.');
+      error.statusCode = 400;
+      throw error;
+    }
+    selectedWarehouseId = Number(technician.defaultWarehouseId);
   }
 
   if (selectedWarehouseId) {
-    if (req.user.role !== 'admin') {
-      assertWarehouseAccess(req.user, selectedWarehouseId, 'Você só pode solicitar material para estoques autorizados ao seu usuário.');
+    if (!isPrivileged(req.user)) {
+      assertWarehouseAccess(req.user, selectedWarehouseId, 'Você só pode solicitar material para estoques/cidades autorizados ao seu usuário.');
     }
     const warehouse = await Warehouse.findByPk(selectedWarehouseId);
     if (!warehouse || warehouse.status !== 'ativo') {
@@ -125,17 +141,52 @@ async function resolveRequestWarehouse({ req, warehouseId, technicianId, request
   return selectedWarehouseId;
 }
 
+async function availableQuantityForMaterial(material, warehouseId, transaction = null) {
+  if (material.requiresSerial) {
+    return SerializedAsset.count({
+      where: {
+        materialId: material.id,
+        warehouseId,
+        ownerType: 'estoque',
+        status: 'em_estoque',
+      },
+      transaction,
+    });
+  }
+
+  const balance = await StockBalance.sum('quantity', {
+    where: {
+      materialId: material.id,
+      warehouseId,
+      ownerType: 'estoque',
+      technicianId: null,
+    },
+    transaction,
+  });
+  return qty(balance || 0);
+}
+
 exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
+  else if (!isPrivileged(req.user)) Object.assign(where, stockWhereForUser(req.user, req.query.warehouseId));
   if (req.user.role === 'estoquista') {
     const requestFilter = stockistRequestWhere(req.user);
-    if (requestFilter) Object.assign(where, requestFilter);
+    if (requestFilter) where[Op.and] = [requestFilter];
   }
   if (req.query.status) where.status = req.query.status;
   if (req.query.requestType) where.requestType = req.query.requestType;
-  if (req.query.technicianId) where.technicianId = req.query.technicianId;
-  if (req.query.warehouseId) where.warehouseId = req.query.warehouseId;
+  if (req.query.technicianId) {
+    const filteredTechnician = await Technician.findByPk(req.query.technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
+    try {
+      assertTechnicianAccess(req.user, filteredTechnician);
+      where.technicianId = req.query.technicianId;
+    } catch (_) {
+      where.technicianId = -1;
+    }
+  }
+  // warehouseId já foi aplicado por stockWhereForUser acima. Não sobrescrever
+  // esse escopo com um parâmetro enviado pelo navegador.
   const pagination = paginationFromQuery(req.query);
   const [requests, total] = await Promise.all([
     MaterialRequest.findAll({
@@ -154,9 +205,10 @@ exports.list = asyncHandler(async (req, res) => {
 exports.summary = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.user.role === 'tecnico') filter.technicianId = req.user.technicianId || -1;
+  else if (!isPrivileged(req.user)) Object.assign(filter, stockWhereForUser(req.user));
   if (req.user.role === 'estoquista') {
     const requestFilter = stockistRequestWhere(req.user);
-    if (requestFilter) Object.assign(filter, requestFilter);
+    if (requestFilter) filter[Op.and] = [requestFilter];
   }
   const [pending, approved, delivered, rejected, total] = await Promise.all([
     MaterialRequest.count({ where: { ...filter, status: 'pendente_aprovacao' } }),
@@ -172,6 +224,9 @@ exports.get = asyncHandler(async (req, res) => {
   const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
   if (!request) return fail(res, 404, 'Solicitação não encontrada.');
   if (req.user.role === 'tecnico' && Number(request.technicianId) !== Number(req.user.technicianId)) return fail(res, 403, 'Você só pode consultar suas próprias solicitações.');
+  if (req.user.role !== 'tecnico' && !isPrivileged(req.user)) {
+    try { assertWarehouseAccess(req.user, request.warehouseId, 'Você não tem acesso à cidade desta solicitação.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+  }
   if (req.user.role === 'estoquista' && !stockistCanAccessRequest(req.user, request)) {
     return fail(res, 403, 'Você só pode consultar solicitações técnicas liberadas para sua operação ou recargas dos seus estoques autorizados.');
   }
@@ -196,8 +251,9 @@ exports.create = asyncHandler(async (req, res) => {
   let technician = null;
   if (!isStockRecharge(requestType)) {
     if (!technicianId) return fail(res, 400, 'Técnico é obrigatório para solicitação de carga técnica.');
-    technician = await Technician.findByPk(technicianId);
+    technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
     if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+    try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   }
 
   try {
@@ -232,6 +288,18 @@ exports.create = asyncHandler(async (req, res) => {
       if (!material) throw new Error('Material não encontrado na solicitação.');
       const quantity = qty(item.quantity);
       if (quantity <= 0) continue;
+
+      if (!isStockRecharge(requestType)) {
+        if (String(material.category || '').toLowerCase() === 'ferramenta' || material.allowTechnicianTransfer === false || String(material.movementPolicy || '').toLowerCase() === 'bloqueado') {
+          throw new Error(`${material.name} não está liberado para transferência à caixa do técnico.`);
+        }
+        const availableQuantity = await availableQuantityForMaterial(material, warehouseId, transaction);
+        if (availableQuantity <= 0) throw new Error(`${material.name} não possui saldo disponível no estoque da cidade do técnico.`);
+        if (quantity > availableQuantity) {
+          throw new Error(`Saldo insuficiente para ${material.name} no estoque ${warehouse?.name || warehouseId}. Disponível: ${qty(availableQuantity)} ${material.unit || 'un'}.`);
+        }
+      }
+
       const unitCost = money(item.unitCost ?? material.unitCost);
       const totalCost = money(quantity * unitCost);
       const serialNumbers = Array.isArray(item.serialNumbers)

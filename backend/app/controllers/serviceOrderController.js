@@ -9,6 +9,8 @@ const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { normalizeServiceOrderCity, resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
+const { stockWhereForUser, isPrivileged } = require('../utils/warehouseAccess');
+const { assertTechnicianAccess } = require('../utils/technicianAccess');
 
 function serviceRequiresSerial(serviceType, addressChangeType) {
   return serviceType === 'instalacao'
@@ -56,6 +58,7 @@ function replacementReference(order) {
 exports.list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.user.role === 'tecnico') where.technicianId = req.user.technicianId || -1;
+  else if (!isPrivileged(req.user)) Object.assign(where, stockWhereForUser(req.user, req.query.warehouseId));
   if (req.query.search) where[Op.or] = [{ osNumber: { [Op.iLike]: `%${req.query.search}%` } }, { customerName: { [Op.iLike]: `%${req.query.search}%` } }, { customerCpf: { [Op.iLike]: `%${req.query.search}%` } }];
   if (req.query.city) where.city = { [Op.iLike]: String(req.query.city).trim() };
   const pagination = paginationFromQuery(req.query);
@@ -78,6 +81,9 @@ exports.create = asyncHandler(async (req, res) => {
   let { technicianId, osNumber, customerName, customerCpf, customerAddress, city, serviceType = 'instalacao', addressChangeType, status, completedAt, notes, materials = [] } = req.body;
   if (req.user.role === 'tecnico') technicianId = req.user.technicianId;
   if (!technicianId) return fail(res, 400, 'Técnico não identificado.');
+  const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
+  if (!technician) return fail(res, 404, 'Técnico não encontrado.');
+  try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   if (!customerName || !customerCpf) return fail(res, 400, 'Nome do cliente e número do contrato são obrigatórios.');
   osNumber = String(osNumber || '').trim() || nextAutomaticServiceOrderNumber(technicianId);
   let operationalLocation;
@@ -169,6 +175,7 @@ exports.replacementOptions = asyncHandler(async (req, res) => {
   });
   if (!order) return fail(res, 404, 'OS não encontrada.');
   if (!order.technicianId) return fail(res, 400, 'A OS não possui técnico responsável.');
+  try { assertTechnicianAccess(req.user, order.Technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   if (req.user.role === 'tecnico' && Number(order.technicianId) !== Number(req.user.technicianId)) {
     return fail(res, 403, 'Você só pode substituir equipamentos das suas próprias ordens de serviço.');
   }
@@ -250,7 +257,11 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
       throw Object.assign(new Error('Você só pode substituir equipamentos das suas próprias ordens de serviço.'), { statusCode: 403 });
     }
 
-    const technician = await Technician.findByPk(order.technicianId, { transaction });
+    const technician = await Technician.findByPk(order.technicianId, {
+      include: [{ model: Warehouse, as: 'defaultWarehouse' }],
+      transaction,
+    });
+    assertTechnicianAccess(req.user, technician);
 
     const serviceOrderMaterial = await ServiceOrderMaterial.findOne({
       where: { serviceOrderId: order.id, assetId: oldAssetId },
@@ -425,6 +436,7 @@ exports.replaceEquipment = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const order = await ServiceOrder.findByPk(req.params.id, { include: [Technician, Warehouse, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }, equipmentReplacementInclude()] });
   if (!order) return fail(res, 404, 'OS não encontrada.');
+  try { assertTechnicianAccess(req.user, order.Technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
   const before = order.toJSON();
   const allowed = ['osNumber', 'customerName', 'customerCpf', 'customerAddress', 'serviceType', 'status', 'completedAt', 'notes'];
   for (const field of allowed) {
