@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
@@ -57,7 +58,7 @@ export default function TechnicianInbox() {
       api.get(`/material-requests?technicianId=${id}`),
     ]);
     setStock(stockRes.data.data);
-    setRequests(requestsRes.data.data || []);
+    setRequests(sortRecentFirst(requestsRes.data.data || [], ['createdAt']));
   }
   async function loadCatalog() { setMaterialsCatalog((await api.get('/materials')).data.data || []); }
 

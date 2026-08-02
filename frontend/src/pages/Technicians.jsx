@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
@@ -92,7 +93,7 @@ export default function Technicians() {
       api.get('/companies'),
       api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
-    setTechnicians(t.data.data || []);
+    setTechnicians(sortRecentFirst(t.data.data || [], ['createdAt']));
     setCompanies(c.data.data || []);
     setWarehouses(w.data.data || []);
   }
@@ -177,7 +178,7 @@ export default function Technicians() {
     setToolError('');
     try {
       const res = await api.get(`/technicians/${technicianId}/tools`);
-      setTools(res.data.data?.tools || []);
+      setTools(sortRecentFirst(res.data.data?.tools || [], ['updatedAt', 'deliveredAt', 'createdAt']));
     } catch (err) {
       setToolError(err.response?.data?.message || 'Não foi possível carregar a ficha de ferramentas do técnico.');
     } finally {
@@ -192,7 +193,7 @@ export default function Technicians() {
     }
     try {
       const res = await api.get(`/technicians/${technicianId}/tools/documents`);
-      setToolDocuments(res.data.data?.documents || []);
+      setToolDocuments(sortRecentFirst(res.data.data?.documents || [], ['signedAt', 'createdAt']));
     } catch (err) {
       setDocumentError(err.response?.data?.message || 'Não foi possível carregar os termos assinados.');
     }

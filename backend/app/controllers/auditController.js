@@ -24,7 +24,7 @@ exports.list = asyncHandler(async (req, res) => {
       attributes: { exclude: ['beforeData', 'afterData'] },
       include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
       where,
-      order: [['createdAt', 'DESC']],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
       limit,
       ...(pagination.enabled ? { offset: pagination.offset } : {}),
     }),

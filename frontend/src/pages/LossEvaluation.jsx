@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import KpiCard from '../components/KpiCard';
 import AttachmentPreview from '../components/AttachmentPreview';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
@@ -38,7 +39,7 @@ export default function LossEvaluation() {
       api.get('/stock/technician-losses'),
       api.get('/technicians').catch(() => ({ data: { data: [] } })),
     ]);
-    setLosses(lossRes.data.data || []);
+    setLosses(sortRecentFirst(lossRes.data.data || [], ['deliveredAt', 'createdAt']));
     setTechnicians(techRes.data.data || []);
     setLoading(false);
   }

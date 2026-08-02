@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import { formatQuantity } from '../utils/formatQuantity';
 
 function brl(value) {
@@ -27,6 +28,7 @@ export default function TechnicianLoadPrint() {
   const rows = useMemo(() => {
     if (!stock) return [];
     const serialized = (stock.assets || []).map((asset) => ({
+      id: asset.id,
       key: `asset-${asset.id}`,
       material: asset.Material?.name || 'Equipamento',
       category: asset.Material?.category || '-',
@@ -41,6 +43,7 @@ export default function TechnicianLoadPrint() {
     const consumables = (stock.balances || [])
       .filter((balance) => Number(balance.quantity || 0) > 0)
       .map((balance) => ({
+        id: balance.id || balance.materialId,
         key: `balance-${balance.id || balance.materialId}`,
         material: balance.Material?.name || 'Material',
         category: balance.Material?.category || '-',
@@ -52,7 +55,7 @@ export default function TechnicianLoadPrint() {
         value: Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0),
         custodySince: balance.updatedAt || balance.createdAt,
       }));
-    return [...serialized, ...consumables].sort((a, b) => a.material.localeCompare(b.material, 'pt-BR') || a.serial.localeCompare(b.serial, 'pt-BR'));
+    return sortRecentFirst([...serialized, ...consumables], ['custodySince']);
   }, [stock]);
 
   if (loadError) return <div className="panel"><strong>Não foi possível carregar a carga do técnico.</strong><p>{loadError}</p></div>;

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import AttachmentPreview from '../components/AttachmentPreview';
@@ -153,9 +154,9 @@ export default function Transfers() {
         );
       }
       const [t, requests, tec, wh] = await Promise.all(calls);
-      setTransfers(t.data.data || []);
+      setTransfers(sortRecentFirst(t.data.data || [], ['deliveredAt', 'createdAt']));
       setPagination(t.data.pagination || { page: targetPage, pageSize: 15, total: t.data.data?.length || 0, totalPages: 1 });
-      setApprovedRequests(requests.data.data || []);
+      setApprovedRequests(sortRecentFirst(requests.data.data || [], ['approvedAt', 'createdAt']));
       if (tec) setTechnicians(tec.data.data || []);
       if (wh) setWarehouses(wh.data.data || []);
       setPage(targetPage);
@@ -507,7 +508,7 @@ export default function Transfers() {
     setSourceToolsLoading(true);
     try {
       const response = await api.get(`/technicians/${fromTechnicianId}/tools`);
-      setSourceTools((response.data.data?.tools || []).filter((tool) => tool.status === 'com_tecnico'));
+      setSourceTools(sortRecentFirst((response.data.data?.tools || []).filter((tool) => tool.status === 'com_tecnico'), ['updatedAt', 'deliveredAt', 'createdAt']));
     } catch (error) {
       showNotice(error.response?.data?.message || 'Não foi possível carregar as ferramentas do técnico de origem.');
     } finally {

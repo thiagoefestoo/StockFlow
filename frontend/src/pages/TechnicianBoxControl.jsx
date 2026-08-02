@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
@@ -128,6 +129,7 @@ export default function TechnicianBoxControl() {
 
     for (const asset of box?.assets || []) {
       rows.push({
+        id: asset.id,
         key: `asset-${asset.id}`,
         type: 'Equipamento serializado',
         material: asset.Material?.name || 'Equipamento',
@@ -148,6 +150,7 @@ export default function TechnicianBoxControl() {
       if (quantity <= 0) continue;
 
       rows.push({
+        id: balance.id || balance.materialId,
         key: `balance-${balance.id || balance.materialId}`,
         type: 'Consumível / material sem serial',
         material: balance.Material?.name || 'Material',
@@ -163,7 +166,7 @@ export default function TechnicianBoxControl() {
       });
     }
 
-    return rows.sort((a, b) => String(a.material).localeCompare(String(b.material), 'pt-BR'));
+    return sortRecentFirst(rows, ['custodyStartedAt']);
   }, [box]);
 
   function assetsByMaterial(materialId) {

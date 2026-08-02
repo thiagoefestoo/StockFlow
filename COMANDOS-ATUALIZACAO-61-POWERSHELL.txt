@@ -1,0 +1,152 @@
+ATUALIZAÇÃO 61 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NECESSÁRIOS NA PASTA DOWNLOADS
+---------------------------------------
+atualizacao-61-ordenacao-listas-recentes.zip
+APLICAR-ATUALIZACAO-61.ps1
+
+1. APLICAR COM BACKUP E RESTAURAÇÃO AUTOMÁTICA
+-----------------------------------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-61-ordenacao-listas-recentes.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-61.ps1"
+
+if (!(Test-Path -LiteralPath $repo)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. TESTE LOCAL
+--------------
+
+# Janela 1
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+npm start --prefix backend
+
+# Janela 2
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+npm start --prefix frontend
+
+# Abrir
+http://localhost:3000
+
+Testar especialmente:
+- Transferências;
+- Ordens de serviço;
+- Solicitações;
+- Movimentações;
+- Entradas;
+- Caixa do técnico;
+- Ferramentas;
+- Auditoria.
+
+3. COMMIT E PUSH
+----------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/operationsController.js",
+    "backend/app/controllers/notificationController.js",
+    "backend/app/controllers/auditController.js",
+    "backend/app/controllers/technicianController.js",
+    "backend/app/controllers/stockController.js",
+    "backend/app/controllers/technicianToolController.js",
+    "backend/app/controllers/userController.js",
+    "backend/app/controllers/serviceOrderController.js",
+    "backend/app/controllers/materialController.js",
+    "backend/app/controllers/warehouseController.js",
+    "backend/app/controllers/batchController.js",
+    "backend/app/controllers/crudHelpers.js",
+    "backend/app/controllers/transferController.js",
+    "backend/app/controllers/biController.js",
+    "backend/app/controllers/materialRequestController.js",
+    "backend/app/controllers/approvalController.js",
+    "backend/app/services/reverseLogisticsService.js",
+    "frontend/src/utils/recentFirst.js",
+    "frontend/src/pages/Technicians.jsx",
+    "frontend/src/pages/Users.jsx",
+    "frontend/src/pages/Warehouses.jsx",
+    "frontend/src/pages/Receiving.jsx",
+    "frontend/src/pages/Transfers.jsx",
+    "frontend/src/pages/Stock.jsx",
+    "frontend/src/pages/Patrimony.jsx",
+    "frontend/src/pages/TechnicianLosses.jsx",
+    "frontend/src/pages/TechnicianInbox.jsx",
+    "frontend/src/pages/LossEvaluation.jsx",
+    "frontend/src/pages/ServiceOrders.jsx",
+    "frontend/src/pages/TechnicianLoadPrint.jsx",
+    "frontend/src/pages/Approvals.jsx",
+    "frontend/src/pages/TechnicianBoxControl.jsx",
+    "frontend/src/pages/Audit.jsx",
+    "frontend/src/pages/TechnicianPortal.jsx",
+    "frontend/src/pages/MaterialRequests.jsx",
+    "frontend/src/pages/MovementHistory.jsx",
+    "frontend/build",
+    "ATUALIZACAO-61-ORDENACAO-LISTAS-RECENTES.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-61.txt",
+    "COMANDOS-ATUALIZACAO-61-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-61.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O git diff --check encontrou problemas."
+}
+
+git status --short
+
+git commit -m "Ordena listas das mais recentes para as mais antigas"
+
+git push origin main
+
+4. REDEPLOY
+-----------
+
+Ordem recomendada:
+
+1. redeploy do backend no Render;
+2. aguardar o backend finalizar;
+3. testar a API;
+4. redeploy do frontend na Vercel;
+5. sair e entrar novamente no sistema;
+6. usar Ctrl+F5 para limpar a versão antiga do navegador.
+
+Teste de saúde:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+5. CONFERÊNCIA RÁPIDA
+---------------------
+
+Em cada página, confirme que:
+- o primeiro registro possui a data mais recente;
+- registros da mesma data aparecem pelo maior ID primeiro;
+- trocar de página não repete ou embaralha registros;
+- filtros e buscas continuam funcionando;
+- nenhum saldo ou status foi alterado pela atualização.

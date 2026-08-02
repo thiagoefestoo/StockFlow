@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
@@ -123,7 +124,7 @@ export default function Receiving() {
         requests.push(api.get('/materials'), api.get('/warehouses').catch(() => ({ data: { data: [] } })));
       }
       const [b, m, w] = await Promise.all(requests);
-      setBatches(b.data.data || []);
+      setBatches(sortRecentFirst(b.data.data || [], ['receivedAt', 'createdAt']));
       setPagination(b.data.pagination || { page: targetPage, pageSize: 15, total: b.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
       if (m) setMaterials(m.data.data || []);

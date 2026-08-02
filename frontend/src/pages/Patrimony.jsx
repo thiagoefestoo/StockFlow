@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import KpiCard from '../components/KpiCard';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
@@ -27,7 +28,7 @@ export default function Patrimony() {
     setLoading(true);
     try {
       const response = await api.get('/stock/assets', { params: { page: targetPage, pageSize: PAGE_SIZE } });
-      setAssets(response.data.data || []);
+      setAssets(sortRecentFirst(response.data.data || [], ['updatedAt', 'lastMovementAt', 'createdAt']));
       setPagination(response.data.pagination || { page: targetPage, pageSize: PAGE_SIZE, total: response.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
       setMultiSearchActive(false);
@@ -75,7 +76,7 @@ export default function Patrimony() {
       }
 
       const found = Array.from(byId.values());
-      setAssets(found);
+      setAssets(sortRecentFirst(found, ['updatedAt', 'lastMovementAt', 'createdAt']));
       setSerial(terms.join(', '));
       setDetails(null);
       setSearchModal(false);

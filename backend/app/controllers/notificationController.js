@@ -29,7 +29,7 @@ exports.list = asyncHandler(async (req, res) => {
     Notification.findAll({
       where,
       attributes: ['id', 'type', 'severity', 'title', 'message', 'status', 'route', 'createdAt'],
-      order: [['createdAt', 'DESC']],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
       limit,
     }),
     Notification.count({ where: unreadWhere }),

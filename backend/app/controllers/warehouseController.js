@@ -100,7 +100,7 @@ exports.list = asyncHandler(async (req, res) => {
       { region: { [Op.iLike]: q } },
     ];
   }
-  const warehouses = await Warehouse.findAll({ where, order: [['isReverseLogistics', 'ASC'], ['status', 'ASC'], ['city', 'ASC'], ['name', 'ASC']], limit: 500 });
+  const warehouses = await Warehouse.findAll({ where, order: [['createdAt', 'DESC'], ['id', 'DESC']], limit: 500 });
   const withStats = [];
   for (const warehouse of warehouses) {
     withStats.push({ ...warehouse.toJSON(), ...(await warehouseStats(warehouse)) });
@@ -119,7 +119,7 @@ exports.get = asyncHandler(async (req, res) => {
       User.findAll({
         where: { warehouseIds: { [Op.contains]: [warehouse.id] } },
         attributes: ['id', 'name', 'email', 'role', 'status', 'warehouseIds', 'approvalLimit'],
-        order: [['role', 'ASC'], ['name', 'ASC']],
+        order: [['createdAt', 'DESC'], ['id', 'DESC']],
       }).catch(() => []),
     ]);
 
@@ -147,10 +147,10 @@ exports.get = asyncHandler(async (req, res) => {
 
   const movementScope = movementWhereForUser(req.user, warehouse.id);
   const [balancesRaw, assets, users, technicians, movements] = await Promise.all([
-    StockBalance.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material], order: [[Material, 'name', 'ASC']] }),
-    SerializedAsset.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque', status: 'em_estoque' }, include: [Material], order: [['serialNumber', 'ASC']], limit: 2500 }),
-    User.findAll({ where: { warehouseIds: { [Op.contains]: [warehouse.id] } }, attributes: ['id', 'name', 'email', 'role', 'status', 'warehouseIds', 'approvalLimit'], order: [['role', 'ASC'], ['name', 'ASC']] }).catch(() => []),
-    Technician.findAll({ where: { defaultWarehouseId: warehouse.id }, limit: 500, order: [['name', 'ASC']] }),
+    StockBalance.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque' }, include: [Material], order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']] }),
+    SerializedAsset.findAll({ where: { warehouseId: warehouse.id, ownerType: 'estoque', status: 'em_estoque' }, include: [Material], order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']], limit: 2500 }),
+    User.findAll({ where: { warehouseIds: { [Op.contains]: [warehouse.id] } }, attributes: ['id', 'name', 'email', 'role', 'status', 'warehouseIds', 'approvalLimit'], order: [['createdAt', 'DESC'], ['id', 'DESC']] }).catch(() => []),
+    Technician.findAll({ where: { defaultWarehouseId: warehouse.id }, limit: 500, order: [['createdAt', 'DESC'], ['id', 'DESC']] }),
     StockMovement.findAll({
       where: movementScope || { [Op.or]: [{ fromWarehouseId: warehouse.id }, { toWarehouseId: warehouse.id }] },
       include: [
@@ -162,7 +162,7 @@ exports.get = asyncHandler(async (req, res) => {
         { model: Technician, as: 'toTechnician' },
         { model: Technician, as: 'fromTechnician' },
       ],
-      order: [['movementAt', 'DESC']],
+      order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
       limit: 800,
     }),
   ]);

@@ -65,7 +65,7 @@ exports.list = asyncHandler(async (req, res) => {
   const query = {
     where,
     include: [Technician, Warehouse, { model: ServiceOrderMaterial, include: [Material, SerializedAsset] }, equipmentReplacementInclude()],
-    order: [['createdAt', 'DESC']],
+    order: [['createdAt', 'DESC'], ['id', 'DESC']],
     ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 400 }),
   };
   const [orders, total] = await Promise.all([

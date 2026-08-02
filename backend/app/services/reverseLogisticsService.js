@@ -65,9 +65,17 @@ function groupReverseInventory(rows = []) {
     .map((group) => ({
       ...group,
       quantity: qty(group.quantity),
-      serials: group.serials.sort((a, b) => String(a.serialNumber).localeCompare(String(b.serialNumber), 'pt-BR')),
+      serials: group.serials.sort((a, b) => {
+        const dateDiff = new Date(b.receivedAt || 0).getTime() - new Date(a.receivedAt || 0).getTime();
+        if (dateDiff) return dateDiff;
+        return Number(b.itemId || 0) - Number(a.itemId || 0);
+      }),
     }))
-    .sort((a, b) => String(a.description).localeCompare(String(b.description), 'pt-BR'));
+    .sort((a, b) => {
+      const dateDiff = new Date(b.lastReceivedAt || 0).getTime() - new Date(a.lastReceivedAt || 0).getTime();
+      if (dateDiff) return dateDiff;
+      return Number((b.itemIds || [])[0] || 0) - Number((a.itemIds || [])[0] || 0);
+    });
 }
 
 async function reverseWarehouseSnapshot(warehouseId, options = {}) {
@@ -131,7 +139,7 @@ async function reverseWarehouseDetails(warehouseId) {
       where: { warehouseId },
       attributes: { exclude: ['proofAttachmentData'] },
       include: [{ model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }],
-      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
+      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
       limit: 500,
     }),
     ReverseLogisticsExit.findAll({
@@ -140,7 +148,7 @@ async function reverseWarehouseDetails(warehouseId) {
         { model: ReverseLogisticsExitItem, as: 'items' },
         { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
       ],
-      order: [['createdAt', 'DESC']],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
       limit: 500,
     }),
   ]);
@@ -163,7 +171,7 @@ async function reverseWarehouseExportDetails(warehouseId) {
         { model: ReverseLogisticsItem, as: 'items' },
         { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
       ],
-      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
+      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
     }),
     ReverseLogisticsExit.findAll({
       where: { warehouseId },
@@ -171,7 +179,7 @@ async function reverseWarehouseExportDetails(warehouseId) {
         { model: ReverseLogisticsExitItem, as: 'items' },
         { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
       ],
-      order: [['createdAt', 'DESC']],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
     }),
   ]);
 

@@ -28,7 +28,7 @@ exports.list = asyncHandler(async (req, res) => {
         { model: StockBatchItem, include: [Material] },
       ],
       distinct: true,
-      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
+      order: [['receivedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
       limit,
       ...(pagination.enabled ? { offset: pagination.offset } : {}),
     }),

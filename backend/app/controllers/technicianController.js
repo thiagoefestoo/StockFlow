@@ -186,7 +186,7 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
 }
 
 exports.list = asyncHandler(async (req, res) => {
-  const allTechnicians = await Technician.findAll({ include: technicianInclude, order: [['name', 'ASC']] });
+  const allTechnicians = await Technician.findAll({ include: technicianInclude, order: [['createdAt', 'DESC'], ['id', 'DESC']] });
   const technicians = filterTechniciansForUser(req.user, allTechnicians);
   const data = [];
   for (const technician of technicians) {
@@ -336,13 +336,13 @@ exports.stock = asyncHandler(async (req, res) => {
   const rawAssets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material],
-    order: [['custodyStartedAt', 'ASC']],
+    order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
 
   const rawBalances = await StockBalance.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
     include: [Material],
-    order: [[Material, 'name', 'ASC']],
+    order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
 
   // Ferramentas pertencem exclusivamente à ficha do técnico e não à caixa de consumíveis.
@@ -358,7 +358,7 @@ exports.stock = asyncHandler(async (req, res) => {
       { model: Technician, as: 'toTechnician' },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
     ],
-    order: [['movementAt', 'DESC']],
+    order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
     limit: 80,
   });
   const movements = rawMovements.filter((movement) => String(movement.Material?.category || '').toLowerCase() !== 'ferramenta' && movement.toOwnerType !== 'ficha_tecnico' && movement.fromOwnerType !== 'ficha_tecnico');
@@ -366,13 +366,13 @@ exports.stock = asyncHandler(async (req, res) => {
   const transfers = await Transfer.findAll({
     where: { technicianId: technician.id, transferType: { [Op.ne]: 'ferramenta' } },
     include: [{ model: TransferItem, include: [Material, SerializedAsset] }],
-    order: [['deliveredAt', 'DESC']],
+    order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
     limit: 30,
   });
 
   const orders = await ServiceOrder.findAll({
     where: { technicianId: technician.id },
-    order: [['createdAt', 'DESC']],
+    order: [['createdAt', 'DESC'], ['id', 'DESC']],
     limit: 40,
   });
 
@@ -380,7 +380,7 @@ exports.stock = asyncHandler(async (req, res) => {
     ? await TechnicianTool.findAll({
       where: { technicianId: technician.id },
       include: [Material, { model: Warehouse, as: 'sourceWarehouse' }],
-      order: [['status', 'ASC'], ['deliveredAt', 'ASC']],
+      order: [['updatedAt', 'DESC'], ['deliveredAt', 'DESC'], ['id', 'DESC']],
     }).catch(() => [])
     : [];
   const activeTools = tools.filter((tool) => tool.status === 'com_tecnico');

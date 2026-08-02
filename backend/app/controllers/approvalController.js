@@ -200,7 +200,7 @@ exports.list = asyncHandler(async (req, res) => {
           { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
           { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
         ],
-        order: [['requestedAt', 'DESC']],
+        order: [['requestedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
         ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 500 }),
       }),
       pagination.enabled ? ApprovalRequest.count({ where }) : Promise.resolve(0),
@@ -219,7 +219,7 @@ exports.list = asyncHandler(async (req, res) => {
       { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
       { model: User, as: 'decidedBy', attributes: ['id', 'name', 'email', 'role'] },
     ],
-    order: [['requestedAt', 'DESC']],
+    order: [['requestedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
     limit: 2000,
   });
   const enriched = await Promise.all(approvals.map(enrichApproval));

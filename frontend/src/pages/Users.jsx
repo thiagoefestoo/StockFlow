@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
@@ -106,7 +107,7 @@ export default function Users() {
   async function load() {
     const params = new URLSearchParams(filters).toString();
     const [u, w] = await Promise.all([api.get(`/users?${params}`), api.get('/warehouses').catch(() => ({ data: { data: [] } }))]);
-    setUsers(u.data.data.users || []);
+    setUsers(sortRecentFirst(u.data.data.users || [], ['createdAt']));
     setStats(u.data.data.stats || {});
     setWarehouses(w.data.data || []);
   }

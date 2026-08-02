@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import KpiCard from '../components/KpiCard';
 import Pagination from '../components/Pagination';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
@@ -206,7 +207,7 @@ export default function Audit() {
       if (entity) params.entity = entity;
       if (search.trim()) params.search = search.trim();
       const res = await api.get('/audit', { params });
-      setLogs(res.data.data || []);
+      setLogs(sortRecentFirst(res.data.data || [], ['createdAt']));
       setPagination(res.data.pagination || { page: targetPage, pageSize: 15, total: res.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
     } catch (error) {

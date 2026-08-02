@@ -131,7 +131,7 @@ exports.list = asyncHandler(async (req, res) => {
       where,
       attributes: { exclude: ['attachmentData'] },
       include: transferInclude,
-      order: [['deliveredAt', 'DESC']],
+      order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
       ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 300 }),
     }),
     pagination.enabled ? Transfer.count({ where }) : Promise.resolve(0),

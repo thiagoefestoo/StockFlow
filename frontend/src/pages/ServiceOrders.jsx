@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import Pagination from '../components/Pagination';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
@@ -32,7 +33,7 @@ export default function ServiceOrders() {
     setLoading(true);
     try {
       const response = await api.get('/service-orders', { params: { search, city: selectedCity || undefined, page: targetPage, pageSize: 15 } });
-      setOrders(response.data.data || []);
+      setOrders(sortRecentFirst(response.data.data || [], ['createdAt']));
       setPagination(response.data.pagination || { page: targetPage, pageSize: 15, total: response.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
     } catch (error) {

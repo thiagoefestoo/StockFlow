@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import { useAuth } from '../contexts/AuthContext';
 import KpiCard from '../components/KpiCard';
 import OperationReviewModal from '../components/OperationReviewModal';
@@ -29,7 +30,7 @@ export default function TechnicianPortal() {
   async function loadStock(id = selectedTech) {
     if (!id) return;
     setStock((await api.get(`/technicians/${id}/stock`)).data.data);
-    setRequests((await api.get(`/material-requests?technicianId=${id}`)).data.data || []);
+    setRequests(sortRecentFirst((await api.get(`/material-requests?technicianId=${id}`)).data.data || [], ['createdAt']));
   }
   useEffect(() => { loadTechs(); if (selectedTech) loadStock(selectedTech); }, []);
 

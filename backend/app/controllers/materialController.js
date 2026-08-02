@@ -58,7 +58,7 @@ exports.list = asyncHandler(async (req, res) => {
   const visibleWarehouseWhere = { [Op.and]: warehouseFilters };
 
   const [records, visibleWarehouses] = await Promise.all([
-    Material.findAll({ where: materialWhere, order: [['name', 'ASC']] }),
+    Material.findAll({ where: materialWhere, order: [['createdAt', 'DESC'], ['id', 'DESC']] }),
     Warehouse.findAll({
       where: visibleWarehouseWhere,
       attributes: ['id', 'name', 'code', 'city', 'region', 'state', 'status'],

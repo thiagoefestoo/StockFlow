@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
@@ -107,7 +108,7 @@ export default function Stock() {
       api.get('/materials'),
       api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
-    setMaterials(materialsResponse.data.data || []);
+    setMaterials(sortRecentFirst(materialsResponse.data.data || [], ['createdAt']));
     setWarehouses(warehousesResponse.data.data || []);
   }
 

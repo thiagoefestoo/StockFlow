@@ -130,7 +130,7 @@ exports.list = asyncHandler(async (req, res) => {
   if (role) where.role = role;
   if (includeDeleted !== 'true') where.deletedAt = null;
 
-  const users = await User.findAll({ where, include: [{ model: Technician, include: [ContractorCompany] }], order: [['createdAt', 'DESC']] });
+  const users = await User.findAll({ where, include: [{ model: Technician, include: [ContractorCompany] }], order: [['createdAt', 'DESC'], ['id', 'DESC']] });
   let list = users.map(hide);
   if (status) list = list.filter((u) => u.accessStatus === status || u.status === status);
 
@@ -161,7 +161,7 @@ exports.get = asyncHandler(async (req, res) => {
   const audits = await AuditLog.findAll({
     where: { entity: 'User', entityId: String(user.id) },
     include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'email', 'role'] }],
-    order: [['createdAt', 'DESC']],
+    order: [['createdAt', 'DESC'], ['id', 'DESC']],
     limit: 30,
   });
   return ok(res, { user: hide(user), audits });

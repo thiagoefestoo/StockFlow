@@ -1,0 +1,58 @@
+ATUALIZAÇÃO 61 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main.zip
+Projeto aplicado: StockFlow-main
+
+OBJETIVO
+--------
+Exibir as listas cronológicas do sistema das mais recentes para as mais antigas.
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: Sintaxe validada em 103 arquivos JS.
+
+2. Frontend
+   Comando: CI=true npm run build --prefix frontend
+   Resultado: Compiled successfully.
+   JavaScript: build/static/js/main.464a76e9.js
+   CSS: build/static/css/main.4fcda747.css
+
+3. Auditoria estática
+   - transferências com data e ID decrescentes;
+   - OS com criação e ID decrescentes;
+   - solicitações com criação e ID decrescentes;
+   - entradas com recebimento, criação e ID decrescentes;
+   - movimentações com data, criação e ID decrescentes;
+   - ferramentas e documentos com ordem recente;
+   - históricos aninhados com ordem recente;
+   - camada defensiva no frontend aplicada às páginas cronológicas.
+
+4. Segurança operacional
+   - nenhuma migration;
+   - nenhuma alteração de saldo;
+   - nenhuma exclusão de transferência, OS ou documento;
+   - nenhum arquivo .env no pacote;
+   - nenhuma pasta .git no pacote;
+   - nenhum node_modules no pacote;
+   - uploads de produção não incluídos.
+
+OBSERVAÇÃO SOBRE DEPENDÊNCIAS
+-----------------------------
+A build foi concluída com dependências compatíveis já disponíveis no ambiente.
+Uma reinstalação limpa não pôde ser validada neste ambiente porque o registro npm
+interno não disponibilizou o pacote yocto-queue@0.1.0. Isso não foi erro do código.
+O aplicador só executa npm install quando node_modules não existir no computador.
+
+ORDENAÇÕES NÃO CRONOLÓGICAS PRESERVADAS
+----------------------------------------
+Seletores alfabéticos, seriais disponíveis, rankings, FIFO de logística reversa
+e rotinas internas de consolidação foram mantidos em sua ordem operacional.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA COM BACKUP E TESTE LOCAL.

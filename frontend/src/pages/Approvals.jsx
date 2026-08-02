@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
@@ -66,7 +67,7 @@ export default function Approvals() {
     try {
       setMessage('');
       const response = await api.get('/approvals', { params: { status: status || undefined, page: targetPage, pageSize: 15 } });
-      setApprovals(response.data.data || []);
+      setApprovals(sortRecentFirst(response.data.data || [], ['requestedAt', 'createdAt']));
       setPagination(response.data.pagination || { page: targetPage, pageSize: 15, total: response.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
     } catch (error) {

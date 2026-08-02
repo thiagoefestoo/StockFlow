@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
@@ -70,7 +71,7 @@ export default function MaterialRequests() {
         requestsToRun.push(api.get('/warehouses?operationalOnly=true'));
       }
       const [reqRes, sumRes, whRes] = await Promise.all(requestsToRun);
-      setRequests(reqRes.data.data || []);
+      setRequests(sortRecentFirst(reqRes.data.data || [], ['createdAt']));
       setPagination(reqRes.data.pagination || { page: targetPage, pageSize: 15, total: reqRes.data.data?.length || 0, totalPages: 1 });
       setSummary(sumRes.data.data || {});
       if (whRes) setWarehouses(whRes.data.data || []);

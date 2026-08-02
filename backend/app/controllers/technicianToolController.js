@@ -97,7 +97,7 @@ exports.list = asyncHandler(async (req, res) => {
   const tools = await TechnicianTool.findAll({
     where: { technicianId: technician.id },
     include: toolInclude,
-    order: [['status', 'ASC'], ['deliveredAt', 'ASC']],
+    order: [['updatedAt', 'DESC'], ['deliveredAt', 'DESC'], ['id', 'DESC']],
   });
 
   const active = tools.filter((tool) => tool.status === 'com_tecnico');
@@ -925,7 +925,7 @@ exports.termData = asyncHandler(async (req, res) => {
   const tools = await TechnicianTool.findAll({
     where: { technicianId: technician.id },
     include: toolInclude,
-    order: [['status', 'ASC'], ['deliveredAt', 'ASC']],
+    order: [['updatedAt', 'DESC'], ['deliveredAt', 'DESC'], ['id', 'DESC']],
   });
   const active = tools.filter((tool) => tool.status === 'com_tecnico');
 
@@ -948,7 +948,7 @@ exports.listDocuments = asyncHandler(async (req, res) => {
     where: { technicianId: technician.id },
     attributes: { exclude: ['documentData'] },
     include: [{ model: User, as: 'createdBy', attributes: ['id', 'name', 'email'] }],
-    order: [['signedAt', 'DESC'], ['createdAt', 'DESC']],
+    order: [['signedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
 
   return ok(res, {

@@ -5,7 +5,7 @@ const { writeAudit } = require('../services/auditService');
 function crudController(Model, entity, include = []) {
   return {
     list: asyncHandler(async (req, res) => {
-      const records = await Model.findAll({ include, order: [['createdAt', 'DESC']] });
+      const records = await Model.findAll({ include, order: [['createdAt', 'DESC'], ['id', 'DESC']] });
       return ok(res, records);
     }),
     get: asyncHandler(async (req, res) => {

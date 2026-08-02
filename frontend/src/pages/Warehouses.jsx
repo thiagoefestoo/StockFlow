@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst, sortNestedRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
@@ -294,7 +295,7 @@ export default function Warehouses() {
       api.get('/warehouses'),
       api.get('/materials').catch(() => ({ data: { data: [] } })),
     ]);
-    setRows(w.data.data || []);
+    setRows(sortRecentFirst(w.data.data || [], ['createdAt']));
     setMaterials(m.data.data || []);
   }
 
@@ -304,7 +305,7 @@ export default function Warehouses() {
       return;
     }
     const res = await api.get(`/stock/assets?ownerType=estoque&status=em_estoque&warehouseId=${fromWarehouseId}&limit=2500`);
-    setAvailableAssets(res.data.data || []);
+    setAvailableAssets(sortRecentFirst(res.data.data || [], ['updatedAt', 'createdAt']));
   }
 
   useEffect(() => { load(); }, []);
@@ -339,7 +340,15 @@ export default function Warehouses() {
 
   async function openDetails(row) {
     const res = await api.get(`/warehouses/${row.id}`);
-    setDetails(res.data.data);
+    setDetails(sortNestedRecentFirst(res.data.data, {
+      reverseEntries: ['receivedAt', 'createdAt'],
+      reverseExits: ['createdAt'],
+      users: ['createdAt'],
+      technicians: ['createdAt'],
+      assets: ['updatedAt', 'createdAt'],
+      balances: ['updatedAt', 'createdAt'],
+      movements: ['movementAt', 'createdAt'],
+    }));
   }
 
   async function downloadDetailsExcel() {
@@ -451,7 +460,13 @@ export default function Warehouses() {
       setMessage('');
       const response = await api.get(`/warehouses/${row.id}`);
       setReverseExitWarehouse(row);
-      setReverseExitDetails(response.data.data);
+      setReverseExitDetails(sortNestedRecentFirst(response.data.data, {
+        reverseEntries: ['receivedAt', 'createdAt'],
+        reverseExits: ['createdAt'],
+        assets: ['updatedAt', 'createdAt'],
+        balances: ['updatedAt', 'createdAt'],
+        movements: ['movementAt', 'createdAt'],
+      }));
       setReverseExitForm(emptyReverseExit());
       setReverseExitModal(true);
     } catch (error) {

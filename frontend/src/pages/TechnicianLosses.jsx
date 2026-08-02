@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import AttachmentPreview from '../components/AttachmentPreview';
@@ -63,7 +64,7 @@ export default function TechnicianLosses() {
       api.get('/stock/technician-losses'),
     ]);
     setTechnicians(techRes.data.data || []);
-    setLosses(lossRes.data.data || []);
+    setLosses(sortRecentFirst(lossRes.data.data || [], ['deliveredAt', 'createdAt']));
   }
 
   async function loadTechResources(technicianId) {

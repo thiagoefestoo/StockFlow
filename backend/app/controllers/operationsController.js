@@ -239,8 +239,8 @@ exports.cockpit = asyncHandler(async (req, res) => {
     Notification.count({ where: { status: 'nao_lida' } }),
     SerializedAsset.findAll({ where: { ownerType: 'tecnico', ...(selectedCity ? { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } } : {}) }, include: [Material, Technician] }),
     SerializedAsset.findAll({ where: { ownerType: 'estoque', warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } }, include: [Material] }),
-    StockMovement.findAll({ where: { [Op.and]: [movementOutsideReverse(reverseIds), movementCityWhere] }, include: [Material, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }], order: [['movementAt', 'DESC']], limit: 12 }),
-    MaterialRequest.findAll({ where: requestCityWhere, include: [Technician], order: [['createdAt', 'DESC']], limit: 8 }),
+    StockMovement.findAll({ where: { [Op.and]: [movementOutsideReverse(reverseIds), movementCityWhere] }, include: [Material, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }], order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']], limit: 12 }),
+    MaterialRequest.findAll({ where: requestCityWhere, include: [Technician], order: [['createdAt', 'DESC'], ['id', 'DESC']], limit: 8 }),
     StockBalance.findAll({ include: [Material, Technician] }),
   ]);
 

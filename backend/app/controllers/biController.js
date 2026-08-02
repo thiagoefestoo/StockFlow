@@ -340,7 +340,7 @@ exports.warehouseValues = asyncHandler(async (req, res) => {
   const warehouses = await Warehouse.findAll({
     where: { ...warehouseListWhere(req.user), isReverseLogistics: false },
     attributes: ['id', 'name', 'code', 'city', 'region', 'status'],
-    order: [['status', 'ASC'], ['city', 'ASC'], ['name', 'ASC']],
+    order: [['id', 'DESC']],
   });
   const warehouseIds = warehouses.map((warehouse) => Number(warehouse.id)).filter(Number.isFinite);
 
@@ -676,7 +676,7 @@ async function loadBiData(filters, requested = {}) {
             { model: StockBatchItem, attributes: ['id', 'batchId', 'materialId', 'quantity', 'unitCost', 'totalCost', 'condition'], include: [materialInclude()] },
             { association: 'createdBy', attributes: ['id', 'name', 'email'] },
           ],
-          order: [['receivedAt', 'DESC'], ['createdAt', 'DESC']],
+          order: [['receivedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
           limit: 1500,
         })
       : Promise.resolve([]),
@@ -691,7 +691,7 @@ async function loadBiData(filters, requested = {}) {
             { model: Technician, attributes: ['id', 'name', 'companyId', 'status', 'type'] },
             { model: TransferItem, attributes: ['id', 'transferId', 'materialId', 'quantity', 'unitCost', 'totalCost', 'serialNumber', 'itemType'], include: [materialInclude()] },
           ],
-          order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC']],
+          order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
           limit: 1500,
         })
       : Promise.resolve([]),
@@ -706,7 +706,7 @@ async function loadBiData(filters, requested = {}) {
             { model: Technician, attributes: ['id', 'name', 'companyId', 'status', 'type'] },
             { model: ServiceOrderMaterial, attributes: ['id', 'serviceOrderId', 'materialId', 'quantity', 'unitCost', 'totalCost', 'serialNumber'], include: [materialInclude()] },
           ],
-          order: [['createdAt', 'DESC']],
+          order: [['createdAt', 'DESC'], ['id', 'DESC']],
           limit: 1500,
         })
       : Promise.resolve([]),
@@ -725,7 +725,7 @@ async function loadBiData(filters, requested = {}) {
             { model: Technician, as: 'toTechnician', attributes: ['id', 'name', 'companyId'] },
             { association: 'createdBy', attributes: ['id', 'name', 'email'] },
           ],
-          order: [['movementAt', 'DESC']],
+          order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
           limit: 2000,
         })
       : Promise.resolve([]),
@@ -741,7 +741,7 @@ async function loadBiData(filters, requested = {}) {
           where: dateWhere('createdAt', filters),
           attributes: ['id', 'requestNumber', 'status', 'priority', 'totalQuantity', 'totalValue', 'technicianId', 'warehouseId', 'createdAt'],
           include: [{ model: Technician, attributes: ['id', 'name', 'companyId'] }],
-          order: [['createdAt', 'DESC']],
+          order: [['createdAt', 'DESC'], ['id', 'DESC']],
           limit: 1000,
         })
       : Promise.resolve([]),
@@ -749,7 +749,7 @@ async function loadBiData(filters, requested = {}) {
       ? ApprovalRequest.findAll({
           where: dateWhere('createdAt', filters),
           attributes: ['id', 'workflowCode', 'entityType', 'entityId', 'title', 'status', 'priority', 'amount', 'payload', 'createdAt', 'requestedAt', 'decidedAt'],
-          order: [['createdAt', 'DESC']],
+          order: [['createdAt', 'DESC'], ['id', 'DESC']],
           limit: 1000,
         })
       : Promise.resolve([]),
@@ -1052,7 +1052,7 @@ exports.audit = asyncHandler(async (req, res) => {
       where: dateWhere('createdAt', filters),
       attributes: ['id', 'action', 'entity', 'entityId', 'message', 'ip', 'actorId', 'createdAt'],
       include: [{ association: 'actor', attributes: ['id', 'name', 'email'] }],
-      order: [['createdAt', 'DESC']],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
       limit: 1000,
     }),
     SerializedAsset.findAll({

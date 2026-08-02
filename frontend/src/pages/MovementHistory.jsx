@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
+import { sortRecentFirst } from '../utils/recentFirst';
 import KpiCard from '../components/KpiCard';
 import Pagination from '../components/Pagination';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
@@ -45,7 +46,7 @@ export default function MovementHistory() {
       const requests = [api.get('/stock/movements', { params })];
       if (refreshTechnicians || !technicians.length) requests.push(api.get('/technicians'));
       const [mov, tech] = await Promise.all(requests);
-      setRows(mov.data.data || []);
+      setRows(sortRecentFirst(mov.data.data || [], ['movementAt', 'createdAt']));
       setPagination(mov.data.pagination || { page: targetPage, pageSize: 15, total: mov.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
       if (tech) setTechnicians(tech.data.data || []);

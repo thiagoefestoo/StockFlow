@@ -192,7 +192,7 @@ exports.list = asyncHandler(async (req, res) => {
     MaterialRequest.findAll({
       where,
       include: includeFull(),
-      order: [['createdAt', 'DESC']],
+      order: [['createdAt', 'DESC'], ['id', 'DESC']],
       ...(pagination.enabled ? { limit: pagination.limit, offset: pagination.offset } : { limit: 500 }),
     }),
     pagination.enabled ? MaterialRequest.count({ where }) : Promise.resolve(0),
