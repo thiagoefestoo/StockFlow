@@ -1,0 +1,101 @@
+ATUALIZAÇÃO 63 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-63-cidade-solicitacao-material.zip
+APLICAR-ATUALIZACAO-63.ps1
+
+1. APLICAR NO REPOSITÓRIO LOCAL
+-------------------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-63-cidade-solicitacao-material.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-63.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/materialRequestController.js",
+    "frontend/src/pages/MaterialRequests.jsx",
+    "ATUALIZACAO-63-CIDADE-SOLICITACAO-MATERIAL.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-63.txt",
+    "COMANDOS-ATUALIZACAO-63-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-63.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Exibe cidade nas solicitações de material"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+Ordem recomendada:
+
+1. push concluído no GitHub;
+2. redeploy do backend no Render;
+3. aguardar o backend ficar saudável;
+4. redeploy do frontend na Vercel;
+5. sair e entrar novamente no sistema;
+6. pressionar Ctrl+F5.
+
+4. TESTAR A API
+---------------
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+5. CONFERÊNCIA
+--------------
+
+Na página Solicitações de material:
+
+- confirmar a nova coluna Cidade;
+- abrir Detalhes e confirmar Cidade da solicitação;
+- verificar Vila Velha e São Pedro da Aldeia;
+- confirmar que filtros, aprovação e entrega continuam funcionando;
+- confirmar que nenhuma quantidade ou status foi alterado.

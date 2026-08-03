@@ -23,6 +23,15 @@ function statusLabel(value) {
 function requestTypeLabel(value) {
   return value === 'recarga_estoque' ? 'Recarga de estoque' : 'Carga para técnico';
 }
+function requestCityLabel(request) {
+  const warehouse = request?.Warehouse;
+  const technicianWarehouse = request?.Technician?.defaultWarehouse;
+  const city = warehouse?.city || technicianWarehouse?.city || request?.Technician?.serviceCities?.[0];
+  const state = warehouse?.state || technicianWarehouse?.state;
+
+  if (!city) return '-';
+  return state ? `${city}/${state}` : city;
+}
 function priorityLabel(value) {
   return ({ baixa: 'Baixa', media: 'Média', alta: 'Alta', critica: 'Crítica' }[value] || value || '-');
 }
@@ -115,10 +124,15 @@ export default function MaterialRequests() {
       destination: form.requestType === 'recarga_estoque'
         ? [destination?.name, destination?.city, destination?.state].filter(Boolean).join(' • ') || '-'
         : destination?.name || '-',
+      city: requestWarehouse?.city
+        ? [requestWarehouse.city, requestWarehouse.state].filter(Boolean).join('/')
+        : destination?.defaultWarehouse?.city
+          ? [destination.defaultWarehouse.city, destination.defaultWarehouse.state].filter(Boolean).join('/')
+          : destination?.serviceCities?.[0] || '-',
       totalQuantity: reviewItems.reduce((sum, item) => sum + item.quantity, 0),
       totalValue: reviewItems.reduce((sum, item) => sum + item.totalCost, 0),
     };
-  }, [form, materials, warehouses, technicians, isTechnician, user?.name]);
+  }, [form, materials, warehouses, technicians, isTechnician, user?.name, requestWarehouse]);
 
   async function loadAvailableMaterials(technicianId = '') {
     const selectedTechnician = isTechnician
@@ -336,7 +350,7 @@ export default function MaterialRequests() {
       </section>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Cidade</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><strong>{requestCityLabel(r)}</strong></td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
         <Pagination {...pagination} page={page} loading={loading} onPageChange={load} />
       </section>
 
@@ -362,7 +376,7 @@ export default function MaterialRequests() {
       </Modal>
 
       <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(details)}>Entregar carga</button>)}</>}>
-        {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
+        {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Cidade da solicitação", requestCityLabel(details)], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
       </DetailsModal>
 
       <Modal
@@ -382,6 +396,7 @@ export default function MaterialRequests() {
           <div className="detail-grid compact">
             <div className="detail-card"><span>Tipo de solicitação</span><strong>{requestTypeLabel(form.requestType)}</strong></div>
             <div className="detail-card"><span>Destino</span><strong>{requestReview.destination}</strong></div>
+            <div className="detail-card"><span>Cidade</span><strong>{requestReview.city}</strong></div>
             <div className="detail-card"><span>Prioridade</span><strong>{priorityLabel(form.priority)}</strong></div>
             <div className="detail-card"><span>Necessário até</span><strong>{dateOnlyLabel(form.neededBy)}</strong></div>
             <div className="detail-card"><span>Quantidade total</span><strong>{formatQuantity(requestReview.totalQuantity)}</strong></div>
@@ -417,7 +432,7 @@ export default function MaterialRequests() {
       </Modal>
 
       <Modal open={decision.open} title={decision.type === 'approve' ? 'Aprovar solicitação' : decision.type === 'reject' ? 'Reprovar solicitação' : decision.item?.requestType === 'recarga_estoque' ? 'Receber recarga no estoque' : 'Entregar carga e gerar guia'} onClose={() => setDecision({ open: false, type: '', item: null, notes: '', items: [] })} footer={<><button className="ghost" onClick={() => setDecision({ open: false, type: '', item: null, notes: '', items: [] })}>Cancelar</button><button onClick={runDecision}>{decision.type === 'deliver' ? decision.item?.requestType === 'recarga_estoque' ? 'Receber no estoque' : 'Entregar e gerar guia' : 'Confirmar'}</button></>}>
-        <p><strong>{decision.item?.requestNumber}</strong> • {decision.item?.requestType === 'recarga_estoque' ? decision.item?.Warehouse?.name : decision.item?.Technician?.name}</p>
+        <p><strong>{decision.item?.requestNumber}</strong> • {decision.item?.requestType === 'recarga_estoque' ? decision.item?.Warehouse?.name : decision.item?.Technician?.name} • {requestCityLabel(decision.item)}</p>
         {['approve', 'reject'].includes(decision.type) && <div className="detail-grid compact"><div className="detail-card"><span>Valor solicitado</span><strong>{brl(decision.item?.totalValue)}</strong></div><div className="detail-card"><span>Limite do técnico sem aprovação</span><strong>{brl(decision.item?.metadata?.technicianApprovalLimit)}</strong></div><div className="detail-card"><span>Seu limite de aprovação</span><strong>{isAdmin ? 'Sem limite' : brl(user?.approvalLimit)}</strong></div></div>}
         <label>Observação interna<textarea rows="4" value={decision.notes} onChange={(e) => setDecision({ ...decision, notes: e.target.value })} /></label>
         {decision.type === 'deliver' && decision.item?.requestType === 'recarga_estoque' && <div className="form-stack"><div className="viz-callout">A recarga aprovada será adicionada ao estoque regional selecionado. Para equipamentos serializados, informe os seriais antes de receber.</div>{decision.items.map((item, index) => <div className="item-card" key={item.requestItemId}><div className="form-grid"><div><small>Material</small><strong>{item.materialName}</strong></div><label>Quantidade recebida<input type="number" step="1" min="0" value={item.approvedQuantity} onChange={(e) => updateDecisionItem(index, { approvedQuantity: e.target.value })} /></label></div>{item.requiresSerial && <label>Seriais recebidos<textarea rows="4" value={item.serialNumbersText || ''} onChange={(e) => updateDecisionItem(index, { serialNumbersText: e.target.value })} placeholder="Um serial por linha" /></label>}</div>)}</div>}

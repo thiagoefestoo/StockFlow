@@ -1,0 +1,52 @@
+ATUALIZAÇÃO 63 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(2).zip
+
+OBJETIVO
+--------
+Exibir a cidade associada a cada solicitação de material.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/materialRequestController.js
+frontend/src/pages/MaterialRequests.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: Sintaxe validada em 105 arquivos JS.
+
+2. Git
+   Comando: git diff --check
+   Resultado: aprovado, sem erros de espaços ou linhas adicionais no final.
+
+3. Regra de exibição
+   Cenários validados:
+   - solicitação com Warehouse: Vila Velha/ES;
+   - solicitação antiga com defaultWarehouse do técnico: São Pedro da Aldeia/RJ;
+   - fallback por serviceCities: Macaé;
+   - registro sem referência de cidade: "-".
+
+4. Segurança operacional
+   - nenhuma migration;
+   - nenhuma alteração em saldos;
+   - nenhuma alteração de status;
+   - nenhuma exclusão ou recriação de solicitação;
+   - nenhuma alteração nas regras de acesso por cidade;
+   - pacote sem .env, .git, node_modules e uploads de produção.
+
+FRONTEND
+--------
+A alteração JSX foi revisada e o aplicador executará a build de produção no
+computador do usuário antes de permitir o commit. A build não foi executada
+neste ambiente porque o projeto enviado não contém node_modules e o registro
+npm disponível aqui não fornece todas as dependências do React.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA. O aplicador possui backup e restauração
+automática caso a validação ou a build local falhe.

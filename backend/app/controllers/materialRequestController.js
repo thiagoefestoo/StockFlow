@@ -41,7 +41,14 @@ function nextTransferNumber() {
 
 function includeFull() {
   return [
-    Technician,
+    {
+      model: Technician,
+      include: [{
+        model: Warehouse,
+        as: 'defaultWarehouse',
+        attributes: ['id', 'name', 'code', 'city', 'state', 'region'],
+      }],
+    },
     { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
     { model: User, as: 'approvedBy', attributes: ['id', 'name', 'email', 'role'] },
     { model: User, as: 'deliveredBy', attributes: ['id', 'name', 'email', 'role'] },
