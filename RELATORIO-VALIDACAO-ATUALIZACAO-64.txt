@@ -1,0 +1,67 @@
+ATUALIZAÇÃO 64 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(3).zip
+
+ESCOPO
+------
+Somente BI Financeiro.
+
+ARQUIVOS DE CÓDIGO ALTERADOS
+----------------------------
+backend/app/controllers/biController.js
+backend/app/utils/financialBi.js
+backend/scripts/test-financial-bi.js
+frontend/src/pages/BIFinancial.jsx
+frontend/src/components/WarehouseValueOverview.jsx
+
+VALIDAÇÕES CONCLUÍDAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 107 arquivos JavaScript.
+
+2. Regra financeira
+   Comando: node backend/scripts/test-financial-bi.js
+   Resultado:
+   - OS concluída incluída;
+   - OS aberta excluída;
+   - OS cancelada excluída;
+   - equipamento serializado separado;
+   - consumível separado;
+   - perda de consumível separada;
+   - cobertura documentada validada em 100%;
+   - filtros incompatíveis com cobertura detectados.
+
+3. Frontend
+   BIFinancial.jsx e WarehouseValueOverview.jsx foram validados pelo parser
+   TypeScript com suporte a JSX.
+
+4. Git
+   Comando: git diff --check
+   Resultado: aprovado, sem erros de espaços ou linhas adicionais.
+
+LIMITAÇÃO DO AMBIENTE
+---------------------
+A build React completa não foi executada neste ambiente porque o registro npm
+interno não disponibilizou yocto-queue@0.1.0. O aplicador executa a build no
+computador do usuário antes de permitir o commit. Em caso de falha, restaura
+automaticamente os arquivos anteriores.
+
+SEGURANÇA OPERACIONAL
+---------------------
+- nenhuma migration;
+- nenhum saldo alterado;
+- nenhuma OS alterada;
+- nenhuma movimentação criada;
+- nenhum arquivo .env incluído;
+- nenhuma pasta .git incluída;
+- nenhum node_modules incluído;
+- nenhum upload de produção incluído.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA COM BACKUP, TESTE LOCAL E REDEPLOY
+SEQUENCIAL NO RENDER E VERCEL.

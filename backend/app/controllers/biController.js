@@ -23,6 +23,12 @@ const { ok } = require('../utils/response');
 const { money, daysBetween } = require('../utils/number');
 const { reverseWarehouseIds, warehouseOutsideReverse, movementOutsideReverse } = require('../utils/reverseLogistics');
 const { warehouseListWhere, isPrivileged } = require('../utils/warehouseAccess');
+const {
+  calculateDocumentedCoverage,
+  hasUnsupportedCoverageFilters,
+  nonSerializedLossValue,
+  splitCompletedOrderValues,
+} = require('../utils/financialBi');
 
 function asArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
@@ -337,8 +343,24 @@ async function getFilterOptions(user) {
 exports.filterOptions = asyncHandler(async (req, res) => ok(res, await getFilterOptions(req.user)));
 
 exports.warehouseValues = asyncHandler(async (req, res) => {
+  const requestedCity = String(req.query.city || '').trim();
+  const selectedMaterialIds = asArray(req.query.materialId).map(Number).filter(Number.isFinite);
+  const selectedCategories = asArray(req.query.category);
+  const selectedRequiresSerial = req.query.requiresSerial === 'true'
+    ? true
+    : req.query.requiresSerial === 'false'
+      ? false
+      : null;
+  const search = String(req.query.search || '').trim();
+
+  const warehouseClauses = [
+    warehouseListWhere(req.user),
+    { isReverseLogistics: false, status: 'ativo' },
+  ];
+  if (requestedCity) warehouseClauses.push({ city: { [Op.iLike]: requestedCity } });
+
   const warehouses = await Warehouse.findAll({
-    where: { ...warehouseListWhere(req.user), isReverseLogistics: false },
+    where: { [Op.and]: warehouseClauses },
     attributes: ['id', 'name', 'code', 'city', 'region', 'status'],
     order: [['id', 'DESC']],
   });
@@ -348,6 +370,24 @@ exports.warehouseValues = asyncHandler(async (req, res) => {
     return ok(res, { rows: [], totalQuantity: 0, totalValue: 0, generatedAt: new Date().toISOString() });
   }
 
+  const materialWhere = {};
+  if (selectedMaterialIds.length) materialWhere.id = { [Op.in]: selectedMaterialIds };
+  if (selectedCategories.length) materialWhere.category = { [Op.in]: selectedCategories };
+  if (selectedRequiresSerial !== null) materialWhere.requiresSerial = selectedRequiresSerial;
+  if (search) {
+    materialWhere[Op.or] = [
+      { name: { [Op.iLike]: `%${search}%` } },
+      { sku: { [Op.iLike]: `%${search}%` } },
+      { category: { [Op.iLike]: `%${search}%` } },
+    ];
+  }
+  const hasMaterialWhere = Reflect.ownKeys(materialWhere).length > 0;
+  const materialInclude = {
+    model: Material,
+    attributes: ['id', 'unitCost'],
+    ...(hasMaterialWhere ? { where: materialWhere, required: true } : {}),
+  };
+
   const [balances, assets] = await Promise.all([
     StockBalance.findAll({
       where: {
@@ -356,7 +396,7 @@ exports.warehouseValues = asyncHandler(async (req, res) => {
         quantity: { [Op.gt]: 0 },
       },
       attributes: ['warehouseId', 'materialId', 'quantity'],
-      include: [{ model: Material, attributes: ['id', 'unitCost'] }],
+      include: [materialInclude],
     }),
     SerializedAsset.findAll({
       where: {
@@ -365,7 +405,7 @@ exports.warehouseValues = asyncHandler(async (req, res) => {
         status: 'em_estoque',
       },
       attributes: ['id', 'warehouseId', 'materialId', 'acquisitionCost', 'status'],
-      include: [{ model: Material, attributes: ['id', 'unitCost'] }],
+      include: [materialInclude],
     }),
   ]);
 
@@ -413,7 +453,6 @@ exports.warehouseValues = asyncHandler(async (req, res) => {
 
   return ok(res, { rows, totalQuantity, totalValue, generatedAt: new Date().toISOString() });
 });
-
 
 function monthKey(dateValue) {
   const date = dateValue ? new Date(dateValue) : new Date();
@@ -653,6 +692,7 @@ async function calculateStockPosition(materials, filters = {}) {
 
 async function loadBiData(filters, requested = {}) {
   const useAll = requested.all !== false;
+  const unbounded = requested.unbounded === true;
   const needs = (key) => useAll || requested[key] === true;
   const needsReverseIds = needs('batches') || needs('movements');
   const reverseIds = needsReverseIds ? await reverseWarehouseIds() : [];
@@ -677,7 +717,7 @@ async function loadBiData(filters, requested = {}) {
             { association: 'createdBy', attributes: ['id', 'name', 'email'] },
           ],
           order: [['receivedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
-          limit: 1500,
+          ...(unbounded ? {} : { limit: 1500 }),
         })
       : Promise.resolve([]),
     needs('transfers')
@@ -692,7 +732,7 @@ async function loadBiData(filters, requested = {}) {
             { model: TransferItem, attributes: ['id', 'transferId', 'materialId', 'quantity', 'unitCost', 'totalCost', 'serialNumber', 'itemType'], include: [materialInclude()] },
           ],
           order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
-          limit: 1500,
+          ...(unbounded ? {} : { limit: 1500 }),
         })
       : Promise.resolve([]),
     needs('orders')
@@ -707,7 +747,7 @@ async function loadBiData(filters, requested = {}) {
             { model: ServiceOrderMaterial, attributes: ['id', 'serviceOrderId', 'materialId', 'quantity', 'unitCost', 'totalCost', 'serialNumber'], include: [materialInclude()] },
           ],
           order: [['createdAt', 'DESC'], ['id', 'DESC']],
-          limit: 1500,
+          ...(unbounded ? {} : { limit: 1500 }),
         })
       : Promise.resolve([]),
     needs('movements')
@@ -726,7 +766,7 @@ async function loadBiData(filters, requested = {}) {
             { association: 'createdBy', attributes: ['id', 'name', 'email'] },
           ],
           order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
-          limit: 2000,
+          ...(unbounded ? {} : { limit: 2000 }),
         })
       : Promise.resolve([]),
     needs('technicians')
@@ -1140,14 +1180,21 @@ exports.financial = asyncHandler(async (req, res) => {
   const filters = await resolveCityScope(buildFilters(req.query), req.user);
   const { materials, batches, transfers, orders, movements, technicians, materialRequests, approvalRequests } = await loadBiData(filters);
   const stockPosition = await calculateStockPosition(materials, filters);
+
   const confirmedBatches = batches.filter((batch) => batch.status !== 'cancelado');
+  const completedOrderSummary = splitCompletedOrderValues(orders);
+  const completedOrders = completedOrderSummary.completedOrders;
   const totalEntries = money(confirmedBatches.reduce((sum, batch) => sum + Number(batch.totalValue || 0), 0));
   const totalTransfers = money(transfers.filter((transfer) => transfer.status !== 'cancelado').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
-  const totalConsumed = money(orders.reduce((sum, order) => sum + orderValue(order), 0));
-  const consumedCompleted = money(orders.filter((order) => order.status === 'concluida').reduce((sum, order) => sum + orderValue(order), 0));
+  const totalConsumed = money(completedOrderSummary.totalValue);
+  const consumedCompleted = totalConsumed;
+  const serializedConsumedValue = money(completedOrderSummary.serializedValue);
+  const consumablesAppliedValue = money(completedOrderSummary.consumableValue);
+  const excludedOrderValue = money(orders.filter((order) => order.status !== 'concluida').reduce((sum, order) => sum + orderValue(order), 0));
   const pendingSignatureValue = money(transfers.filter((transfer) => transfer.status === 'pendente_assinatura').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
   const requestPipeline = money(materialRequests.filter((request) => !['cancelado', 'entregue'].includes(request.status)).reduce((sum, request) => sum + Number(request.totalValue || 0), 0));
   const approvalsPendingAmount = money(approvalRequests.filter((approval) => approval.status === 'pendente').reduce((sum, approval) => sum + Number(approval.amount || 0), 0));
+
   const technicianIds = technicians.map((technician) => technician.id);
   const [technicianAssets, technicianBalances, technicianTools] = technicianIds.length
     ? await Promise.all([
@@ -1183,13 +1230,46 @@ exports.financial = asyncHandler(async (req, res) => {
   const custodyRiskValue = money(custodyRiskAssets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0));
   const lostValue = money(stockPosition.totals.perdido || 0);
   const blockedCapital = money(stockPosition.totals.tecnico);
-  const financialCoverage = totalEntries ? money((stockPosition.totals.totalAtual / totalEntries) * 100) : 0;
   const consumptionRate = totalEntries ? money((totalConsumed / totalEntries) * 100) : 0;
+
+  const coverageSupported = !hasUnsupportedCoverageFilters(filters);
+  const coverageFilters = {
+    ...filters,
+    start: null,
+    end: null,
+    preset: 'all',
+    calculationMode: 'competencia',
+    movementTypes: [],
+    orderStatuses: [],
+    serviceTypes: [],
+  };
+  const coverageData = coverageSupported
+    ? await loadBiData(coverageFilters, {
+        all: false,
+        batches: true,
+        orders: true,
+        movements: true,
+        unbounded: true,
+      })
+    : { batches: [], orders: [], movements: [] };
+  const coverageConfirmedBatches = (coverageData.batches || []).filter((batch) => batch.status !== 'cancelado');
+  const coverageOrderSummary = splitCompletedOrderValues(coverageData.orders || []);
+  const coverageEntryValue = money(coverageConfirmedBatches.reduce((sum, batch) => sum + Number(batch.totalValue || 0), 0));
+  const consumableLossValue = nonSerializedLossValue(coverageData.movements || []);
+  const coverage = calculateDocumentedCoverage({
+    entryValue: coverageEntryValue,
+    currentPositionValue: stockPosition.totals.totalAtual,
+    consumablesAppliedValue: coverageOrderSummary.consumableValue,
+    serializedLossValue: lostValue,
+    consumableLossValue,
+    available: coverageSupported,
+    unavailableReason: 'A cobertura documentada fica indisponível quando há filtros de técnico, empresa, status, fornecedor, serviço, movimento, valor ou busca livre.',
+  });
 
   const monthFlow = {};
   confirmedBatches.forEach((batch) => addToBucket(addRowMetric(monthFlow, monthKey(batch.receivedAt), {}), 'entrada', Number(batch.totalValue || 0)));
   transfers.filter((transfer) => transfer.status !== 'cancelado').forEach((transfer) => addToBucket(addRowMetric(monthFlow, monthKey(transfer.deliveredAt || transfer.createdAt), {}), 'transferencia', Number(transfer.totalValue || 0)));
-  orders.forEach((order) => addToBucket(addRowMetric(monthFlow, monthKey(order.completedAt || order.createdAt), {}), 'baixa', orderValue(order)));
+  completedOrders.forEach((order) => addToBucket(addRowMetric(monthFlow, monthKey(order.completedAt || order.createdAt), {}), 'baixa', orderValue(order)));
   movements.forEach((movement) => {
     const value = movementValue(movement);
     if (movement.type === 'retorno_tecnico') addToBucket(addRowMetric(monthFlow, monthKey(movement.movementAt), {}), 'retorno', value);
@@ -1202,7 +1282,7 @@ exports.financial = asyncHandler(async (req, res) => {
     if (materialMatches(item.Material, { ...filters, search: '' })) addRowMetric(categoryMap, item.Material?.category || 'outro', { entrada: Number(item.totalCost || 0), total: Number(item.totalCost || 0), quantidade: Number(item.quantity || 0) });
   }));
   stockPosition.rows.forEach((row) => addRowMetric(categoryMap, row.category || 'outro', { estoque: row.estoqueValue, tecnico: row.tecnicoValue, cliente: row.clienteValue, total: row.totalValue }));
-  orders.forEach((order) => (order.ServiceOrderMaterials || []).forEach((item) => {
+  completedOrders.forEach((order) => (order.ServiceOrderMaterials || []).forEach((item) => {
     if (materialMatches(item.Material, { ...filters, search: '' })) addRowMetric(categoryMap, item.Material?.category || 'outro', { baixa: Number(item.totalCost || 0), total: Number(item.totalCost || 0), quantidade: Number(item.quantity || 0) });
   }));
   const byCategory = Object.values(categoryMap).sort((a, b) => Number(b.total || 0) - Number(a.total || 0));
@@ -1236,19 +1316,19 @@ exports.financial = asyncHandler(async (req, res) => {
     const consumableValue = money(balanceRows.filter((row) => materialMatches(row.Material, { ...filters, search: '' })).reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0));
     const activeTools = toolsByTechnician.get(Number(tech.id)) || [];
     const toolValue = money(activeTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0));
-    const transferValue = money(transfers.filter((transfer) => Number(transfer.technicianId) === Number(tech.id) && transfer.status !== 'cancelado').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
-    const consumedValue = money(orders.filter((order) => Number(order.technicianId) === Number(tech.id)).reduce((sum, order) => sum + orderValue(order), 0));
+    const transferValueForTechnician = money(transfers.filter((transfer) => Number(transfer.technicianId) === Number(tech.id) && transfer.status !== 'cancelado').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
+    const consumedValue = money(completedOrders.filter((order) => Number(order.technicianId) === Number(tech.id)).reduce((sum, order) => sum + orderValue(order), 0));
     const pendingValue = money(transfers.filter((transfer) => Number(transfer.technicianId) === Number(tech.id) && transfer.status === 'pendente_assinatura').reduce((sum, transfer) => sum + Number(transfer.totalValue || 0), 0));
     const oldValue = money(custodyRiskAssets.filter((asset) => Number(asset.technicianId) === Number(tech.id)).reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0));
-    technicianFinance.push({ id: tech.id, name: tech.name, company: tech.ContractorCompany?.name || '-', status: tech.status, assetValue, consumableValue, toolCount: activeTools.length, toolValue, custodyValue: money(assetValue + consumableValue + toolValue), transferValue, consumedValue, pendingSignatureValue: pendingValue, oldCustodyValue: oldValue, openFinancialRisk: money(pendingValue + oldValue) });
+    technicianFinance.push({ id: tech.id, name: tech.name, company: tech.ContractorCompany?.name || '-', status: tech.status, assetValue, consumableValue, toolCount: activeTools.length, toolValue, custodyValue: money(assetValue + consumableValue + toolValue), transferValue: transferValueForTechnician, consumedValue, pendingSignatureValue: pendingValue, oldCustodyValue: oldValue, openFinancialRisk: money(pendingValue + oldValue) });
   }
   technicianFinance.sort((a, b) => b.custodyValue - a.custodyValue);
 
   const materialFinance = stockPosition.rows.map((row) => ({
     ...row,
-    entryValue: money(confirmedBatches.reduce((sum, batch) => sum + (batch.StockBatchItems || []).filter((item) => Number(item.materialId) === Number(row.id)).reduce((s, item) => s + Number(item.totalCost || 0), 0), 0)),
-    transferValue: money((transfers || []).reduce((sum, transfer) => sum + (transfer.TransferItems || []).filter((item) => Number(item.materialId) === Number(row.id)).reduce((s, item) => s + Number(item.totalCost || 0), 0), 0)),
-    consumedValue: money((orders || []).reduce((sum, order) => sum + (order.ServiceOrderMaterials || []).filter((item) => Number(item.materialId) === Number(row.id)).reduce((s, item) => s + Number(item.totalCost || 0), 0), 0)),
+    entryValue: money(confirmedBatches.reduce((sum, batch) => sum + (batch.StockBatchItems || []).filter((item) => Number(item.materialId) === Number(row.id)).reduce((subtotal, item) => subtotal + Number(item.totalCost || 0), 0), 0)),
+    transferValue: money((transfers || []).reduce((sum, transfer) => sum + (transfer.TransferItems || []).filter((item) => Number(item.materialId) === Number(row.id)).reduce((subtotal, item) => subtotal + Number(item.totalCost || 0), 0), 0)),
+    consumedValue: money(completedOrders.reduce((sum, order) => sum + (order.ServiceOrderMaterials || []).filter((item) => Number(item.materialId) === Number(row.id)).reduce((subtotal, item) => subtotal + Number(item.totalCost || 0), 0), 0)),
   })).sort((a, b) => b.entryValue - a.entryValue);
 
   const transferStatusValue = transfers.reduce((acc, transfer) => addToBucket(acc, transfer.status || 'sem_status', Number(transfer.totalValue || 0)), {});
@@ -1260,14 +1340,82 @@ exports.financial = asyncHandler(async (req, res) => {
   const replenishmentNeed = money(lowStockRows.reduce((sum, row) => sum + Number(row.replenishmentValue || 0), 0));
   const recentEntries = batches.slice(0, 50).map((batch) => ({ id: batch.id, receiptNumber: batch.receiptNumber, sourceCompany: batch.sourceCompany, receivedAt: batch.receivedAt, status: batch.status, fiscalDocumentType: batch.fiscalDocumentType, fiscalDocumentNumber: batch.fiscalDocumentNumber, proofAttachmentName: batch.proofAttachmentName, totalItems: money(batch.totalItems || 0), totalValue: money(batch.totalValue || 0) }));
   const recentTransfers = transfers.slice(0, 50).map((transfer) => ({ id: transfer.id, transferNumber: transfer.transferNumber, technician: transfer.Technician?.name || '-', status: transfer.status, deliveredAt: transfer.deliveredAt, signedAt: transfer.signedAt, totalQuantity: money(transfer.totalQuantity || 0), totalValue: money(transfer.totalValue || 0) }));
-  const recentConsumption = orders.slice(0, 50).map((order) => ({ id: order.id, osNumber: order.osNumber, technician: order.Technician?.name || '-', customerName: order.customerName, serviceType: order.serviceType, status: order.status, totalCost: money(orderValue(order)), completedAt: order.completedAt, createdAt: order.createdAt }));
-  const cards = { totalEntries, totalTransfers, totalConsumed, consumedCompleted, currentStockValue: stockPosition.totals.estoque, technicianBoxValue: stockPosition.totals.tecnico, installedCustomerValue: stockPosition.totals.cliente, currentPositionValue: stockPosition.totals.totalAtual, pendingSignatureValue, requestPipeline, approvalsPendingAmount, custodyRiskValue, lostValue, replenishmentNeed, blockedCapital, financialCoverage, consumptionRate };
+  const recentConsumption = completedOrders.slice(0, 50).map((order) => ({ id: order.id, osNumber: order.osNumber, technician: order.Technician?.name || '-', customerName: order.customerName, serviceType: order.serviceType, status: order.status, totalCost: money(orderValue(order)), completedAt: order.completedAt, createdAt: order.createdAt }));
+
+  const cards = {
+    totalEntries,
+    totalTransfers,
+    totalConsumed,
+    consumedCompleted,
+    serializedConsumedValue,
+    consumablesAppliedValue,
+    excludedOrderValue,
+    currentStockValue: stockPosition.totals.estoque,
+    technicianBoxValue: stockPosition.totals.tecnico,
+    installedCustomerValue: stockPosition.totals.cliente,
+    currentPositionValue: stockPosition.totals.totalAtual,
+    pendingSignatureValue,
+    requestPipeline,
+    approvalsPendingAmount,
+    custodyRiskValue,
+    lostValue,
+    consumableLossValue,
+    documentedLossValue: coverage.documentedLossValue,
+    documentedTrackedValue: coverage.documentedValue,
+    coverageEntryValue: coverage.entryValue,
+    coverageDifferenceValue: coverage.differenceValue,
+    financialCoverage: coverage.percentage,
+    financialCoverageAvailable: coverage.available,
+    financialCoverageReason: coverage.reason,
+    replenishmentNeed,
+    blockedCapital,
+    consumptionRate,
+  };
+
   const insights = [];
   if (pendingSignatureValue > 0) insights.push({ tone: 'warning', title: 'Guias pendentes com impacto financeiro', text: `Existem ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(pendingSignatureValue)} em guias ainda sem assinatura.` });
   if (custodyRiskValue > 0) insights.push({ tone: 'danger', title: 'Capital parado em campo', text: `Materiais com mais de 60 dias na caixa somam ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(custodyRiskValue)}.` });
   if (replenishmentNeed > 0) insights.push({ tone: 'info', title: 'Necessidade de reposição', text: `Estoque abaixo do mínimo sugere reposição estimada de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(replenishmentNeed)}.` });
-  if (totalEntries > 0) insights.push({ tone: 'success', title: 'Cobertura financeira rastreada', text: `${Number(financialCoverage).toFixed(1)}% do valor de entrada permanece rastreado em estoque, técnico, cliente ou status patrimonial.` });
+  if (excludedOrderValue > 0) insights.push({ tone: 'info', title: 'OS não concluídas fora do consumo', text: `${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(excludedOrderValue)} em OS abertas, pendentes ou canceladas não entra no card “Baixado em OS”.` });
+  if (coverage.available) {
+    const difference = Number(coverage.differenceValue || 0);
+    const differenceText = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(difference));
+    insights.push({
+      tone: Math.abs(difference) <= 0.01 ? 'success' : 'warning',
+      title: 'Cobertura documental do histórico',
+      text: `${Number(coverage.percentage).toFixed(1)}% das entradas estão explicadas por posição atual, consumíveis aplicados em OS concluídas e perdas documentadas. ${Math.abs(difference) <= 0.01 ? 'A conciliação está fechada.' : `${differenceText} permanecem ${difference > 0 ? 'a conciliar' : 'acima das entradas registradas'}.`}`,
+    });
+  } else {
+    insights.push({ tone: 'info', title: 'Cobertura documental indisponível', text: coverage.reason });
+  }
   if (filters.search) insights.push({ tone: 'info', title: 'Busca aplicada', text: `Resultados filtrados por “${filters.search}”.` });
 
-  return ok(res, { cards, flowByMonth, byCategory, stockPosition: stockPosition.rows, stockTotals: stockPosition.totals, technicianFinance, materialFinance, transferStatusValue, orderStatusCost, movementTypeValue, sourceCompanyValue, lowStockRows, custodyRiskAssets: custodyRiskAssets.map((asset) => ({ id: asset.id, serialNumber: asset.serialNumber, material: asset.Material?.name || '-', technician: asset.Technician?.name || '-', acquisitionCost: money(asset.acquisitionCost || asset.Material?.unitCost || 0), custodyDays: daysBetween(asset.custodyStartedAt), custodyStartedAt: asset.custodyStartedAt })), recentEntries, recentTransfers, recentConsumption, insights, filtersApplied: { ...req.query, startDate: dateOnly(filters.start), endDate: dateOnly(filters.end) }, generatedAt: new Date().toISOString() });
+  return ok(res, {
+    cards,
+    flowByMonth,
+    byCategory,
+    stockPosition: stockPosition.rows,
+    stockTotals: stockPosition.totals,
+    technicianFinance,
+    materialFinance,
+    transferStatusValue,
+    orderStatusCost,
+    movementTypeValue,
+    sourceCompanyValue,
+    lowStockRows,
+    custodyRiskAssets: custodyRiskAssets.map((asset) => ({ id: asset.id, serialNumber: asset.serialNumber, material: asset.Material?.name || '-', technician: asset.Technician?.name || '-', acquisitionCost: money(asset.acquisitionCost || asset.Material?.unitCost || 0), custodyDays: daysBetween(asset.custodyStartedAt), custodyStartedAt: asset.custodyStartedAt })),
+    recentEntries,
+    recentTransfers,
+    recentConsumption,
+    insights,
+    coverageMethod: {
+      scope: 'historico_completo',
+      formula: 'posição atual + consumíveis em OS concluídas + perdas documentadas ÷ entradas confirmadas',
+      periodIndependent: true,
+      available: coverage.available,
+      reason: coverage.reason,
+    },
+    filtersApplied: { ...req.query, startDate: dateOnly(filters.start), endDate: dateOnly(filters.end) },
+    generatedAt: new Date().toISOString(),
+  });
 });

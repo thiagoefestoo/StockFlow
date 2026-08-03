@@ -6,7 +6,9 @@ function brl(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-export default function WarehouseValueOverview() {
+const EMPTY_FILTERS = {};
+
+export default function WarehouseValueOverview({ filters = EMPTY_FILTERS } = {}) {
   const [data, setData] = useState({ rows: [], totalQuantity: 0, totalValue: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -14,7 +16,7 @@ export default function WarehouseValueOverview() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    api.getCached('/bi/warehouse-values', {}, 60000)
+    api.getCached('/bi/warehouse-values', { params: filters }, 60000)
       .then((response) => {
         if (!active) return;
         setData(response.data.data || { rows: [], totalQuantity: 0, totalValue: 0 });
@@ -28,7 +30,7 @@ export default function WarehouseValueOverview() {
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [filters]);
 
   const summary = useMemo(() => {
     const rows = Array.isArray(data.rows) ? data.rows : [];

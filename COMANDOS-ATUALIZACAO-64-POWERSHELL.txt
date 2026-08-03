@@ -1,0 +1,95 @@
+﻿ATUALIZAÇÃO 64 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-64-correcao-bi-financeiro.zip
+APLICAR-ATUALIZACAO-64.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-64-correcao-bi-financeiro.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-64.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/biController.js",
+    "backend/app/utils/financialBi.js",
+    "backend/scripts/test-financial-bi.js",
+    "frontend/src/pages/BIFinancial.jsx",
+    "frontend/src/components/WarehouseValueOverview.jsx",
+    "ATUALIZACAO-64-CORRECAO-BI-FINANCEIRO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-64.txt",
+    "COMANDOS-ATUALIZACAO-64-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-64.ps1",
+    "VERIFICAR-BI-FINANCEIRO-PRODUCAO.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Corrige cálculos e conciliação do BI financeiro"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+1. Push no GitHub
+2. Redeploy do backend no Render
+3. Verificação somente leitura do BI
+4. Redeploy do frontend na Vercel
+5. Sair e entrar novamente
+6. Pressionar Ctrl+F5
+
+Teste de saúde:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+Verificação do BI:
+
+& "$HOME\Downloads\VERIFICAR-BI-FINANCEIRO-PRODUCAO.ps1"

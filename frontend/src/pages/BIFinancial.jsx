@@ -12,7 +12,8 @@ function brl(value) {
 }
 
 function pct(value) {
-  return `${Number(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 }
 
 function mapChart(obj = {}, label = 'Valor') {
@@ -87,6 +88,13 @@ export default function BIFinancial() {
     load(EMPTY_FILTERS);
   }
 
+  const warehouseFilters = useMemo(() => {
+    const params = toParams(appliedFilters);
+    return Object.fromEntries(['city', 'materialId', 'category', 'requiresSerial', 'search']
+      .filter((key) => params[key] !== undefined)
+      .map((key) => [key, params[key]]));
+  }, [appliedFilters]);
+
   const charts = useMemo(() => {
     if (!data) return null;
     const flow = data.flowByMonth || [];
@@ -102,7 +110,7 @@ export default function BIFinancial() {
         datasets: [
           { label: 'Entradas', data: flow.map((item) => Number(item.entrada || 0)) },
           { label: 'Transf. para técnicos', data: flow.map((item) => Number(item.transferencia || 0)) },
-          { label: 'Baixas por OS', data: flow.map((item) => Number(item.baixa || 0)) },
+          { label: 'Baixas em OS concluídas', data: flow.map((item) => Number(item.baixa || 0)) },
           { label: 'Perdas', data: flow.map((item) => Number(item.perda || 0)) },
         ],
       },
@@ -114,7 +122,7 @@ export default function BIFinancial() {
         labels: category.map((item) => item.label),
         datasets: [
           { label: 'Entradas', data: category.map((item) => Number(item.entrada || 0)) },
-          { label: 'Baixa OS', data: category.map((item) => Number(item.baixa || 0)) },
+          { label: 'Baixa em OS concluídas', data: category.map((item) => Number(item.baixa || 0)) },
         ],
       },
       categoryPosition: {
@@ -219,17 +227,20 @@ export default function BIFinancial() {
       <section className="kpi-grid finance-kpis">
         <KpiCard label="Entradas fiscais" value={brl(cards.totalEntries)} hint="Tudo que entrou via recebimento." />
         <KpiCard label="Transferido a técnicos" value={brl(cards.totalTransfers)} hint="Guias de carga geradas." tone="warning" />
-        <KpiCard label="Baixado em OS" value={brl(cards.totalConsumed)} hint="Consumo total registrado." tone="success" />
+        <KpiCard label="Baixado em OS concluídas" value={brl(cards.totalConsumed)} hint="Equipamentos e consumíveis registrados somente em OS concluídas." tone="success" />
+        <KpiCard label="Equipamentos baixados em OS" value={brl(cards.serializedConsumedValue)} hint="Valor histórico dos itens serializados registrados em OS concluídas no período." />
+        <KpiCard label="Consumíveis aplicados" value={brl(cards.consumablesAppliedValue)} hint="Materiais sem serial consumidos em OS concluídas no período." tone="success" />
         <KpiCard label="Estoque atual" value={brl(cards.currentStockValue)} hint="Valor ainda em almoxarifado." />
         <KpiCard label="Caixa dos técnicos" value={brl(cards.technicianBoxValue)} hint="Valor em responsabilidade dos técnicos." tone="warning" />
-        <KpiCard label="Instalado no cliente" value={brl(cards.installedCustomerValue)} hint="Valor já transferido ao cliente." />
+        <KpiCard label="Equipamentos instalados" value={brl(cards.installedCustomerValue)} hint="Posição atual dos equipamentos serializados instalados em clientes." />
         <KpiCard label="Guias sem assinatura" value={brl(cards.pendingSignatureValue)} hint="Risco documental." tone="danger" />
         <KpiCard label="Custódia +60 dias" value={brl(cards.custodyRiskValue)} hint="Capital parado em campo." tone="danger" />
         <KpiCard label="Reposição sugerida" value={brl(cards.replenishmentNeed)} hint="Itens abaixo do mínimo." tone="warning" />
-        <KpiCard label="Cobertura rastreada" value={pct(cards.financialCoverage)} hint="Valor atual x entradas." tone="success" />
+        <KpiCard label="Cobertura documentada" value={cards.financialCoverageAvailable ? pct(cards.financialCoverage) : '—'} hint={cards.financialCoverageAvailable ? 'Histórico completo: posição atual + consumíveis aplicados + perdas documentadas ÷ entradas confirmadas.' : (cards.financialCoverageReason || 'Indisponível com os filtros atuais.')} tone={cards.financialCoverageAvailable ? 'success' : 'warning'} />
+        <KpiCard label="Diferença a conciliar" value={cards.financialCoverageAvailable ? brl(Math.abs(Number(cards.coverageDifferenceValue || 0))) : '—'} hint={cards.financialCoverageAvailable ? (Number(cards.coverageDifferenceValue || 0) >= 0 ? 'Valor das entradas ainda não explicado pelos destinos documentados.' : 'Valor documentado acima das entradas confirmadas; revisar custos e registros históricos.') : 'Disponível junto com a cobertura documentada.'} tone={Math.abs(Number(cards.coverageDifferenceValue || 0)) <= 0.01 ? 'success' : 'danger'} />
       </section>
 
-      <WarehouseValueOverview />
+      <WarehouseValueOverview filters={warehouseFilters} />
 
       <section className="finance-insights">
         {(data.insights || []).map((insight, index) => (
@@ -252,9 +263,9 @@ export default function BIFinancial() {
       {tab === 'visao' && (
         <>
           <section className="bi-charts-grid finance-chart-grid">
-            <ChartPanel title="Fluxo financeiro mensal" subtitle="Entradas, transferências, baixas e perdas por mês." type="line" data={charts.monthlyFlow} tone="success" />
+            <ChartPanel title="Fluxo financeiro mensal" subtitle="Entradas, transferências, baixas de OS concluídas e perdas por mês." type="line" data={charts.monthlyFlow} tone="success" />
             <ChartPanel title="Composição do valor atual" subtitle="Onde o patrimônio está financeiramente alocado." type="doughnut" data={charts.currentPosition} tone="info" />
-            <ChartPanel title="Entrada x consumo por categoria" subtitle="Valor recebido e valor aplicado em OS por família." data={charts.categoryEntry} tone="warning" />
+            <ChartPanel title="Entrada x consumo por categoria" subtitle="Valor recebido e valor aplicado somente em OS concluídas por família." data={charts.categoryEntry} tone="warning" />
             <ChartPanel title="Valor atual por categoria" subtitle="Estoque, técnico e cliente por tipo de material." data={charts.categoryPosition} tone="success" />
           </section>
           <section className="panel two-col">
@@ -285,7 +296,7 @@ export default function BIFinancial() {
           <section className="bi-charts-grid finance-chart-grid">
             <ChartPanel title="Caixa, consumo e risco por técnico" subtitle="Comparativo financeiro de responsabilidade operacional." data={charts.technicians} tone="danger" />
             <ChartPanel title="Valor por status de guia" subtitle="Quanto ainda depende de assinatura/regularização." type="doughnut" data={charts.transferStatus} tone="warning" />
-            <ChartPanel title="Fluxo mensal financeiro" subtitle="Entrada e saída de valor por período." type="line" data={charts.monthlyFlow} tone="success" />
+            <ChartPanel title="Fluxo mensal financeiro" subtitle="Entradas e saídas confirmadas por período; baixas consideram somente OS concluídas." type="line" data={charts.monthlyFlow} tone="success" />
             <ChartPanel title="Valor movimentado por tipo" subtitle="Peso financeiro de cada movimento." data={charts.movementValue} tone="info" />
           </section>
           <section className="panel two-col">
@@ -315,7 +326,7 @@ export default function BIFinancial() {
 
       <section className="finance-footer panel">
         <strong>Leitura financeira da operação</strong>
-        <span>Os valores são calculados a partir de custo unitário, documentos de entrada, guias, baixas por OS, materiais em estoque, materiais em carga de técnico e patrimônio serializado. Atualizado em {new Date(data.generatedAt).toLocaleString('pt-BR')}.</span>
+        <span>Os valores são calculados a partir de documentos de entrada, guias, OS concluídas, materiais em estoque, materiais em carga de técnico e patrimônio serializado. A cobertura documentada usa o histórico completo e não soma duas vezes equipamentos instalados. Atualizado em {new Date(data.generatedAt).toLocaleString('pt-BR')}.</span>
       </section>
     </div>
   );
