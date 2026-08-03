@@ -1,0 +1,112 @@
+﻿ATUALIZAÇÃO 67 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-67-excluir-item-solicitacao.zip
+APLICAR-ATUALIZACAO-67.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-67-excluir-item-solicitacao.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-67.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/transferController.js",
+    "backend/app/utils/requestDeliveryExclusions.js",
+    "backend/scripts/test-request-delivery-exclusions.js",
+    "frontend/src/pages/Transfers.jsx",
+    "frontend/src/components/OperationReviewModal.jsx",
+    "frontend/src/styles.css",
+    "ATUALIZACAO-67-EXCLUIR-ITEM-SOLICITACAO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-67.txt",
+    "COMANDOS-ATUALIZACAO-67-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-67.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Permite excluir item da entrega de solicitação"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+Ordem recomendada:
+
+1. push concluído no GitHub;
+2. redeploy do backend no Render;
+3. aguardar o backend ficar saudável;
+4. redeploy do frontend na Vercel;
+5. sair e entrar novamente no sistema;
+6. pressionar Ctrl+F5.
+
+Teste de saúde:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE CONTROLADO
+-------------------
+
+Utilize uma solicitação aprovada que tenha pelo menos dois materiais.
+
+1. abrir a solicitação em Transferências;
+2. clicar em Excluir da entrega em um item;
+3. confirmar a exclusão;
+4. verificar a seção Itens excluídos desta entrega;
+5. clicar em Restaurar e confirmar que o item retorna;
+6. excluir novamente;
+7. abrir a revisão final;
+8. confirmar que o botão também aparece na coluna Ação;
+9. confirmar que quantidade e valor foram recalculados;
+10. concluir a transferência;
+11. conferir que o item excluído não aparece na guia;
+12. conferir que o saldo do item excluído não foi reduzido;
+13. conferir que os demais itens entraram na caixa do técnico.

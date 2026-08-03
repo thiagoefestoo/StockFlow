@@ -108,6 +108,7 @@ export default function Transfers() {
   const [edit, setEdit] = useState({ open: false, item: null, form: {} });
   const [form, setForm] = useState({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
   const [requestPrefilled, setRequestPrefilled] = useState(false);
+  const [excludedRequestItems, setExcludedRequestItems] = useState([]);
   const [transferSearch, setTransferSearch] = useState('');
   const [transferStatusFilter, setTransferStatusFilter] = useState('');
   const [transferTypeFilter, setTransferTypeFilter] = useState('');
@@ -236,12 +237,13 @@ export default function Transfers() {
           technicianId: request.technicianId ? String(request.technicianId) : '',
           materialRequestId: request.id,
           notes: `Entrega pela solicitação ${request.requestNumber}.`,
-          items: (request.MaterialRequestItems || []).map((item) => ({
+          items: (request.MaterialRequestItems || []).map((item, originalIndex) => ({
             materialId: item.materialId ? String(item.materialId) : '',
             requestedQuantity: item.approvedQuantity ?? item.quantity ?? 1,
             quantity: item.approvedQuantity ?? item.quantity ?? 1,
             serialNumbers: [],
             requestItemId: item.id,
+            originalIndex,
             requestMaterial: item.Material ? {
               id: item.Material.id,
               name: item.Material.name,
@@ -252,6 +254,7 @@ export default function Transfers() {
             } : null,
           })),
         });
+        setExcludedRequestItems([]);
         setModal(true);
         setRequestPrefilled(true);
         navigate('/transferencias', { replace: true });
@@ -299,6 +302,7 @@ export default function Transfers() {
 
   function openNewTransfer() {
     const firstActive = warehouses.find((warehouse) => warehouse.status === 'ativo') || warehouses[0];
+    setExcludedRequestItems([]);
     setForm({ warehouseId: firstActive ? String(firstActive.id) : '', technicianId: '', notes: '', materialRequestId: '', items: [] });
     setModal(true);
   }
@@ -337,7 +341,41 @@ export default function Transfers() {
   }
 
   function removeItem(i) {
-    setForm({ ...form, items: form.items.filter((_, idx) => idx !== i) });
+    const item = form.items[i];
+    if (!item) return;
+
+    if (requestLinked) {
+      if (form.items.length <= 1) {
+        showNotice('Mantenha pelo menos um item na solicitação. Para não entregar nenhum material, use quantidade zero ou cancele a solicitação.', 'warning');
+        return;
+      }
+
+      const material = materialForItem(item);
+      const confirmed = window.confirm(`Excluir ${material?.name || 'este material'} desta entrega? O item continuará preservado no histórico da solicitação com quantidade entregue igual a zero.`);
+      if (!confirmed) return;
+
+      setExcludedRequestItems((current) => [
+        ...current.filter((row) => Number(row.requestItemId) !== Number(item.requestItemId)),
+        { ...item, removedMaterialName: material?.name || 'Material' },
+      ].sort((a, b) => Number(a.originalIndex ?? 0) - Number(b.originalIndex ?? 0)));
+      setForm((current) => ({ ...current, items: current.items.filter((_, idx) => idx !== i) }));
+      showNotice(`${material?.name || 'Material'} removido desta entrega. Use “Restaurar” caso precise incluí-lo novamente.`, 'warning');
+      return;
+    }
+
+    setForm((current) => ({ ...current, items: current.items.filter((_, idx) => idx !== i) }));
+  }
+
+  function restoreExcludedRequestItem(requestItemId) {
+    const item = excludedRequestItems.find((row) => Number(row.requestItemId) === Number(requestItemId));
+    if (!item) return;
+
+    setForm((current) => ({
+      ...current,
+      items: [...current.items, item].sort((a, b) => Number(a.originalIndex ?? 0) - Number(b.originalIndex ?? 0)),
+    }));
+    setExcludedRequestItems((current) => current.filter((row) => Number(row.requestItemId) !== Number(requestItemId)));
+    showNotice(`${item.removedMaterialName || 'Material'} restaurado na entrega.`, 'success');
   }
 
   function updateItem(i, patch) {
@@ -392,6 +430,7 @@ export default function Transfers() {
     if (!form.warehouseId) return 'Selecione o estoque de origem.';
     if (!form.technicianId) return 'Selecione o técnico de destino.';
     if (!form.items.length && !requestLinked) return 'Adicione pelo menos um item à transferência.';
+    if (requestLinked && !form.items.length) return 'Mantenha pelo menos um item na solicitação para continuar a entrega.';
 
     const repeatedMaterials = duplicateItemIds(form.items);
     if (repeatedMaterials.length) return 'O mesmo material não pode ser selecionado mais de uma vez. Remova o item repetido antes de continuar.';
@@ -447,6 +486,9 @@ export default function Transfers() {
       const payload = {
         ...form,
         warehouseId: form.warehouseId,
+        excludedRequestItemIds: requestLinked
+          ? excludedRequestItems.map((item) => Number(item.requestItemId)).filter((id) => Number.isInteger(id) && id > 0)
+          : [],
         items: form.items.map((item) => ({
           materialId: item.materialId,
           requestItemId: item.requestItemId || null,
@@ -469,7 +511,8 @@ export default function Transfers() {
         setReviewOpen(false);
         setModal(false);
         setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
-        setWarehouseMaterials([]);
+        setExcludedRequestItems([]);
+      setWarehouseMaterials([]);
         setAvailableAssets([]);
         return;
       }
@@ -483,6 +526,7 @@ export default function Transfers() {
       setReviewOpen(false);
       setModal(false);
       setForm({ warehouseId: '', technicianId: '', notes: '', materialRequestId: '', items: [] });
+      setExcludedRequestItems([]);
         setWarehouseMaterials([]);
       setAvailableAssets([]);
       showNotice(response.data?.message || 'Material transferido e guia gerada com sucesso.', 'success');
@@ -673,6 +717,8 @@ export default function Transfers() {
         : quantity * Number(material.unitCost || 0);
       return {
         key: `${item.materialId}-${index}`,
+        sourceIndex: index,
+        requestItemId: item.requestItemId || null,
         name: material.name,
         detail: material.requiresSerial ? 'Equipamento controlado por serial' : `Material sem serial • saldo disponível ${qtyLabel(material.mainStock, material.unit)}`,
         quantity,
@@ -684,11 +730,18 @@ export default function Transfers() {
     })
     .filter(Boolean);
   const reviewQuantity = reviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const reviewWarning = selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500)
-    ? `O valor ultrapassa o limite individual de ${brl(selectedTechnician.transferApprovalLimit ?? 500)}. Ao confirmar, a carga será enviada para aprovação antes de movimentar o estoque.`
-    : zeroStockRelease
-      ? 'Todos os itens estão com quantidade zero. A solicitação será liberada sem movimentação de material.'
-      : 'Ao confirmar, o saldo do estoque será movimentado e a guia será gerada para a caixa do técnico.';
+  const reviewWarningParts = [];
+  if (selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500)) {
+    reviewWarningParts.push(`O valor ultrapassa o limite individual de ${brl(selectedTechnician.transferApprovalLimit ?? 500)}. Ao confirmar, a carga será enviada para aprovação antes de movimentar o estoque.`);
+  } else if (zeroStockRelease) {
+    reviewWarningParts.push('Todos os itens mantidos estão com quantidade zero. A solicitação será liberada sem movimentação de material.');
+  } else {
+    reviewWarningParts.push('Ao confirmar, o saldo do estoque será movimentado e a guia será gerada para a caixa do técnico.');
+  }
+  if (excludedRequestItems.length) {
+    reviewWarningParts.push(`${excludedRequestItems.length} item(ns) foram excluídos desta entrega e serão preservados no histórico da solicitação com quantidade entregue igual a zero.`);
+  }
+  const reviewWarning = reviewWarningParts.join(' ');
 
   const toolSourceTechnician = technicians.find((technician) => String(technician.id) === String(toolTransferForm.fromTechnicianId));
   const toolDestinationTechnician = technicians.find((technician) => String(technician.id) === String(toolTransferForm.technicianId));
@@ -755,7 +808,7 @@ export default function Transfers() {
             <label>👷 Técnico<select disabled={requestLinked} value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
             <label className="span-2">📝 Motivo/observação<input disabled={requestLinked} list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           </div>
-          {requestLinked ? <div className="viz-callout"><strong>Solicitação aprovada vinculada.</strong> Técnico e materiais permanecem vinculados ao pedido. Ajuste a quantidade que será realmente entregue conforme o saldo disponível e selecione os seriais dos equipamentos antes de transferir.</div> : form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
+          {requestLinked ? <div className="viz-callout"><strong>Solicitação aprovada vinculada.</strong> Ajuste a quantidade realmente entregue, selecione os seriais e use <strong>Excluir da entrega</strong> quando um item não for mais necessário. O item excluído continuará preservado no histórico do pedido com quantidade entregue igual a zero.</div> : form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
           {loadingStock && <div className="empty-state">Carregando materiais do estoque selecionado...</div>}
           <div className="subtoolbar"><h4>Itens da guia</h4>{!requestLinked && <button className="ghost" onClick={addItem}>➕ Adicionar item</button>}</div>
           {!requestLinked && !loadingStock && form.warehouseId && materialOptions.length === 0 && <div className="empty-state">Este estoque não possui saldo disponível para transferência.</div>}
@@ -774,7 +827,7 @@ export default function Transfers() {
             const availableMaterialOptions = optionsWithoutSelected(materialOptions, form.items, i);
             return (
               <div className="item-card transfer-item-card" key={i}>
-                <div className="item-head"><strong>📦 Item {i + 1}</strong>{!requestLinked && <button className="ghost danger-outline" onClick={() => removeItem(i)}>Remover</button>}</div>
+                <div className="item-head"><strong>📦 Item {i + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeItem(i)}>{requestLinked ? '🗑️ Excluir da entrega' : 'Remover'}</button></div>
                 <div className="form-grid">
                   <label>Material<select disabled={requestLinked} value={item.materialId} onChange={(e) => handleMaterialChange(i, e.target.value)}><option value="">Selecione o material</option>{material && !materialOptions.some((option) => Number(option.id) === Number(material.id)) && <option value={material.id}>{material.name}</option>}{availableMaterialOptions.map((m) => <option key={m.id} value={m.id}>{m.name} — disponível {qtyLabel(m.mainStock, m.unit)}</option>)}</select></label>
                   <label>Quantidade a transferir<input type="number" min={requestLinked ? 0 : 1} max={material ? Math.min(availableQuantityForMaterial(material, allSerialAssets), requestLinked ? toQuantityNumber(item.requestedQuantity) || Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY) : undefined} step="1" value={item.quantity ?? ''} disabled={!material} onChange={(e) => updateItem(i, { quantity: e.target.value, serialNumbers: material?.requiresSerial ? [] : item.serialNumbers })} placeholder={material ? 'Informe o que será realmente entregue' : 'Selecione o material primeiro'} />
@@ -837,6 +890,28 @@ export default function Transfers() {
               </div>
             );
           })}
+          {requestLinked && excludedRequestItems.length > 0 && (
+            <section className="excluded-request-items">
+              <div className="subtoolbar">
+                <div>
+                  <h4>🗑️ Itens excluídos desta entrega</h4>
+                  <small>Não serão movimentados nem aparecerão na guia. O pedido original permanece preservado para auditoria.</small>
+                </div>
+                <span className="badge warning">{excludedRequestItems.length} removido(s)</span>
+              </div>
+              <div className="excluded-request-items-list">
+                {excludedRequestItems.map((item) => (
+                  <article key={item.requestItemId || `${item.materialId}-${item.originalIndex}`}>
+                    <div>
+                      <strong>{item.removedMaterialName || item.requestMaterial?.name || 'Material'}</strong>
+                      <small>Solicitado: {qtyLabel(item.requestedQuantity, item.requestMaterial?.unit)}</small>
+                    </div>
+                    <button type="button" className="ghost" onClick={() => restoreExcludedRequestItem(item.requestItemId)}>↩️ Restaurar</button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </Modal>
 
@@ -849,6 +924,7 @@ export default function Transfers() {
           { label: 'Técnico de destino', value: selectedTechnician?.name, hint: selectedTechnician?.ContractorCompany?.name || 'Carga individual' },
           { label: 'Motivo', value: form.notes || 'Não informado' },
           { label: 'Tipo de fluxo', value: form.materialRequestId ? 'Entrega de solicitação aprovada' : 'Transferência direta' },
+          ...(requestLinked && excludedRequestItems.length ? [{ label: 'Itens excluídos', value: String(excludedRequestItems.length), hint: 'Preservados no histórico com entrega zero' }] : []),
         ]}
         items={reviewItems}
         totalQuantity={reviewQuantity}
@@ -856,6 +932,8 @@ export default function Transfers() {
         warning={reviewWarning}
         loading={saving}
         confirmLabel={selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500) ? 'Confirmar e enviar para aprovação' : zeroStockRelease ? 'Confirmar liberação sem material' : 'Confirmar transferência'}
+        onRemoveItem={requestLinked ? (item) => removeItem(item.sourceIndex) : undefined}
+        removeItemLabel="Excluir da entrega"
         onCancel={() => setReviewOpen(false)}
         onConfirm={save}
       />

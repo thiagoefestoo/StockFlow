@@ -20,6 +20,8 @@ export default function OperationReviewModal({
   confirmLabel = 'Confirmar operação',
   cancelLabel = 'Voltar e corrigir',
   loading = false,
+  onRemoveItem,
+  removeItemLabel = 'Excluir item',
   onCancel,
   onConfirm,
 }) {
@@ -75,6 +77,7 @@ export default function OperationReviewModal({
                   <th>Quantidade</th>
                   <th>Seriais</th>
                   <th>Valor</th>
+                  {onRemoveItem && <th className="action-cell">Ação</th>}
                 </tr>
               </thead>
               <tbody>
@@ -95,9 +98,21 @@ export default function OperationReviewModal({
                       ) : 'Não se aplica'}
                     </td>
                     <td>{brl(item.totalValue)}</td>
+                    {onRemoveItem && (
+                      <td className="action-cell">
+                        <button
+                          type="button"
+                          className="ghost danger-outline operation-review-remove"
+                          disabled={loading}
+                          onClick={() => onRemoveItem(item, index)}
+                        >
+                          🗑️ {removeItemLabel}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
-                {!items.length && <tr><td colSpan="5"><div className="empty-state">Nenhum item selecionado.</div></td></tr>}
+                {!items.length && <tr><td colSpan={onRemoveItem ? 6 : 5}><div className="empty-state">Nenhum item selecionado.</div></td></tr>}
               </tbody>
             </table>
           </div>

@@ -1,0 +1,70 @@
+ATUALIZAÇÃO 67 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(5).zip
+Tela analisada: revisão de transferência de solicitação aprovada.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/transferController.js
+backend/app/utils/requestDeliveryExclusions.js
+backend/scripts/test-request-delivery-exclusions.js
+frontend/src/pages/Transfers.jsx
+frontend/src/components/OperationReviewModal.jsx
+frontend/src/styles.css
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 109 arquivos JavaScript.
+
+2. Teste da regra
+   Comando: node backend/scripts/test-request-delivery-exclusions.js
+   Resultado:
+   - exclusão de um item e manutenção dos demais: aprovado;
+   - item que não pertence à solicitação: bloqueado;
+   - exclusão de todos os itens: bloqueada;
+   - item enviado e excluído simultaneamente: bloqueado;
+   - item omitido sem exclusão explícita: bloqueado;
+   - compatibilidade com requisição antiga: preservada.
+
+3. Frontend JSX
+   Arquivos validados pelo transpiler TypeScript:
+   - Transfers.jsx;
+   - OperationReviewModal.jsx.
+   Resultado: JSX válido.
+
+4. CSS
+   Blocos de abertura: 1004
+   Blocos de fechamento: 1004
+   Resultado: estrutura válida.
+
+5. Git
+   Comando: git diff --check
+   Resultado: aprovado, sem linhas em branco adicionais ou erros de espaço.
+
+6. Segurança operacional
+   - item excluído não entra na guia;
+   - item excluído não gera movimentação;
+   - item excluído não altera saldo;
+   - item original permanece no histórico;
+   - totais são recalculados antes da confirmação;
+   - exclusão pode ser desfeita antes da transferência;
+   - backend valida propriedade e cobertura dos itens;
+   - nenhuma migration;
+   - nenhum arquivo .env, .git ou node_modules no pacote.
+
+BUILD
+-----
+O aplicador executará a build completa do frontend no computador do usuário.
+A atualização somente será mantida se backend, teste da regra, build e
+git diff --check terminarem com sucesso.
+
+Em caso de falha, os arquivos anteriores e a build anterior serão restaurados.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA EM SISTEMA EM PRODUÇÃO.

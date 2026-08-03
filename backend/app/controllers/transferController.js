@@ -11,6 +11,7 @@ const { stockWhereForUser, assertWarehouseAccess, isPrivileged } = require('../u
 const { assertTechnicianAccess, filterTechniciansForUser } = require('../utils/technicianAccess');
 const { hasModuleAccess } = require('../config/modulePermissions');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
+const { resolveExcludedRequestItemIds, assertRequestDeliveryCoverage } = require('../utils/requestDeliveryExclusions');
 
 const transferInclude = [
   Technician,
@@ -193,7 +194,9 @@ exports.getAttachment = asyncHandler(async (req, res) => {
 
 exports.create = asyncHandler(async (req, res) => {
   const { technicianId, deliveredAt, notes, warehouseId, materialRequestId } = req.body;
-  let items = Array.isArray(req.body.items) ? req.body.items : [];
+  let items = Array.isArray(req.body.items) ? req.body.items.map((item) => ({ ...item })) : [];
+  const explicitExclusionsProvided = Object.prototype.hasOwnProperty.call(req.body, 'excludedRequestItemIds');
+  const rawExcludedRequestItemIds = req.body.excludedRequestItemIds;
   if (!technicianId) return fail(res, 400, 'Selecione o técnico de destino.');
   if (!items.length && !materialRequestId) return fail(res, 400, 'Adicione pelo menos um item à transferência.');
   try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
@@ -215,6 +218,8 @@ exports.create = asyncHandler(async (req, res) => {
   let linkedRequest = null;
   const linkedRequestItemsByMaterial = new Map();
   const linkedRequestItemsById = new Map();
+  const excludedRequestItemIdSet = new Set();
+  const excludedRequestItemsSummary = [];
   if (materialRequestId) {
     if (!['admin', 'supervisor', 'estoquista'].includes(req.user.role) || !hasModuleAccess(req.user, 'materialRequestDelivery')) {
       return fail(res, 403, 'Você não tem permissão para entregar cargas aprovadas. Solicite a liberação ao administrador.');
@@ -232,6 +237,17 @@ exports.create = asyncHandler(async (req, res) => {
       const rows = linkedRequestItemsByMaterial.get(materialId) || [];
       rows.push(requestItem);
       linkedRequestItemsByMaterial.set(materialId, rows);
+    }
+
+    try {
+      const resolvedExcludedIds = resolveExcludedRequestItemIds({
+        requestItems: linkedRequest.MaterialRequestItems || [],
+        rawExcludedRequestItemIds,
+        explicitExclusionsProvided,
+      });
+      for (const requestItemId of resolvedExcludedIds) excludedRequestItemIdSet.add(requestItemId);
+    } catch (error) {
+      return fail(res, error.statusCode || 400, error.message);
     }
 
     const submittedRequestItems = new Set();
@@ -254,15 +270,40 @@ exports.create = asyncHandler(async (req, res) => {
       // Isso permite concluir uma carga parcial e entregar normalmente os demais materiais.
     }
 
+    try {
+      assertRequestDeliveryCoverage({
+        requestItems: linkedRequest.MaterialRequestItems || [],
+        submittedRequestItemIds: submittedRequestItems,
+        excludedRequestItemIds: excludedRequestItemIdSet,
+        explicitExclusionsProvided,
+      });
+    } catch (error) {
+      return fail(res, error.statusCode || 400, error.message);
+    }
+
     for (const requestItem of linkedRequest.MaterialRequestItems || []) {
       const requestItemKey = Number(requestItem.id);
       if (submittedRequestItems.has(requestItemKey)) continue;
+
+      const explicitlyExcluded = excludedRequestItemIdSet.has(requestItemKey);
+
       items.push({
         materialId: requestItem.materialId,
         requestItemId: requestItem.id,
         quantity: 0,
         serialNumbers: [],
+        excludedFromDelivery: explicitlyExcluded,
       });
+
+      if (explicitlyExcluded) {
+        excludedRequestItemsSummary.push({
+          requestItemId: requestItem.id,
+          materialId: requestItem.materialId,
+          materialName: requestItem.Material?.name || 'Material',
+          requestedQuantity: qty(requestItem.quantity),
+          approvedQuantity: qty(requestItem.approvedQuantity || requestItem.quantity),
+        });
+      }
     }
   }
 
@@ -302,6 +343,7 @@ exports.create = asyncHandler(async (req, res) => {
           serialNumbers: [],
           unitCost,
           totalCost: 0,
+          excludedFromDelivery: Boolean(item.excludedFromDelivery),
         });
         continue;
       }
@@ -331,7 +373,7 @@ exports.create = asyncHandler(async (req, res) => {
           serialTotalCost += assetCost;
         }
         if (linkedRequest) {
-          deliveredRequestItems.push({ requestItemId: item.requestItemId || null, materialId: material.id, quantity: serials.length, serialNumbers: serials, unitCost: serials.length ? money(serialTotalCost / serials.length) : unitCost, totalCost: money(serialTotalCost) });
+          deliveredRequestItems.push({ requestItemId: item.requestItemId || null, materialId: material.id, quantity: serials.length, serialNumbers: serials, unitCost: serials.length ? money(serialTotalCost / serials.length) : unitCost, totalCost: money(serialTotalCost), excludedFromDelivery: false });
         }
       } else {
         await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: sourceWarehouseId, delta: -quantity, transaction });
@@ -341,7 +383,7 @@ exports.create = asyncHandler(async (req, res) => {
         totalQuantity += quantity;
         totalValue += quantity * unitCost;
         if (linkedRequest) {
-          deliveredRequestItems.push({ requestItemId: item.requestItemId || null, materialId: material.id, quantity, serialNumbers: [], unitCost, totalCost: money(quantity * unitCost) });
+          deliveredRequestItems.push({ requestItemId: item.requestItemId || null, materialId: material.id, quantity, serialNumbers: [], unitCost, totalCost: money(quantity * unitCost), excludedFromDelivery: false });
         }
       }
     }
@@ -394,12 +436,28 @@ exports.create = asyncHandler(async (req, res) => {
         severity: hasTransferredItems ? 'success' : 'warning',
         title: hasTransferredItems ? `Carga recebida ${linkedRequest.requestNumber}` : `Solicitação liberada sem saldo ${linkedRequest.requestNumber}`,
         message: hasTransferredItems
-          ? `Sua solicitação foi entregue. Confira sua caixa e assine a guia ${record.transferNumber}.`
-          : `Sua solicitação foi processada, porém nenhum material foi transferido porque o estoque estava zerado. Consulte a guia ${record.transferNumber}.`,
+          ? `Sua solicitação foi entregue. Confira sua caixa e assine a guia ${record.transferNumber}.${excludedRequestItemsSummary.length ? ` ${excludedRequestItemsSummary.length} item(ns) não foram incluídos nesta entrega por decisão da logística.` : ''}`
+          : `Sua solicitação foi processada, porém nenhum material foi transferido porque os itens mantidos estavam com quantidade zero.${excludedRequestItemsSummary.length ? ` ${excludedRequestItemsSummary.length} item(ns) foram excluídos desta entrega.` : ''} Consulte a guia ${record.transferNumber}.`,
         route: '/caixa-tecnico',
-        metadata: { requestId: linkedRequest.id, transferId: record.id },
+        metadata: { requestId: linkedRequest.id, transferId: record.id, excludedRequestItemIds: excludedRequestItemsSummary.map((item) => item.requestItemId) },
       }, { transaction });
-      await writeAudit({ req, action: 'deliver_from_request', entity: 'MaterialRequest', entityId: linkedRequest.id, message: hasTransferredItems ? `Solicitação ${linkedRequest.requestNumber} entregue pela guia ${record.transferNumber}.` : `Solicitação ${linkedRequest.requestNumber} liberada sem transferência física por saldo zerado, registrada na guia ${record.transferNumber}.`, beforeData: beforeRequest, afterData: linkedRequest.toJSON(), transaction });
+      const exclusionAuditSuffix = excludedRequestItemsSummary.length
+        ? ` ${excludedRequestItemsSummary.length} item(ns) foram excluídos da entrega e mantidos no histórico com quantidade entregue zero.`
+        : '';
+      await writeAudit({
+        req,
+        action: 'deliver_from_request',
+        entity: 'MaterialRequest',
+        entityId: linkedRequest.id,
+        message: `${hasTransferredItems ? `Solicitação ${linkedRequest.requestNumber} entregue pela guia ${record.transferNumber}.` : `Solicitação ${linkedRequest.requestNumber} liberada sem transferência física por saldo zerado, registrada na guia ${record.transferNumber}.`}${exclusionAuditSuffix}`,
+        beforeData: beforeRequest,
+        afterData: {
+          ...linkedRequest.toJSON(),
+          excludedRequestItems: excludedRequestItemsSummary,
+          deliveredRequestItems,
+        },
+        transaction,
+      });
     }
 
     await writeAudit({
@@ -408,13 +466,17 @@ exports.create = asyncHandler(async (req, res) => {
       entity: 'Transfer',
       entityId: record.id,
       message: hasTransferredItems ? `Guia ${record.transferNumber} transferiu material do estoque ${sourceWarehouse.name} para ${technician.name}.` : `Guia ${record.transferNumber} registrou liberação sem transferência física por saldo zerado no estoque ${sourceWarehouse.name}.`,
-      afterData: { ...record.toJSON(), sourceWarehouse: sourceWarehouse.toJSON(), technicianApprovalLimit, estimatedTotalValue, linkedMaterialRequestId: linkedRequest?.id || null, items },
+      afterData: { ...record.toJSON(), sourceWarehouse: sourceWarehouse.toJSON(), technicianApprovalLimit, estimatedTotalValue, linkedMaterialRequestId: linkedRequest?.id || null, excludedRequestItems: excludedRequestItemsSummary, items },
       transaction,
     });
     return record;
   });
 
-  return created(res, transfer, qty(transfer.totalQuantity) > 0 ? 'Transferência registrada e guia gerada.' : 'Solicitação liberada sem transferência física porque o estoque estava zerado.');
+  const excludedCount = excludedRequestItemsSummary.length;
+  const successMessage = qty(transfer.totalQuantity) > 0
+    ? `Transferência registrada e guia gerada.${excludedCount ? ` ${excludedCount} item(ns) foram excluídos desta entrega.` : ''}`
+    : `Solicitação liberada sem transferência física.${excludedCount ? ` ${excludedCount} item(ns) foram excluídos desta entrega.` : ''}`;
+  return created(res, transfer, successMessage);
 });
 
 

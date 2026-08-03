@@ -2721,8 +2721,23 @@ input[readonly], textarea[readonly] {
 .operation-review-totals article { background: linear-gradient(135deg, #eff6ff, #f8fafc); border-color: #bfdbfe; }
 .operation-review-totals strong { font-size: 1.5rem; color: #0f3f8f; }
 .operation-review-warning { margin: 0; }
+.operation-review-remove { white-space: nowrap; }
+.excluded-request-items { display: grid; gap: 12px; margin-top: 6px; padding: 16px; border: 1px dashed #f59e0b; border-radius: 18px; background: linear-gradient(135deg, #fff7ed, #fffbeb); }
+.excluded-request-items .subtoolbar { margin: 0; align-items: flex-start; }
+.excluded-request-items .subtoolbar h4 { margin: 0 0 4px; color: #9a3412; }
+.excluded-request-items .subtoolbar small { color: #7c2d12; }
+.excluded-request-items-list { display: grid; gap: 8px; }
+.excluded-request-items-list article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #fed7aa; border-radius: 14px; background: rgba(255, 255, 255, .82); }
+.excluded-request-items-list article div { display: grid; gap: 3px; min-width: 0; }
+.excluded-request-items-list article strong { color: #7c2d12; overflow-wrap: anywhere; }
+.excluded-request-items-list article small { color: #9a3412; }
 .option-used-note { color: #64748b; font-size: .82rem; font-weight: 750; }
-@media (max-width: 720px) { .operation-review-totals { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .operation-review-totals { grid-template-columns: 1fr; }
+  .operation-review-remove { width: 100%; }
+  .excluded-request-items-list article { align-items: stretch; flex-direction: column; }
+  .excluded-request-items-list article button { width: 100%; }
+}
 
 /* Atualização 42: transferência e termos de ferramentas */
 .tool-transfer-grid {
