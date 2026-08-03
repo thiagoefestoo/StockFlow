@@ -9,6 +9,7 @@ const { writeAudit } = require('../services/auditService');
 const { money } = require('../utils/number');
 const { normalizeBoolean, isTrue } = require('../utils/booleans');
 const { normalizeServiceOrderQuantityLimit } = require('../utils/serviceOrderQuantityLimit');
+const { hasModuleAccess } = require('../config/modulePermissions');
 
 const base = crudController(Material, 'Material');
 
@@ -165,6 +166,13 @@ exports.create = asyncHandler(async (req, res) => {
 
   if (!normalizedPayload.sku || !normalizedPayload.name) {
     return fail(res, 400, 'SKU e nome do material são obrigatórios.');
+  }
+  if (registerInAll && !hasModuleAccess(req.user, 'materialAllWarehouses')) {
+    return fail(
+      res,
+      403,
+      'Sua conta não possui permissão para cadastrar materiais em todos os estoques. Solicite a liberação em Administração de usuários.',
+    );
   }
   if (!registerInAll && !selectedWarehouseId) {
     return fail(res, 400, 'Selecione um estoque regional ou a opção Todos os estoques autorizados.');

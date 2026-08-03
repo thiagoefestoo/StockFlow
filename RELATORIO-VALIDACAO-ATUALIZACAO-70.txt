@@ -1,0 +1,81 @@
+ATUALIZAÇÃO 70 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE
+----
+Funcionalidade da atualização 69 aplicada sobre StockFlow-main(9).zip.
+
+OBJETIVO
+--------
+Permitir que o administrador conceda ou retire, por conta, o direito de
+cadastrar um material em todos os estoques autorizados.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/config/modulePermissions.js
+backend/app/controllers/materialController.js
+backend/scripts/test-material-all-warehouses-permission.js
+frontend/src/config/modulePermissions.js
+frontend/src/pages/Stock.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 110 arquivos JavaScript.
+
+2. Teste da permissão
+   Comando:
+   node backend/scripts/test-material-all-warehouses-permission.js
+
+   Resultado:
+   - administrador: permitido;
+   - supervisor padrão: bloqueado;
+   - estoquista padrão: bloqueado;
+   - técnico padrão: bloqueado;
+   - supervisor com permissão explícita: permitido;
+   - estoquista com permissão explícita: permitido.
+
+3. Frontend
+   Arquivos validados pelo transpiler TypeScript:
+   - frontend/src/config/modulePermissions.js;
+   - frontend/src/pages/Stock.jsx.
+
+   Resultado: JavaScript/JSX válido.
+
+4. Git
+   Comando: git diff --check
+   Resultado: aprovado sem erros.
+
+5. Segurança
+   - opção oculta sem permissão;
+   - formulário bloqueia seleção antiga sem permissão;
+   - backend retorna 403 para tentativa manual;
+   - escopo por cidade/estoque preservado;
+   - logística reversa e estoques inativos excluídos;
+   - administrador mantém acesso total;
+   - usuários não administradores não recebem acesso automaticamente.
+
+6. Banco e produção
+   - nenhuma migration;
+   - nenhuma coluna nova;
+   - nenhum usuário alterado em massa;
+   - nenhum material antigo alterado;
+   - nenhum saldo movimentado;
+   - nenhum arquivo .env, .git, node_modules ou upload incluído.
+
+BUILD LOCAL
+-----------
+O aplicador executará a build completa do frontend no computador do usuário.
+
+A atualização somente será mantida se:
+- o backend passar na validação;
+- o teste da permissão passar;
+- a build do frontend concluir;
+- o git diff --check for aprovado.
+
+Em caso de falha, os arquivos anteriores e a build anterior serão restaurados.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA.

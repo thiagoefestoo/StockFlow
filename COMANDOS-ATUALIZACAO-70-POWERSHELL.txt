@@ -1,0 +1,130 @@
+﻿ATUALIZAÇÃO 70 — COMANDOS POWERSHELL
+=======================================
+
+IMPORTANTE
+----------
+A atualização 70 já inclui a funcionalidade da atualização 69.
+Não é necessário aplicar os dois pacotes.
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-70-permissao-cadastro-todos-estoques.zip
+APLICAR-ATUALIZACAO-70.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-70-permissao-cadastro-todos-estoques.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-70.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/config/modulePermissions.js",
+    "backend/app/controllers/materialController.js",
+    "backend/scripts/test-material-all-warehouses-permission.js",
+    "frontend/src/config/modulePermissions.js",
+    "frontend/src/pages/Stock.jsx",
+    "frontend/build",
+    "ATUALIZACAO-70-PERMISSAO-CADASTRO-TODOS-ESTOQUES.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-70.txt",
+    "COMANDOS-ATUALIZACAO-70-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-70.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Controla permissão para cadastrar material em todos os estoques"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização possui backend e frontend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente na conta testada;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. CONCEDER A PERMISSÃO
+-----------------------
+
+Após os redeploys:
+
+1. entrar como administrador;
+2. abrir Administração;
+3. abrir Usuários e permissões;
+4. editar o usuário;
+5. abrir Permissões especiais;
+6. marcar Cadastrar material em todos os estoques;
+7. salvar.
+
+O usuário deve sair e entrar novamente, ou aguardar a atualização automática
+das permissões da sessão.
+
+5. TESTE CONTROLADO
+-------------------
+
+Conta sem permissão:
+
+- a opção Todos os estoques não deve aparecer;
+- cadastro em um estoque específico deve funcionar;
+- tentativa manual pela API deve receber 403.
+
+Conta com permissão:
+
+- a opção Todos os estoques deve aparecer;
+- o material deve ser criado uma única vez;
+- cada estoque autorizado deve aparecer com saldo zero;
+- estoque não autorizado não deve receber o cadastro.
