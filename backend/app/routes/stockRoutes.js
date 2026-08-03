@@ -7,6 +7,7 @@ router.get('/assets', requireModule('patrimony', 'transfers', 'receiving', 'tech
 router.get('/serial-life/:serial', requireModule('serialLife'), controller.serialLife);
 router.get('/movements', requireModule('movementHistory'), controller.movements);
 router.get('/technician-losses', requireModule('technicianLosses', 'lossEvaluation'), controller.losses);
+router.get('/technician-box/returns-history', requireModule('technicianReturns'), controller.returnHistory);
 router.get('/technician-box/:id', requireModule('technicianBoxControl', 'technicianInbox', 'technicianReturns'), controller.technicianBox);
 router.post('/technician-box/move-to-client', requireModule('technicianInbox', 'serviceOrders'), controller.moveFromTechnicianToClient);
 router.post('/technician-box/loss', requireModule('technicianLosses'), controller.registerTechnicianLoss);

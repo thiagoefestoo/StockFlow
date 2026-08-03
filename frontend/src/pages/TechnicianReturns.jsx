@@ -1,6 +1,9 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import KpiCard from '../components/KpiCard';
+import Pagination from '../components/Pagination';
+import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import OperationReviewModal from '../components/OperationReviewModal';
 import { duplicateItemIds, duplicateSerials, optionsWithoutSelected, selectedSerialsExcept } from '../utils/operationSelections';
 import { formatQuantity, formatQuantityLabel } from '../utils/formatQuantity';
@@ -11,6 +14,23 @@ function qtyLabel(value, unit = '') { return formatQuantityLabel(value, unit); }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
 function unique(values = []) { return Array.from(new Set(values.map((v) => String(v || '').trim()).filter(Boolean))); }
 function quantityNumber(value) { const parsed = Number(String(value ?? '').replace(',', '.')); return Number.isFinite(parsed) ? parsed : 0; }
+
+function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-'; }
+function returnItems(row) { return Array.isArray(row?.TransferItems) ? row.TransferItems : []; }
+function effectiveReturnStatus(row) {
+  if (row?.status === 'cancelado') return 'cancelado';
+  return row?.attachmentName ? 'assinado' : 'pendente_assinatura';
+}
+function returnStatusLabel(status) {
+  const labels = { pendente_assinatura: 'Pendente de assinatura', assinado: 'Assinado', cancelado: 'Cancelado' };
+  return labels[status] || status || '-';
+}
+function returnItemSummary(row) {
+  const items = returnItems(row);
+  if (!items.length) return '-';
+  const labels = items.slice(0, 2).map((item) => item.Material?.name || item.itemDescription || 'Material');
+  return labels.join(', ') + (items.length > 2 ? ` +${items.length - 2}` : '');
+}
 
 const emptyForm = { warehouseId: '', reference: '', notes: '', items: [] };
 
@@ -23,6 +43,16 @@ export default function TechnicianReturns() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyTechnicianId, setHistoryTechnicianId] = useState('');
+  const [historyWarehouseId, setHistoryWarehouseId] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPagination, setHistoryPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState('');
+  const [historyDetails, setHistoryDetails] = useState(null);
 
   async function loadInitial() {
     const [techRes, whRes] = await Promise.all([
@@ -43,7 +73,27 @@ export default function TechnicianReturns() {
     setBox(res.data.data);
   }
 
-  useEffect(() => { loadInitial(); }, []);
+  async function loadHistory(targetPage = historyPage) {
+    setHistoryLoading(true);
+    try {
+      setHistoryMessage('');
+      const params = { page: targetPage, pageSize: 15 };
+      if (historySearch.trim()) params.search = historySearch.trim();
+      if (historyTechnicianId) params.technicianId = historyTechnicianId;
+      if (historyWarehouseId) params.warehouseId = historyWarehouseId;
+      if (historyStatus) params.status = historyStatus;
+      const response = await api.get('/stock/technician-box/returns-history', { params });
+      setHistoryRows(response.data.data || []);
+      setHistoryPagination(response.data.pagination || { page: targetPage, pageSize: 15, total: response.data.data?.length || 0, totalPages: 1 });
+      setHistoryPage(targetPage);
+    } catch (error) {
+      setHistoryMessage(error.response?.data?.message || 'Erro ao carregar o histórico de retornos.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => { loadInitial(); loadHistory(1); }, []);
   useEffect(() => { if (selectedTech) loadBox(selectedTech); }, [selectedTech]);
 
   const materialsInBox = useMemo(() => {
@@ -145,7 +195,7 @@ export default function TechnicianReturns() {
       setMessage(`✅ Material retornado para o estoque e guia ${transfer?.transferNumber || transfer?.reference || ''} gerada em Transferências para anexar documento.`);
       setReviewOpen(false);
       setForm({ ...emptyForm, warehouseId: form.warehouseId });
-      await loadBox(selectedTech);
+      await Promise.all([loadBox(selectedTech), loadHistory(1)]);
     } catch (error) {
       setMessage(`❌ ${error.response?.data?.message || error.message || 'Erro ao retornar material.'}`);
     } finally {
@@ -175,12 +225,17 @@ export default function TechnicianReturns() {
     };
   });
   const reviewValue = reviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
+  const historyStats = useMemo(() => ({
+    quantity: historyRows.reduce((sum, row) => sum + Number(row.totalQuantity || 0), 0),
+    value: historyRows.reduce((sum, row) => sum + Number(row.totalValue || 0), 0),
+    pending: historyRows.filter((row) => effectiveReturnStatus(row) === 'pendente_assinatura').length,
+  }), [historyRows]);
 
   return (
     <div className="page-grid technician-return-page">
       <div className="toolbar">
         <div><h2>↩️ Retorno da caixa do técnico para estoque</h2><p>Retire material da responsabilidade do técnico, escolha o estoque de destino e gere uma guia em Transferências para anexar documento/assinatura.</p></div>
-        <button className="ghost" onClick={() => loadBox(selectedTech)}>🔄 Atualizar</button>
+        <button className="ghost" onClick={() => Promise.all([loadBox(selectedTech), loadHistory(historyPage)])}>🔄 Atualizar</button>
       </div>
 
       {message && <div className={`alert ${message.startsWith('❌') ? 'danger' : 'success'}`}>{message}</div>}
@@ -264,6 +319,79 @@ export default function TechnicianReturns() {
         <div className="submit-bar"><span>Destino: <strong>{selectedWarehouse?.name || 'não selecionado'}</strong></span><button disabled={loading} onClick={openReview}>↩️ Revisar retorno para estoque</button></div>
       </section>
 
+      <section className="panel technician-return-history">
+        <div className="subtoolbar">
+          <div>
+            <span className="eyebrow">🧾 Rastreabilidade</span>
+            <h3>Histórico de retornos do técnico</h3>
+            <p>Consulte os retornos já realizados, da operação mais recente para a mais antiga, sem sair desta página.</p>
+          </div>
+          <button type="button" className="ghost" onClick={() => loadHistory(historyPage)} disabled={historyLoading}>{historyLoading ? 'Atualizando...' : '🔄 Atualizar histórico'}</button>
+        </div>
+
+        {historyMessage && <div className="alert danger">{historyMessage}</div>}
+
+        <div className="kpi-grid small">
+          <KpiCard label="Retornos encontrados" value={historyPagination.total || 0} />
+          <KpiCard label="Qtd. nesta página" value={formatQuantity(historyStats.quantity)} />
+          <KpiCard label="Valor nesta página" value={brl(historyStats.value)} tone="success" />
+          <KpiCard label="Pendentes de assinatura" value={historyStats.pending} tone={historyStats.pending ? 'warning' : 'success'} />
+        </div>
+
+        <div className="form-grid return-history-filters">
+          <label>🔎 Pesquisar
+            <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') loadHistory(1); }} placeholder="Guia, referência ou observação" />
+          </label>
+          <label>👷 Técnico
+            <select value={historyTechnicianId} onChange={(e) => setHistoryTechnicianId(e.target.value)}>
+              <option value="">Todos</option>
+              {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+            </select>
+          </label>
+          <label>🏬 Estoque de destino
+            <select value={historyWarehouseId} onChange={(e) => setHistoryWarehouseId(e.target.value)}>
+              <option value="">Todos</option>
+              {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'}</option>)}
+            </select>
+          </label>
+          <label>Status da guia
+            <select value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value)}>
+              <option value="">Todos</option>
+              <option value="pendente_assinatura">Pendente de assinatura</option>
+              <option value="assinado">Assinado</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+          </label>
+          <label className="filter-action"><span>&nbsp;</span><button type="button" onClick={() => loadHistory(1)} disabled={historyLoading}>{historyLoading ? 'Carregando...' : 'Aplicar filtros'}</button></label>
+        </div>
+
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Guia</th><th>Técnico</th><th>Destino</th><th>Materiais</th><th>Qtd.</th><th>Valor</th><th>Status</th><th>Assinatura</th><th>Operador</th><th className="action-cell">Opções</th></tr></thead>
+            <tbody>
+              {historyRows.map((row) => {
+                const status = effectiveReturnStatus(row);
+                return <tr key={row.id}>
+                  <td>{dt(row.deliveredAt || row.createdAt)}</td>
+                  <td><strong>{row.transferNumber || '-'}</strong></td>
+                  <td>{row.Technician?.name || '-'}</td>
+                  <td>{row.Warehouse?.name || '-'}<br /><small>{[row.Warehouse?.city, row.Warehouse?.state].filter(Boolean).join('/') || '-'}</small></td>
+                  <td title={returnItems(row).map((item) => item.Material?.name || item.itemDescription || 'Material').join(', ')}>{returnItemSummary(row)}</td>
+                  <td>{formatQuantity(row.totalQuantity || 0)}</td>
+                  <td>{brl(row.totalValue)}</td>
+                  <td><span className={`badge ${status}`}>{returnStatusLabel(status)}</span></td>
+                  <td>{row.attachmentName ? <span className="badge success">Documento anexado</span> : <span className="badge pendente_assinatura">Sem documento</span>}</td>
+                  <td>{row.createdBy?.name || 'Sistema'}</td>
+                  <td><div className="action-toolbar"><button type="button" className="info" onClick={() => setHistoryDetails(row)}>🔎 Detalhes</button></div></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!historyLoading && historyRows.length === 0 && <div className="empty-state">Nenhum retorno encontrado com os filtros informados.</div>}
+        <Pagination {...historyPagination} page={historyPage} loading={historyLoading} onPageChange={loadHistory} />
+      </section>
+
       <OperationReviewModal
         open={reviewOpen}
         title="Revisar retorno do técnico para o estoque"
@@ -283,6 +411,30 @@ export default function TechnicianReturns() {
         onCancel={() => setReviewOpen(false)}
         onConfirm={save}
       />
+
+      <DetailsModal open={!!historyDetails} title="🔎 Detalhes do retorno técnico" onClose={() => setHistoryDetails(null)}>
+        {historyDetails && <>
+          <DetailGrid fields={[
+            ['Data do retorno', dt(historyDetails.deliveredAt || historyDetails.createdAt)],
+            ['Guia', historyDetails.transferNumber],
+            ['Técnico de origem', historyDetails.Technician?.name],
+            ['Estoque de destino', historyDetails.Warehouse?.name],
+            ['Cidade de destino', [historyDetails.Warehouse?.city, historyDetails.Warehouse?.state].filter(Boolean).join('/')],
+            ['Quantidade total', formatQuantity(historyDetails.totalQuantity || 0)],
+            ['Valor total', brl(historyDetails.totalValue)],
+            ['Status', returnStatusLabel(effectiveReturnStatus(historyDetails))],
+            ['Documento', historyDetails.attachmentName || 'Não anexado'],
+            ['Responsável pela assinatura', historyDetails.signatureResponsible],
+            ['Operador', historyDetails.createdBy?.name || 'Sistema'],
+            ['Observação', historyDetails.notes],
+          ]} />
+          <section className="detail-section">
+            <h4>Materiais retornados</h4>
+            <div className="table-wrap"><table><thead><tr><th>Material</th><th>Qtd.</th><th>Serial</th><th>Valor unitário</th><th>Total</th></tr></thead><tbody>{returnItems(historyDetails).map((item) => <tr key={item.id}><td>{item.Material?.name || item.itemDescription || '-'}</td><td>{formatQuantity(item.quantity || 0)}</td><td>{item.serialNumber || item.SerializedAsset?.serialNumber || '-'}</td><td>{brl(item.unitCost)}</td><td>{brl(item.totalCost)}</td></tr>)}</tbody></table></div>
+            {!returnItems(historyDetails).length && <div className="empty-state">Nenhum item vinculado a esta guia.</div>}
+          </section>
+        </>}
+      </DetailsModal>
     </div>
   );
 }

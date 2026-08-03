@@ -1,0 +1,102 @@
+﻿ATUALIZAÇÃO 66 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-66-historico-retorno-tecnico.zip
+APLICAR-ATUALIZACAO-66.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-66-historico-retorno-tecnico.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-66.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/stockController.js",
+    "backend/app/routes/stockRoutes.js",
+    "frontend/src/pages/TechnicianReturns.jsx",
+    "ATUALIZACAO-66-HISTORICO-RETORNO-TECNICO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-66.txt",
+    "COMANDOS-ATUALIZACAO-66-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-66.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Exibe histórico na página de retorno técnico"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+1. Push concluído no GitHub
+2. Redeploy do backend no Render
+3. Testar a saúde da API
+4. Redeploy do frontend na Vercel
+5. Sair e entrar novamente no sistema
+6. Pressionar Ctrl+F5
+
+Teste de saúde:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. CONFERÊNCIA
+--------------
+
+Na página Retorno Técnico:
+
+- verificar a seção Histórico de retornos;
+- confirmar que o retorno mais recente está no topo;
+- testar os filtros;
+- abrir os detalhes de uma guia;
+- confirmar técnico, cidade, materiais e quantidades;
+- registrar um retorno de teste controlado;
+- confirmar que o novo retorno aparece no topo;
+- verificar que a guia continua disponível em Transferências.

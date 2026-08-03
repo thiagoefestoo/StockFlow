@@ -230,6 +230,92 @@ exports.movements = asyncHandler(async (req, res) => {
     : ok(res, movements);
 });
 
+
+exports.returnHistory = asyncHandler(async (req, res) => {
+  const where = { transferType: 'retorno' };
+  const and = [];
+
+  if (req.query.status === 'cancelado') {
+    where.status = 'cancelado';
+  } else if (req.query.status === 'assinado') {
+    where.status = 'assinado';
+    and.push({ [Op.and]: [{ attachmentName: { [Op.ne]: null } }, { attachmentName: { [Op.ne]: '' } }] });
+  } else if (req.query.status === 'pendente_assinatura') {
+    and.push({
+      [Op.or]: [
+        { status: 'pendente_assinatura' },
+        {
+          [Op.and]: [
+            { status: 'assinado' },
+            { [Op.or]: [{ attachmentName: null }, { attachmentName: '' }] },
+          ],
+        },
+      ],
+    });
+  }
+  if (req.query.technicianId) where.technicianId = Number(req.query.technicianId);
+
+  if (req.query.search) {
+    const q = `%${String(req.query.search).trim()}%`;
+    and.push({
+      [Op.or]: [
+        { transferNumber: { [Op.iLike]: q } },
+        { notes: { [Op.iLike]: q } },
+        { signatureResponsible: { [Op.iLike]: q } },
+      ],
+    });
+  }
+
+  const requestedWarehouseId = Number(req.query.warehouseId || 0);
+  const warehouseScope = stockWhereForUser(req.user, requestedWarehouseId || null);
+  const allTechnicians = await Technician.findAll({
+    attributes: ['id', 'defaultWarehouseId', 'serviceCities'],
+    include: [{ model: Warehouse, as: 'defaultWarehouse', attributes: ['id', 'city'] }],
+  });
+  const visibleTechnicianIds = filterTechniciansForUser(req.user, allTechnicians)
+    .map((technician) => Number(technician.id));
+
+  if (req.user?.role === 'tecnico') {
+    and.push({ technicianId: Number(req.user.technicianId || -1) });
+  } else if (isPrivileged(req.user)) {
+    if (requestedWarehouseId > 0) and.push(warehouseScope);
+  } else {
+    and.push({
+      [Op.or]: [
+        warehouseScope,
+        { technicianId: visibleTechnicianIds.length ? { [Op.in]: visibleTechnicianIds } : -1 },
+      ],
+    });
+  }
+
+  if (and.length) where[Op.and] = and;
+
+  const pagination = paginationFromQuery(req.query, { defaultPageSize: 15, maxPageSize: 100 });
+  const limit = pagination.enabled ? pagination.limit : Math.min(Number(req.query.limit || 100), 300);
+  const include = [
+    Technician,
+    Warehouse,
+    { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
+    { model: TransferItem, include: [Material, SerializedAsset] },
+  ];
+
+  const [returns, total] = await Promise.all([
+    Transfer.findAll({
+      where,
+      attributes: { exclude: ['attachmentData'] },
+      include,
+      order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
+      limit,
+      ...(pagination.enabled ? { offset: pagination.offset } : {}),
+    }),
+    pagination.enabled ? Transfer.count({ where }) : Promise.resolve(0),
+  ]);
+
+  return pagination.enabled
+    ? okPaginated(res, returns, paginationMeta(total, pagination.page, pagination.pageSize))
+    : ok(res, returns);
+});
+
 exports.technicianBox = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');

@@ -1,0 +1,66 @@
+ATUALIZAÇÃO 66 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(4).zip
+
+OBJETIVO
+--------
+Exibir o histórico de retornos também na página Retorno Técnico.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/stockController.js
+backend/app/routes/stockRoutes.js
+frontend/src/pages/TechnicianReturns.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 107 arquivos JavaScript.
+
+2. Frontend
+   TechnicianReturns.jsx validado pelo transpiler TypeScript com suporte a JSX.
+   Resultado: JSX válido.
+
+3. Git
+   Comando: git diff --check
+   Resultado: aprovado sem erros de espaços ou linhas adicionais no final.
+
+4. Segurança
+   - endpoint protegido pelo módulo technicianReturns;
+   - filtro por estoque/cidade aplicado no backend;
+   - técnicos limitados ao escopo da conta;
+   - usuário técnico limitado ao próprio cadastro;
+   - attachmentData não é retornado na listagem;
+   - histórico é somente leitura.
+
+5. Comportamento
+   - paginação de 15 registros;
+   - ordenação por data, criação e ID decrescentes;
+   - filtros por técnico, estoque, status e pesquisa;
+   - novo retorno recarrega a caixa e o histórico;
+   - detalhes exibem todos os itens da guia;
+   - guias sem documento aparecem como pendentes de assinatura.
+
+6. Banco e operação
+   - nenhuma migration;
+   - nenhum saldo movimentado;
+   - nenhum retorno alterado;
+   - nenhuma transferência alterada;
+   - nenhum registro excluído;
+   - nenhum arquivo .env incluído;
+   - nenhuma pasta .git ou node_modules incluída.
+
+BUILD LOCAL
+-----------
+O aplicador executará a build completa do frontend no computador do usuário.
+A atualização somente será mantida se a sintaxe, a build e o git diff --check
+forem concluídos com sucesso. Em caso de falha, os arquivos anteriores serão
+restaurados automaticamente.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA.
