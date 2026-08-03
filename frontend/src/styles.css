@@ -267,13 +267,32 @@ button.success, .success-btn { background: #ecfdf5; color: #166534; border: 1px 
 
 .accordion-menu .menu-group { border-bottom: 1px solid rgba(148,163,184,.08); padding-bottom: 10px; }
 .accordion-menu .menu-group.closed { padding-bottom: 4px; }
-.live-pulse { margin: -8px 0 18px; border: 1px solid rgba(14,165,233,.22); background: linear-gradient(135deg, rgba(236,253,245,.94), rgba(239,246,255,.92)); border-radius: 22px; padding: 12px 16px; display: flex; gap: 12px; align-items: center; box-shadow: 0 10px 28px rgba(15,23,42,.05); overflow: hidden; }
-.pulse-dot { width: 12px; height: 12px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 0 6px rgba(34,197,94,.13), 0 0 24px rgba(34,197,94,.6); flex: 0 0 auto; }
-.live-content { min-width: 0; flex: 1; display: grid; gap: 4px; }
-.live-content strong { color: #064e3b; }
-.live-ticker { display: flex; gap: 8px; overflow: hidden; flex-wrap: wrap; }
-.live-ticker span { background: rgba(255,255,255,.78); border: 1px solid rgba(148,163,184,.2); color: #0f172a; border-radius: 999px; padding: 6px 10px; font-weight: 800; font-size: .88rem; }
-.live-pulse small { color: #0369a1; font-weight: 900; white-space: nowrap; }
+.live-pulse { --live-accent: #0ea5e9; --live-accent-rgb: 14,165,233; --live-soft: rgba(14,165,233,.12); position: relative; margin: -8px 0 18px; border: 1px solid rgba(var(--live-accent-rgb), .28); background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(var(--live-accent-rgb), .07)); border-radius: 22px; padding: 14px 16px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; box-shadow: 0 12px 30px rgba(15,23,42,.07); overflow: hidden; isolation: isolate; }
+.live-pulse::before { content: ''; position: absolute; width: 180px; height: 180px; right: 7%; top: -135px; border-radius: 999px; background: var(--live-soft); filter: blur(2px); z-index: -1; }
+.live-pulse.tone-success { --live-accent: #16a34a; --live-accent-rgb: 22,163,74; --live-soft: rgba(34,197,94,.14); }
+.live-pulse.tone-warning { --live-accent: #d97706; --live-accent-rgb: 217,119,6; --live-soft: rgba(245,158,11,.16); }
+.live-pulse.tone-danger { --live-accent: #dc2626; --live-accent-rgb: 220,38,38; --live-soft: rgba(239,68,68,.14); }
+.live-pulse.tone-info { --live-accent: #0284c7; --live-accent-rgb: 2,132,199; --live-soft: rgba(14,165,233,.14); }
+.live-tip-icon { width: 46px; height: 46px; border-radius: 16px; display: grid; place-items: center; background: var(--live-soft); border: 1px solid rgba(var(--live-accent-rgb), .32); color: var(--live-accent); font-weight: 950; font-size: .96rem; box-shadow: inset 0 0 0 1px rgba(255,255,255,.45), 0 8px 18px rgba(var(--live-accent-rgb), .12); }
+.live-content { min-width: 0; display: grid; gap: 3px; animation: live-tip-enter .38s ease both; }
+.live-tip-kicker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.live-tip-kicker strong { color: var(--live-accent); font-size: .74rem; text-transform: uppercase; letter-spacing: .09em; }
+.live-tip-kicker span { border-radius: 999px; background: var(--live-soft); color: var(--live-accent); padding: 2px 7px; font-size: .7rem; font-weight: 950; }
+.live-content h3 { margin: 0; color: #0f172a; font-size: 1rem; line-height: 1.3; }
+.live-content p { margin: 0; color: #475569; font-weight: 700; font-size: .87rem; line-height: 1.38; }
+.live-tip-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; max-width: 360px; }
+.live-tip-actions button { border-radius: 12px; padding: 8px 11px; font-size: .8rem; font-weight: 900; white-space: nowrap; }
+.live-tip-open { border: 1px solid var(--live-accent); background: var(--live-accent); color: #fff; box-shadow: 0 7px 16px rgba(var(--live-accent-rgb), .2); }
+.live-tip-open:hover { filter: brightness(.96); transform: translateY(-1px); }
+.live-tip-next { border: 1px solid rgba(var(--live-accent-rgb), .3); background: rgba(255,255,255,.8); color: var(--live-accent); }
+.live-tip-next:hover { background: var(--live-soft); }
+.live-tip-next span { font-size: 1.15rem; line-height: .7; }
+.live-tip-actions small { color: #64748b; font-weight: 850; white-space: nowrap; font-size: .72rem; }
+.live-tip-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(148,163,184,.14); overflow: hidden; }
+.live-tip-progress span { display: block; width: 100%; height: 100%; background: linear-gradient(90deg, var(--live-accent), rgba(var(--live-accent-rgb), .45)); transform-origin: left; animation: live-tip-progress 30s linear forwards; }
+@keyframes live-tip-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes live-tip-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .live-content, .live-tip-progress span { animation: none; } }
 .transfer-wizard { display: grid; gap: 18px; }
 .transfer-summary-card { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .transfer-summary-card > div { border: 1px solid var(--line); background: linear-gradient(135deg, #f8fafc, #eef6ff); border-radius: 18px; padding: 14px; display: grid; gap: 4px; }
@@ -318,7 +337,8 @@ button.success, .success-btn { background: #ecfdf5; color: #166534; border: 1px 
 .chart-tone-purple { border-top: 5px solid rgba(168,85,247,.85); }
 .chart-tone-cyan { border-top: 5px solid rgba(14,165,233,.85); }
 @media (max-width: 980px) { .audit-grid { grid-template-columns: 1fr; } .serial-picker-head, .json-compare { grid-template-columns: 1fr; } .transfer-summary-card { grid-template-columns: 1fr; } }
-@media (max-width: 720px) { .live-pulse { align-items: flex-start; flex-direction: column; } .live-ticker { flex-direction: column; align-items: flex-start; } .serial-grid { max-height: none; } }
+@media (max-width: 900px) { .live-pulse { grid-template-columns: auto minmax(0, 1fr); } .live-tip-actions { grid-column: 1 / -1; justify-content: flex-start; max-width: none; padding-left: 60px; } }
+@media (max-width: 720px) { .live-pulse { grid-template-columns: auto minmax(0, 1fr); padding: 13px 13px 16px; } .live-tip-icon { width: 40px; height: 40px; border-radius: 14px; } .live-tip-actions { padding-left: 0; } .live-tip-actions small { width: 100%; } .live-tip-open, .live-tip-next { flex: 1; } .serial-grid { max-height: none; } }
 
 /* Caixa/admin e recebimento fiscal avançado */
 .alert.success { background: #dcfce7; color: #166534; }

@@ -1,0 +1,151 @@
+﻿ATUALIZAÇÃO 65 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-65-dicas-inteligentes-dinamicas.zip
+APLICAR-ATUALIZACAO-65.ps1
+
+ORDEM RECOMENDADA
+-----------------
+Caso a atualização 64 ainda não tenha sido aplicada:
+
+1. aplicar a atualização 64;
+2. aplicar a atualização 65;
+3. realizar um único commit;
+4. fazer um único redeploy no Render e na Vercel.
+
+A atualização 65 não substitui arquivos da atualização 64.
+
+1. APLICAR A ATUALIZAÇÃO 65
+---------------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-65-dicas-inteligentes-dinamicas.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-65.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. COMMIT APENAS DA ATUALIZAÇÃO 65
+----------------------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "frontend/src/components/LivePulse.jsx",
+    "frontend/src/styles.css",
+    "ATUALIZACAO-65-DICAS-INTELIGENTES-DINAMICAS.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-65.txt",
+    "COMANDOS-ATUALIZACAO-65-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-65.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+git commit -m "Adiciona dicas inteligentes e dinâmicas"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. COMMIT CONJUNTO DAS ATUALIZAÇÕES 64 E 65
+--------------------------------------------
+
+Use este bloco quando as duas atualizações forem aplicadas antes do commit:
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/biController.js",
+    "backend/app/utils/financialBi.js",
+    "backend/scripts/test-financial-bi.js",
+    "frontend/src/pages/BIFinancial.jsx",
+    "frontend/src/components/WarehouseValueOverview.jsx",
+    "frontend/src/components/LivePulse.jsx",
+    "frontend/src/styles.css",
+    "ATUALIZACAO-64-CORRECAO-BI-FINANCEIRO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-64.txt",
+    "COMANDOS-ATUALIZACAO-64-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-64.ps1",
+    "VERIFICAR-BI-FINANCEIRO-PRODUCAO.ps1",
+    "ATUALIZACAO-65-DICAS-INTELIGENTES-DINAMICAS.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-65.txt",
+    "COMANDOS-ATUALIZACAO-65-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-65.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+git commit -m "Corrige BI financeiro e adiciona dicas inteligentes"
+
+$branch = (git branch --show-current).Trim()
+git push origin $branch
+
+4. REDEPLOY
+-----------
+
+1. Push concluído no GitHub
+2. Redeploy do backend no Render, devido à atualização 64
+3. Verificar a saúde da API
+4. Redeploy do frontend na Vercel
+5. Sair e entrar novamente
+6. Pressionar Ctrl+F5
+
+Teste do backend:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+5. CONFERÊNCIA VISUAL
+---------------------
+
+Confirmar que:
+
+- uma dica é exibida por vez;
+- a barra leva 30 segundos para completar;
+- a mensagem muda automaticamente;
+- o botão Próxima funciona;
+- uma aprovação real aparece antes das dicas gerais;
+- transferências sem assinatura geram aviso;
+- OS abertas geram aviso;
+- os botões abrem as páginas corretas;
+- um técnico não recebe atalhos para módulos bloqueados;
+- o layout funciona no celular.

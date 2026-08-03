@@ -1,0 +1,70 @@
+ATUALIZAÇÃO 65 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+ESCOPO
+------
+Faixa global de dicas e operação ao vivo.
+
+ARQUIVOS ALTERADOS
+------------------
+frontend/src/components/LivePulse.jsx
+frontend/src/styles.css
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 107 arquivos JavaScript.
+   Observação: nenhum arquivo do backend foi alterado.
+
+2. Frontend JSX
+   LivePulse.jsx validado pelo transpiler TypeScript com suporte a JSX.
+
+3. CSS
+   - 991 blocos de abertura;
+   - 991 blocos de fechamento;
+   - nenhuma inconsistência estrutural;
+   - compatibilidade responsiva;
+   - tratamento para usuários com redução de movimento ativada.
+
+4. Git
+   Comando: git diff --check
+   Resultado: aprovado sem erros de espaços ou linha adicional no final.
+
+5. Lógica operacional
+   - rotação configurada para 30 segundos;
+   - avanço manual reinicia o período;
+   - rotação pausa quando a aba não está visível;
+   - pendências reais aparecem antes de dicas genéricas;
+   - notificações não lidas entram na sequência;
+   - dicas respeitam módulos e rotas autorizados;
+   - mudança de página atualiza a dica contextual;
+   - atalhos levam somente a rotas permitidas.
+
+6. Desempenho
+   - nenhum endpoint novo;
+   - removida a consulta da faixa ao cockpit;
+   - utilizados os mesmos endpoints em cache do sino de notificações;
+   - deduplicação de requisições preservada.
+
+BUILD LOCAL
+-----------
+O pacote não inclui node_modules nem frontend/build.
+
+O aplicador executará `npm run build --prefix frontend` no computador do usuário.
+A atualização somente será mantida se a build e o `git diff --check` terminarem
+com sucesso. Em caso de falha, os arquivos anteriores serão restaurados.
+
+BANCO E OPERAÇÃO
+----------------
+- nenhuma migration;
+- nenhum registro alterado;
+- nenhum saldo movimentado;
+- nenhum documento excluído;
+- nenhum arquivo .env incluído;
+- nenhuma pasta .git incluída;
+- nenhum upload de produção incluído.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA COM BACKUP E ROLLBACK AUTOMÁTICO.
