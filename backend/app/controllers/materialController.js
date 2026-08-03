@@ -9,6 +9,7 @@ const { adjustBalance } = require('../services/stockService');
 const { writeAudit } = require('../services/auditService');
 const { money, qty } = require('../utils/number');
 const { normalizeBoolean, isTrue } = require('../utils/booleans');
+const { normalizeServiceOrderQuantityLimit } = require('../utils/serviceOrderQuantityLimit');
 
 const base = crudController(Material, 'Material');
 
@@ -28,6 +29,15 @@ function normalizeMaterialPayload(payload = {}, current = {}) {
     if (Object.prototype.hasOwnProperty.call(normalized, field)) {
       normalized[field] = normalizeBoolean(normalized[field], Boolean(current[field]));
     }
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'maxQuantityPerServiceOrder')) {
+    normalized.maxQuantityPerServiceOrder = normalizeServiceOrderQuantityLimit(
+      normalized.maxQuantityPerServiceOrder,
+    );
+  }
+  const effectiveSku = String(normalized.sku || current.sku || '').trim().toUpperCase();
+  if (effectiveSku === 'ATFX200571' && normalized.maxQuantityPerServiceOrder == null) {
+    normalized.maxQuantityPerServiceOrder = 2;
   }
   return normalized;
 }

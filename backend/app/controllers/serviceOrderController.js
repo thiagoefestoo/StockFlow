@@ -11,6 +11,7 @@ const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation
 const { normalizeServiceOrderCity, resolveServiceOrderLocation } = require('../utils/serviceOrderLocation');
 const { stockWhereForUser, isPrivileged } = require('../utils/warehouseAccess');
 const { assertTechnicianAccess } = require('../utils/technicianAccess');
+const { assertMaterialServiceOrderQuantity } = require('../utils/serviceOrderQuantityLimit');
 
 function serviceRequiresSerial(serviceType, addressChangeType) {
   return serviceType === 'instalacao'
@@ -104,8 +105,28 @@ exports.create = asyncHandler(async (req, res) => {
       if (serials.length > 1) return fail(res, 400, 'Selecione apenas 1 serial por OS.');
       if (serials.length === 0) return fail(res, 400, `Para baixar ${material.name}, selecione o serial do equipamento ou remova o item.`);
       totalSerials += serials.length;
-    } else if (qty(item.quantity) <= 0) {
-      return fail(res, 400, `Informe uma quantidade válida para ${material.name}.`);
+    } else {
+      try {
+        assertMaterialServiceOrderQuantity(material, item.quantity);
+      } catch (error) {
+        if (error.code === 'SERVICE_ORDER_MATERIAL_LIMIT_EXCEEDED') {
+          await writeAudit({
+            req,
+            action: 'service_order_quantity_limit_blocked',
+            entity: 'Material',
+            entityId: material.id,
+            message: `Baixa de OS bloqueada para ${material.sku}: quantidade ${error.details.requestedQuantity} acima do limite ${error.details.maxQuantityPerServiceOrder}.`,
+            afterData: {
+              ...error.details,
+              technicianId: Number(technicianId),
+              serviceType,
+              addressChangeType: addressChangeType || null,
+              customerContract: normalizeDoc(customerCpf),
+            },
+          });
+        }
+        return fail(res, error.statusCode || 400, error.message);
+      }
     }
   }
   if (serialRequired && totalSerials !== 1) return fail(res, 400, 'Este tipo de serviço exige exatamente 1 serial de equipamento.');
@@ -132,7 +153,9 @@ exports.create = asyncHandler(async (req, res) => {
       const material = await Material.findByPk(item.materialId, { transaction });
       if (!material) throw new Error('Material não encontrado.');
       const serials = Array.isArray(item.serialNumbers) ? item.serialNumbers.map((s) => String(s).trim()).filter(Boolean) : [];
-      const quantity = qty(material.requiresSerial ? serials.length : item.quantity);
+      const quantity = material.requiresSerial
+        ? qty(serials.length)
+        : assertMaterialServiceOrderQuantity(material, item.quantity);
       const unitCost = money(item.unitCost ?? material.unitCost);
       if (quantity <= 0) continue;
       if (material.requiresSerial) {

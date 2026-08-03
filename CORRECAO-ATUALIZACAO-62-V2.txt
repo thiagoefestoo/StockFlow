@@ -1,0 +1,18 @@
+ATUALIZAÇÃO 62 V2 — CORREÇÃO DO PACOTE
+========================================
+
+Motivo da revisão:
+O arquivo frontend/src/utils/serviceOrderRules.js continha uma linha em branco
+adicional no final. O comando git diff --check bloqueou corretamente a aplicação.
+
+Os avisos de conversão LF para CRLF são informativos e não indicam falha.
+
+A revisão V2:
+- remove a linha em branco adicional;
+- mantém a mesma regra funcional do limite do conector verde;
+- não altera o banco de dados durante a aplicação local;
+- mantém backup e restauração automática;
+- foi validada com git diff --check em um repositório temporário.
+
+A execução anterior foi revertida pelo aplicador. Nenhuma alteração daquela
+tentativa foi mantida no repositório.

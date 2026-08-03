@@ -1,0 +1,60 @@
+ATUALIZAÇÃO 62 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(1).zip
+
+OBJETIVO
+--------
+Limitar o conector verde ATFX200571 a 2 unidades por ordem de serviço em todos os tipos de serviço.
+
+ALTERAÇÕES VALIDADAS
+--------------------
+1. Backend
+   - coluna opcional maxQuantityPerServiceOrder no modelo Material;
+   - inclusão segura da coluna pelo runtimeSchemaService;
+   - configuração do SKU ATFX200571 com limite 2 quando nulo;
+   - validação antes da transação;
+   - revalidação dentro da transação;
+   - auditoria de tentativas bloqueadas;
+   - proteção contra chamada direta à API.
+
+2. Frontend
+   - Caixa do Técnico mostra e respeita o limite;
+   - Portal do Técnico mostra e respeita o limite;
+   - cadastro do material permite configurar limite;
+   - materiais serializados preservam a regra de serial.
+
+TESTES EXECUTADOS
+-----------------
+1. node backend/scripts/check-syntax.js
+   Resultado: Sintaxe validada em 105 arquivos JS.
+
+2. node backend/scripts/test-service-order-quantity-limit.js
+   Resultado:
+   - quantidade 1 permitida;
+   - quantidade 2 permitida;
+   - quantidade 3 bloqueada;
+   - material comum sem limite preservado;
+   - material serializado preservado;
+   - fallback de segurança do SKU ATFX200571 validado.
+
+3. CI=true npm run build --prefix frontend
+   Resultado: Compiled successfully.
+   Build JavaScript: frontend/build/static/js/main.4e9deb2d.js
+   Build CSS: frontend/build/static/css/main.4fcda747.css
+
+SEGURANÇA OPERACIONAL
+---------------------
+- nenhuma OS existente alterada;
+- nenhum saldo alterado durante a preparação;
+- nenhuma movimentação criada;
+- nenhuma tabela recriada;
+- nenhuma coluna removida;
+- pacote sem .env, .git e node_modules;
+- uploads de produção não incluídos.
+
+RESULTADO
+---------
+APROVADO PARA DEPLOY CONTROLADO: RENDER PRIMEIRO, VERCEL DEPOIS.

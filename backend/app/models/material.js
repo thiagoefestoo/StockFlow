@@ -40,6 +40,7 @@ const Material = sequelize.define('Material', {
   serialPattern: { type: DataTypes.STRING(120), allowNull: true },
   allowTechnicianTransfer: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   allowCustomerInstall: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  maxQuantityPerServiceOrder: { type: DataTypes.DECIMAL(12, 3), allowNull: true, defaultValue: null },
   requiresReturnOnRemoval: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   autoLowStockAlert: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   notes: { type: DataTypes.TEXT, allowNull: true },

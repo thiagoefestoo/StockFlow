@@ -30,3 +30,36 @@ export function composeServiceNotes(notes, serviceType, addressChangeType) {
     : '';
   return [addressNote, String(notes || '').trim()].filter(Boolean).join(' | ');
 }
+
+const PROTECTED_SERVICE_ORDER_LIMITS = Object.freeze({
+  ATFX200571: 2,
+});
+
+export function materialServiceOrderQuantityLimit(material) {
+  if (!material || material.requiresSerial) return null;
+  const parsed = Number(material.maxQuantityPerServiceOrder);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  const sku = String(material.sku || '').trim().toUpperCase();
+  return PROTECTED_SERVICE_ORDER_LIMITS[sku] || null;
+}
+
+export function validateMaterialServiceOrderQuantity(material, quantity) {
+  if (!material || material.requiresSerial) return null;
+  const parsedQuantity = Number(quantity || 0);
+  if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+    return `Informe uma quantidade válida para ${material.name}.`;
+  }
+  const limit = materialServiceOrderQuantityLimit(material);
+  if (limit !== null && parsedQuantity > limit) {
+    return `O material ${material.name} permite no máximo ${limit} unidade(s) por ordem de serviço. Quantidade informada: ${parsedQuantity}.`;
+  }
+  return null;
+}
+
+export function serviceOrderQuantityInputMax(material, availableQuantity) {
+  const available = Number(availableQuantity || 0);
+  const limit = materialServiceOrderQuantityLimit(material);
+  if (limit === null) return available > 0 ? available : undefined;
+  if (available <= 0) return limit;
+  return Math.min(available, limit);
+}

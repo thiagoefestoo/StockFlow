@@ -1,0 +1,100 @@
+ATUALIZAÇÃO 62 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-62-limite-conector-verde-os.zip
+APLICAR-ATUALIZACAO-62.ps1
+VERIFICAR-LIMITE-CONECTOR-PRODUCAO.ps1
+
+1. APLICAR NO REPOSITÓRIO LOCAL
+-------------------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-62-limite-conector-verde-os.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-62.ps1"
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/models/material.js",
+    "backend/app/services/runtimeSchemaService.js",
+    "backend/app/controllers/materialController.js",
+    "backend/app/controllers/serviceOrderController.js",
+    "backend/app/utils/serviceOrderQuantityLimit.js",
+    "backend/scripts/test-service-order-quantity-limit.js",
+    "frontend/src/utils/serviceOrderRules.js",
+    "frontend/src/pages/Stock.jsx",
+    "frontend/src/pages/TechnicianPortal.jsx",
+    "frontend/src/pages/TechnicianInbox.jsx",
+    "frontend/build",
+    "ATUALIZACAO-62-LIMITE-MAXIMO-POR-OS.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-62.txt",
+    "COMANDOS-ATUALIZACAO-62-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-62.ps1",
+    "VERIFICAR-LIMITE-CONECTOR-PRODUCAO.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas nos arquivos preparados."
+}
+
+git status --short
+
+git commit -m "Adiciona limite máximo de material por ordem de serviço"
+
+$branch = (git branch --show-current).Trim()
+
+git push origin $branch
+
+3. DEPLOY
+---------
+
+Ordem obrigatória:
+
+1. criar snapshot/backup do banco;
+2. redeploy do backend no Render;
+3. aguardar o Render ficar saudável;
+4. verificar o limite pela API;
+5. redeploy do frontend na Vercel;
+6. sair e entrar novamente no sistema;
+7. pressionar Ctrl+F5.
+
+4. TESTAR A API
+---------------
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+& "$HOME\Downloads\VERIFICAR-LIMITE-CONECTOR-PRODUCAO.ps1"
+
+5. TESTE FUNCIONAL
+------------------
+
+Na Caixa do Técnico ou Portal do Técnico:
+
+- selecionar o conector verde ATFX200571;
+- confirmar que aparece Limite por OS: 2;
+- quantidade 1 deve ser aceita;
+- quantidade 2 deve ser aceita;
+- quantidade 3 deve ser bloqueada antes da confirmação;
+- nenhuma OS ou movimentação deve ser criada na tentativa bloqueada.

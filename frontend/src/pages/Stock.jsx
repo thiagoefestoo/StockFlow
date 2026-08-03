@@ -38,6 +38,7 @@ const empty = {
   qualityInspection: 'visual',
   allowTechnicianTransfer: true,
   allowCustomerInstall: true,
+  maxQuantityPerServiceOrder: '',
   requiresReturnOnRemoval: false,
   autoLowStockAlert: true,
   notes: '',
@@ -275,6 +276,7 @@ export default function Stock() {
       active: booleanValue(form.active),
       allowTechnicianTransfer: booleanValue(form.allowTechnicianTransfer),
       allowCustomerInstall: booleanValue(form.allowCustomerInstall),
+      maxQuantityPerServiceOrder: booleanValue(form.requiresSerial) || String(form.maxQuantityPerServiceOrder ?? '').trim() === '' ? null : asNumber(form.maxQuantityPerServiceOrder),
       requiresReturnOnRemoval: booleanValue(form.requiresReturnOnRemoval),
       autoLowStockAlert: booleanValue(form.autoLowStockAlert),
       initialWarehouseId: form.initialWarehouseId || '',
@@ -293,6 +295,10 @@ export default function Stock() {
     }
     if (!payload.id && !payload.initialWarehouseId) {
       setError('Selecione o estoque regional onde o material será cadastrado.');
+      return;
+    }
+    if (payload.maxQuantityPerServiceOrder !== null && payload.maxQuantityPerServiceOrder <= 0) {
+      setError('O limite máximo por OS precisa ser maior que zero ou ficar em branco.');
       return;
     }
     if (!payload.id && payload.requiresSerial && payload.initialQuantity > 0 && payload.initialSerialNumbers.length !== payload.initialQuantity) {
@@ -463,6 +469,7 @@ export default function Stock() {
               <div className="check-grid span-2">
                 <label className="check"><input type="checkbox" checked={booleanValue(form.requiresSerial)} onChange={(e) => change('requiresSerial', e.target.checked)} /> Exige número de série</label>
                 <label className="check"><input type="checkbox" checked={booleanValue(form.allowTechnicianTransfer)} onChange={(e) => change('allowTechnicianTransfer', e.target.checked)} /> Pode ir para técnico</label>
+                <MaterialField label="Limite máximo por OS" hint={booleanValue(form.requiresSerial) ? 'Equipamentos serializados continuam usando a regra própria de 1 serial por OS.' : 'Deixe em branco para não limitar. O limite vale para todos os tipos de serviço e é validado novamente pelo backend.'}><input type="number" min="0.001" step="0.001" disabled={booleanValue(form.requiresSerial)} value={booleanValue(form.requiresSerial) ? '' : (form.maxQuantityPerServiceOrder ?? '')} onChange={(e) => change('maxQuantityPerServiceOrder', e.target.value)} placeholder="Ex.: 2" /></MaterialField>
                 <label className="check"><input type="checkbox" checked={booleanValue(form.allowCustomerInstall)} onChange={(e) => change('allowCustomerInstall', e.target.checked)} /> Pode ser baixado para cliente/OS</label>
                 <label className="check"><input type="checkbox" checked={booleanValue(form.requiresReturnOnRemoval)} onChange={(e) => change('requiresReturnOnRemoval', e.target.checked)} /> Exige retorno em retirada</label>
                 <label className="check"><input type="checkbox" checked={booleanValue(form.autoLowStockAlert)} onChange={(e) => change('autoLowStockAlert', e.target.checked)} /> Gerar alerta automático de estoque</label>
@@ -496,7 +503,7 @@ export default function Stock() {
           <DetailGrid fields={[
             ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', booleanValue(details.requiresSerial) ? 'Sim' : 'Não'],
             ['Total em todos os estoques', formatQuantity(materialAuthorizedQuantity(details), details.unit)], ['Estoque mínimo', formatQuantity(details.minStock, details.unit)], ['Estoque máximo', formatQuantity(details.maxStock, details.unit)], ['Ponto de pedido', formatQuantity(details.reorderPoint, details.unit)], ['Valor unitário', brl(details.unitCost)], ['Prazo reposição', `${details.leadTimeDays || 0} dia(s)`],
-            ['Criticidade', details.criticality], ['Política', details.movementPolicy], ['Inspeção', details.qualityInspection], ['Pode ir para técnico', details.allowTechnicianTransfer], ['Pode ir para cliente', details.allowCustomerInstall], ['Exige retorno', details.requiresReturnOnRemoval],
+            ['Criticidade', details.criticality], ['Política', details.movementPolicy], ['Inspeção', details.qualityInspection], ['Limite máximo por OS', details.requiresSerial ? 'Regra por serial' : (details.maxQuantityPerServiceOrder ? `${Number(details.maxQuantityPerServiceOrder)} unidade(s)` : 'Sem limite')], ['Pode ir para técnico', details.allowTechnicianTransfer], ['Pode ir para cliente', details.allowCustomerInstall], ['Exige retorno', details.requiresReturnOnRemoval],
             ['NCM', details.ncm], ['Código fiscal', details.fiscalCode], ['Código contábil', details.accountingCode], ['Centro de custo', details.costCenter], ['Prefixo patrimonial', details.patrimonyPrefix], ['Local', details.storageLocation], ['Prateleira', details.shelf],
             ['Garantia', `${details.warrantyDays || 0} dia(s)`], ['Vida útil', `${details.usefulLifeMonths || 0} mês(es)`], ['Peso', `${details.weightKg || 0} kg`], ['Dimensões', details.dimensions], ['Status', details.active ? 'Ativo' : 'Inativo'], ['Criado em', details.createdAt],
           ]} />

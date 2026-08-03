@@ -38,6 +38,33 @@ async function ensureNotificationSchema(queryInterface) {
   }
 }
 
+async function ensureMaterialServiceOrderLimitSchema(queryInterface) {
+  let materials = await queryInterface.describeTable('materials').catch(() => null);
+  if (!materials) return;
+
+  if (!materials.maxQuantityPerServiceOrder) {
+    await queryInterface.addColumn('materials', 'maxQuantityPerServiceOrder', {
+      type: DataTypes.DECIMAL(12, 3),
+      allowNull: true,
+      defaultValue: null,
+    });
+    console.log('✅ Coluna materials.maxQuantityPerServiceOrder criada para limite por OS.');
+    materials = await queryInterface.describeTable('materials').catch(() => null);
+  }
+
+  if (!materials?.maxQuantityPerServiceOrder) {
+    throw new Error('Não foi possível validar a coluna de limite máximo por OS.');
+  }
+
+  await sequelize.query(`
+    UPDATE materials
+    SET "maxQuantityPerServiceOrder" = 2
+    WHERE UPPER(TRIM(sku)) = 'ATFX200571'
+      AND "maxQuantityPerServiceOrder" IS NULL
+  `);
+  console.log('✅ Limite de 2 unidades por OS garantido para o conector verde ATFX200571.');
+}
+
 async function ensureMaterialCategorySchema(queryInterface) {
   const materials = await queryInterface.describeTable('materials').catch(() => null);
   if (!materials?.category) return;
@@ -554,6 +581,7 @@ async function ensureRuntimeSchema() {
 
   await ensureTechnicianCompanySchema(queryInterface);
   await ensureMaterialCategorySchema(queryInterface);
+  await ensureMaterialServiceOrderLimitSchema(queryInterface);
   await ensureNotificationSchema(queryInterface);
   await ensureTechnicianToolsSchema(queryInterface);
   await ensureTechnicianToolDocumentsSchema(queryInterface);
