@@ -1,0 +1,98 @@
+﻿ATUALIZAÇÃO 68 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-68-busca-multiplos-seriais-retorno.zip
+APLICAR-ATUALIZACAO-68.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-68-busca-multiplos-seriais-retorno.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-68.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "frontend/src/pages/TechnicianReturns.jsx",
+    "ATUALIZACAO-68-BUSCA-MULTIPLOS-SERIAIS-RETORNO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-68.txt",
+    "COMANDOS-ATUALIZACAO-68-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-68.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Adiciona busca de múltiplos seriais no retorno técnico"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+Esta atualização altera somente o frontend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do frontend na Vercel;
+3. aguardar a publicação;
+4. sair e entrar novamente no sistema;
+5. pressionar Ctrl+F5.
+
+Não é necessário redeploy manual do Render e não existe migration de banco.
+
+4. TESTE CONTROLADO
+-------------------
+
+1. abrir Retorno Técnico;
+2. selecionar um técnico que tenha várias ONUs na caixa;
+3. adicionar um item serializado;
+4. colar três seriais, um por linha;
+5. clicar em Filtrar;
+6. confirmar que aparecem somente os equipamentos encontrados;
+7. clicar em Selecionar tudo filtrado;
+8. confirmar o contador de selecionados;
+9. clicar em Limpar pesquisa e confirmar que a seleção permanece;
+10. abrir a revisão do retorno;
+11. confirmar os seriais antes de finalizar.

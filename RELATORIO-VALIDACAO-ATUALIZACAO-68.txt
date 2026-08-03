@@ -1,0 +1,66 @@
+ATUALIZAÇÃO 68 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main (1).zip
+Tela analisada: Retorno Técnico — seleção de equipamentos serializados.
+
+ARQUIVO DE CÓDIGO ALTERADO
+--------------------------
+frontend/src/pages/TechnicianReturns.jsx
+
+ALTERAÇÕES
+----------
+- campo simples de pesquisa substituído por área para colar vários seriais;
+- suporte a serial e MAC;
+- separação por linha, vírgula, ponto e vírgula, tabulação ou espaço;
+- aplicação do filtro por botão ou Ctrl+Enter;
+- seleção de todos os resultados filtrados;
+- limpeza separada de pesquisa e seleção;
+- contador de encontrados, disponíveis e selecionados;
+- seleção continua impedindo duplicidade entre itens.
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Frontend JSX
+   TechnicianReturns.jsx validado pelo transpiler TypeScript com suporte a JSX.
+   Resultado: válido.
+
+2. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 109 arquivos JavaScript.
+   Observação: nenhum arquivo do backend foi alterado.
+
+3. Regra da pesquisa
+   - lista com dois seriais encontrou exatamente dois equipamentos;
+   - pesquisa por MAC encontrou o equipamento correspondente;
+   - comparação sem diferenciação entre letras maiúsculas e minúsculas.
+
+4. Git
+   Comando equivalente a git diff --check.
+   Resultado: aprovado, sem espaços inválidos ou linha adicional no final.
+
+5. Segurança operacional
+   - nenhum endpoint novo;
+   - nenhuma migration;
+   - nenhum saldo movimentado;
+   - nenhum retorno antigo alterado;
+   - backend continua validando propriedade dos seriais;
+   - pacote sem .env, .git, node_modules, build e uploads de produção.
+
+BUILD LOCAL
+-----------
+O aplicador executará `npm run build --prefix frontend` no computador do usuário.
+A atualização somente será mantida se a build e o `git diff --check` terminarem
+com sucesso. Em caso de falha, o arquivo anterior e a build anterior serão
+restaurados automaticamente.
+
+REDEPLOY
+--------
+A atualização é exclusivamente de frontend. Não é necessário realizar redeploy
+manual do backend no Render. Após o push, faça o redeploy da Vercel.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA.

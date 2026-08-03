@@ -12,6 +12,9 @@ import { RETURN_REASON_OPTIONS, RETURN_REFERENCE_OPTIONS } from '../constants/op
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function qtyLabel(value, unit = '') { return formatQuantityLabel(value, unit); }
 function splitSerials(value) { return String(value || '').split(/\n|,|;/).map((s) => s.trim()).filter(Boolean); }
+function parseSerialTerms(value) { return String(value || '').split(/[\n,;\t ]+/).map((item) => item.trim()).filter(Boolean); }
+function normalizeSerialText(value) { return String(value || '').trim().toLowerCase(); }
+function assetSearchText(asset) { return [asset.serialNumber, asset.mac, asset.brand, asset.model, asset.Material?.name].filter(Boolean).join(' ').toLowerCase(); }
 function unique(values = []) { return Array.from(new Set(values.map((v) => String(v || '').trim()).filter(Boolean))); }
 function quantityNumber(value) { const parsed = Number(String(value ?? '').replace(',', '.')); return Number.isFinite(parsed) ? parsed : 0; }
 
@@ -104,10 +107,14 @@ export default function TechnicianReturns() {
   }, [box]);
 
   function assetsByMaterial(materialId, search = '') {
-    const q = String(search || '').trim().toLowerCase();
+    const terms = parseSerialTerms(search);
     return (box?.assets || [])
       .filter((asset) => Number(asset.materialId) === Number(materialId))
-      .filter((asset) => !q || [asset.serialNumber, asset.mac, asset.brand, asset.model, asset.Material?.name].filter(Boolean).join(' ').toLowerCase().includes(q));
+      .filter((asset) => {
+        if (!terms.length) return true;
+        const text = assetSearchText(asset);
+        return terms.some((term) => text.includes(normalizeSerialText(term)));
+      });
   }
 
   function balanceFor(materialId) {
@@ -118,7 +125,7 @@ export default function TechnicianReturns() {
     if (!selectedTech) { setMessage('Selecione o técnico.'); return; }
     if (!materialsInBox.length) { setMessage('Este técnico não possui material na caixa.'); return; }
     setMessage('');
-    setForm({ ...form, items: [...form.items, { materialId: '', quantity: '', serialNumbers: [], search: '' }] });
+    setForm({ ...form, items: [...form.items, { materialId: '', quantity: '', serialNumbers: [], assetSearch: '', assetSearchApplied: '' }] });
   }
 
   function updateItem(index, patch) {
@@ -143,6 +150,11 @@ export default function TechnicianReturns() {
   function selectVisibleSerials(index, assets) {
     const current = form.items[index]?.serialNumbers || [];
     const next = unique([...current, ...assets.map((asset) => asset.serialNumber)]);
+    updateItem(index, { serialNumbers: next, quantity: next.length });
+  }
+
+  function replaceSerialsForItem(index, serials) {
+    const next = unique(serials);
     updateItem(index, { serialNumbers: next, quantity: next.length });
   }
 
@@ -280,14 +292,15 @@ export default function TechnicianReturns() {
           const material = materialsInBox.find((m) => Number(m.id) === Number(item.materialId));
           const availableMaterials = optionsWithoutSelected(materialsInBox, form.items, index);
           const serialsSelectedElsewhere = selectedSerialsExcept(form.items, index);
-          const visibleAssets = assetsByMaterial(item.materialId, item.search)
+          const allSerialAssets = assetsByMaterial(item.materialId);
+          const visibleAssets = assetsByMaterial(item.materialId, item.assetSearchApplied)
             .filter((asset) => !serialsSelectedElsewhere.has(String(asset.serialNumber || '').toUpperCase()));
           return (
             <div className="item-card movement-item-card" key={index}>
               <div className="item-head"><strong>📦 Item {index + 1}</strong><button className="ghost danger-outline" onClick={() => removeItem(index)}>Remover</button></div>
               <div className="form-grid">
                 <label>Material
-                  <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '0', serialNumbers: [], search: '' })}>
+                  <select value={item.materialId} onChange={(e) => updateItem(index, { materialId: e.target.value, quantity: '0', serialNumbers: [], assetSearch: '', assetSearchApplied: '' })}>
                     <option value="">Selecione o material</option>
                     {availableMaterials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name} — disponível {qtyLabel(mat.availableQty, mat.unit)}</option>)}
                   </select>
@@ -301,8 +314,24 @@ export default function TechnicianReturns() {
               {material?.requiresSerial && (
                 <div className="serial-picker compact-serial-picker">
                   <div className="serial-picker-head serial-picker-head-stacked">
-                    <div><strong>🏷️ Seriais na caixa do técnico</strong><span>{visibleAssets.length} filtrado(s) • {item.serialNumbers?.length || 0} selecionado(s)</span></div>
-                    <div className="serial-actions-row"><input value={item.search || ''} onChange={(e) => updateItem(index, { search: e.target.value })} placeholder="Buscar serial ou MAC" /><button type="button" className="ghost" onClick={() => selectVisibleSerials(index, visibleAssets)}>Selecionar tudo filtrado</button><button type="button" className="ghost" onClick={() => updateItem(index, { serialNumbers: [], quantity: '' })}>Limpar</button></div>
+                    <div><strong>🏷️ Seriais na caixa do técnico</strong><span>{visibleAssets.length} disponível(is) filtrado(s) • {allSerialAssets.length} na caixa • {item.serialNumbers?.length || 0} selecionado(s)</span></div>
+                    <div className="serial-quick-filter">
+                      <label>
+                        <span>🔎 Pesquisar vários seriais ou MACs (cole a coluna do Excel — um por linha)</span>
+                        <textarea
+                          rows="4"
+                          value={item.assetSearch || ''}
+                          onChange={(e) => updateItem(index, { assetSearch: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) updateItem(index, { assetSearchApplied: item.assetSearch || '' }); }}
+                          placeholder={'Cole aqui a lista, uma por linha:\n485754430E7407B7\n485754430E8F05B7\n485754430E7973B7'}
+                        />
+                      </label>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => updateItem(index, { assetSearchApplied: item.assetSearch || '' })}>🔍 Filtrar</button>
+                        <button type="button" className="ghost" onClick={() => updateItem(index, { assetSearch: '', assetSearchApplied: '' })}>Limpar pesquisa</button>
+                      </div>
+                    </div>
+                    <div className="serial-actions-row"><button type="button" className="ghost" onClick={() => selectVisibleSerials(index, visibleAssets)}>Selecionar tudo filtrado</button><button type="button" className="ghost" onClick={() => replaceSerialsForItem(index, [])}>Limpar seleção</button></div>
                   </div>
                   {(item.serialNumbers || []).length === 0 && <small>Sem serial selecionado, este item será registrado com quantidade 0 e não movimentará o estoque.</small>}
                   <div className="serial-grid">
