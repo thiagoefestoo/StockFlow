@@ -162,6 +162,10 @@ export default function Stock() {
     : 'Nenhum estoque autorizado para calcular.';
 
   const cities = useMemo(() => Array.from(new Set(warehouses.map((warehouse) => warehouse.city).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
+  const registrationWarehouses = useMemo(
+    () => warehouses.filter((warehouse) => !warehouse.status || warehouse.status === 'ativo'),
+    [warehouses],
+  );
 
   const warehousesForCity = useMemo(() => warehouses.filter((warehouse) => !filters.city || warehouse.city === filters.city), [warehouses, filters.city]);
 
@@ -232,7 +236,7 @@ export default function Stock() {
   }, [form]);
 
   function openCreate() {
-    const firstWarehouse = warehouses.find((w) => w.status === 'ativo') || warehouses[0];
+    const firstWarehouse = registrationWarehouses[0];
     setForm({ ...empty, initialWarehouseId: firstWarehouse ? String(firstWarehouse.id) : '' });
     setError('');
     setModal(true);
@@ -279,10 +283,11 @@ export default function Stock() {
       maxQuantityPerServiceOrder: booleanValue(form.requiresSerial) || String(form.maxQuantityPerServiceOrder ?? '').trim() === '' ? null : asNumber(form.maxQuantityPerServiceOrder),
       requiresReturnOnRemoval: booleanValue(form.requiresReturnOnRemoval),
       autoLowStockAlert: booleanValue(form.autoLowStockAlert),
-      initialWarehouseId: form.initialWarehouseId || '',
+      registerInAllWarehouses: form.initialWarehouseId === '__ALL__',
+      initialWarehouseId: form.initialWarehouseId === '__ALL__' ? '' : (form.initialWarehouseId || ''),
       initialQuantity: Math.max(0, asNumber(form.initialQuantity)),
-      initialSerialNumbers: splitSerials(form.initialSerialsText),
-      initialSerialsText: form.initialSerialsText || '',
+      initialSerialNumbers: form.initialWarehouseId === '__ALL__' ? [] : splitSerials(form.initialSerialsText),
+      initialSerialsText: form.initialWarehouseId === '__ALL__' ? '' : (form.initialSerialsText || ''),
     };
   }
 
@@ -293,12 +298,16 @@ export default function Stock() {
       setError('Informe SKU e nome do material para continuar.');
       return;
     }
-    if (!payload.id && !payload.initialWarehouseId) {
-      setError('Selecione o estoque regional onde o material será cadastrado.');
+    if (!payload.id && !payload.initialWarehouseId && !payload.registerInAllWarehouses) {
+      setError('Selecione um estoque regional ou a opção Todos os estoques autorizados.');
       return;
     }
     if (payload.maxQuantityPerServiceOrder !== null && payload.maxQuantityPerServiceOrder <= 0) {
       setError('O limite máximo por OS precisa ser maior que zero ou ficar em branco.');
+      return;
+    }
+    if (!payload.id && payload.registerInAllWarehouses && payload.requiresSerial && splitSerials(form.initialSerialsText).length > 0) {
+      setError('Para cadastrar em todos os estoques, o material serializado deve iniciar sem seriais. Registre os seriais depois pela Entrada em Estoque da cidade correta.');
       return;
     }
     if (!payload.id && payload.requiresSerial && payload.initialQuantity > 0 && payload.initialSerialNumbers.length !== payload.initialQuantity) {
@@ -453,11 +462,36 @@ export default function Stock() {
           </section>
 
           {!form.id && <section className="form-section span-2">
-            <div className="section-header"><span>3</span><div><h4>Cadastro direto no estoque regional</h4><p>Não existe mais entrada em estoque central. Todo material novo deve nascer vinculado a um estoque regional.</p></div></div>
+            <div className="section-header"><span>3</span><div><h4>Disponibilidade por estoque regional</h4><p>Cadastre em uma unidade específica ou inicialize o material em todos os estoques operacionais autorizados para sua conta.</p></div></div>
             <div className="form-grid">
-              <MaterialField label="Estoque regional obrigatório"><select value={form.initialWarehouseId || ''} onChange={(e) => change('initialWarehouseId', e.target.value)}><option value="">Selecione o estoque regional</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}</select></MaterialField>
-              {!booleanValue(form.requiresSerial) && <MaterialField label="Quantidade inicial" hint="O catálogo começa com saldo zero. A quantidade real será registrada somente na tela de Entrada em Estoque."><input type="number" value={0} disabled readOnly /></MaterialField>}
-              {booleanValue(form.requiresSerial) && <MaterialField label="Seriais iniciais" className="span-2" hint={`${splitSerials(form.initialSerialsText).length} serial(is) informado(s). Cada linha vira um equipamento em estoque.`}><textarea rows="5" value={form.initialSerialsText || ''} onChange={(e) => change('initialSerialsText', e.target.value)} placeholder="Um serial por linha" /></MaterialField>}
+              <MaterialField
+                label="Onde cadastrar o material"
+                hint={form.initialWarehouseId === '__ALL__'
+                  ? `O material será inicializado com saldo zero em ${registrationWarehouses.length} estoque(s) operacional(is) autorizado(s).`
+                  : 'Escolha uma unidade ou use a opção para todos os estoques autorizados.'}
+              >
+                <select
+                  value={form.initialWarehouseId || ''}
+                  onChange={(e) => setForm((current) => ({
+                    ...current,
+                    initialWarehouseId: e.target.value,
+                    initialSerialsText: e.target.value === '__ALL__' ? '' : current.initialSerialsText,
+                  }))}
+                >
+                  <option value="">Selecione o estoque regional</option>
+                  <option value="__ALL__">🌐 Todos os estoques operacionais autorizados</option>
+                  {registrationWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name} • {w.city || w.region || w.code}</option>)}
+                </select>
+              </MaterialField>
+              {!booleanValue(form.requiresSerial) && <MaterialField label="Quantidade inicial" hint="O catálogo começa com saldo zero em cada estoque escolhido. A quantidade real será registrada somente na tela de Entrada em Estoque."><input type="number" value={0} disabled readOnly /></MaterialField>}
+              {booleanValue(form.requiresSerial) && form.initialWarehouseId === '__ALL__' && <div className="viz-callout span-2">Materiais serializados serão cadastrados com zero seriais em todos os estoques. Depois, registre cada serial pela Entrada em Estoque da cidade correta.</div>}
+              {booleanValue(form.requiresSerial) && form.initialWarehouseId !== '__ALL__' && <MaterialField label="Seriais iniciais" className="span-2" hint={`${splitSerials(form.initialSerialsText).length} serial(is) informado(s). Cada linha vira um equipamento no estoque selecionado.`}><textarea rows="5" value={form.initialSerialsText || ''} onChange={(e) => change('initialSerialsText', e.target.value)} placeholder="Um serial por linha" /></MaterialField>}
+              {form.initialWarehouseId === '__ALL__' && registrationWarehouses.length > 0 && <div className="warehouse-stock-detail span-2">
+                <h4>Estoques que receberão o cadastro</h4>
+                <div className="warehouse-stock-detail-grid">
+                  {registrationWarehouses.map((warehouse) => <div className="warehouse-stock-detail-card" key={warehouse.id}><small>{warehouse.city || warehouse.region || warehouse.code}</small><strong>{warehouse.name}</strong><span>Saldo inicial: 0</span></div>)}
+                </div>
+              </div>}
             </div>
           </section>}
 

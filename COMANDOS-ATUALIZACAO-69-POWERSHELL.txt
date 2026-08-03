@@ -1,0 +1,115 @@
+﻿ATUALIZAÇÃO 69 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-69-cadastrar-material-todos-estoques.zip
+APLICAR-ATUALIZACAO-69.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-69-cadastrar-material-todos-estoques.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-69.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/materialController.js",
+    "frontend/src/pages/Stock.jsx",
+    "ATUALIZACAO-69-CADASTRO-MATERIAL-TODOS-ESTOQUES.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-69.txt",
+    "COMANDOS-ATUALIZACAO-69-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-69.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Permite cadastrar material em todos os estoques"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização possui backend e frontend.
+
+Ordem recomendada:
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente no sistema;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE CONTROLADO
+-------------------
+
+Cadastre um material de teste sem serial:
+
+1. abrir Materiais / Estoque;
+2. clicar em Novo material;
+3. preencher SKU e nome;
+4. em Onde cadastrar o material, escolher Todos os estoques operacionais autorizados;
+5. conferir a lista de cidades exibida;
+6. salvar;
+7. abrir Detalhes do material;
+8. confirmar saldo zero em cada estoque autorizado;
+9. abrir Entrada em Estoque;
+10. confirmar que o material aparece para receber quantidade em cada cidade.
+
+Para material serializado:
+
+1. marcar Exige número de série;
+2. escolher Todos os estoques;
+3. confirmar que os seriais iniciais ficam indisponíveis;
+4. salvar com saldo zero;
+5. registrar os seriais depois na Entrada em Estoque da cidade correta.

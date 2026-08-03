@@ -1,0 +1,72 @@
+ATUALIZAÇÃO 69 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(9).zip
+
+OBJETIVO
+--------
+Permitir cadastrar um novo material em todos os estoques operacionais
+autorizados, sem duplicar o material e sem criar saldo físico.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/materialController.js
+frontend/src/pages/Stock.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 109 arquivos JavaScript.
+
+2. Frontend JSX
+   Arquivo Stock.jsx validado pelo transpiler TypeScript com suporte a JSX.
+   Resultado: JSX válido.
+
+3. Git
+   Comando equivalente a git diff --check.
+   Resultado: aprovado, sem espaços inválidos ou linha adicional no final.
+
+4. Segurança de escopo
+   - todos significa todos os estoques autorizados para a conta;
+   - administrador alcança estoques operacionais ativos;
+   - usuário restrito respeita seus estoques/cidades;
+   - estoques inativos ficam de fora;
+   - logística reversa fica de fora;
+   - estoque específico continua validado no backend.
+
+5. Cadastro e saldo
+   - material criado uma única vez;
+   - resposta da API continua retornando o material diretamente;
+   - uma linha de saldo zero é inicializada em cada estoque escolhido;
+   - nenhuma movimentação é criada para saldo zero;
+   - quantidade real continua sendo registrada na Entrada em Estoque.
+
+6. Materiais serializados
+   - todos os estoques com seriais iniciais: bloqueado;
+   - todos os estoques sem seriais: permitido;
+   - um estoque com seriais iniciais: comportamento atual preservado.
+
+7. Banco e produção
+   - nenhuma migration;
+   - nenhuma coluna nova;
+   - nenhum material antigo alterado;
+   - nenhum saldo existente alterado;
+   - nenhum arquivo .env, .git, node_modules, build ou upload incluído.
+
+BUILD LOCAL
+-----------
+O aplicador executará a build completa do frontend no computador do usuário.
+
+A atualização somente será mantida se:
+- a sintaxe do backend for válida;
+- a build do frontend concluir;
+- o git diff --check for aprovado.
+
+Em caso de falha, os arquivos anteriores e a build anterior serão restaurados.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA EM PRODUÇÃO.

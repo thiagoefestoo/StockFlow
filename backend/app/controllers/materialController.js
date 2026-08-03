@@ -4,10 +4,9 @@ const { Material, StockBalance, SerializedAsset, StockMovement, Warehouse } = re
 const { crudController } = require('./crudHelpers');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
-const { stockWhereForUser, assertWarehouseAccess, warehouseListWhere } = require('../utils/warehouseAccess');
-const { adjustBalance } = require('../services/stockService');
+const { stockWhereForUser, warehouseListWhere } = require('../utils/warehouseAccess');
 const { writeAudit } = require('../services/auditService');
-const { money, qty } = require('../utils/number');
+const { money } = require('../utils/number');
 const { normalizeBoolean, isTrue } = require('../utils/booleans');
 const { normalizeServiceOrderQuantityLimit } = require('../utils/serviceOrderQuantityLimit');
 
@@ -153,6 +152,7 @@ exports.get = base.get;
 exports.create = asyncHandler(async (req, res) => {
   const {
     initialWarehouseId,
+    registerInAllWarehouses = false,
     initialQuantity = 0,
     initialSerialNumbers = [],
     initialSerialsText = '',
@@ -160,64 +160,120 @@ exports.create = asyncHandler(async (req, res) => {
   } = req.body;
 
   const normalizedPayload = normalizeMaterialPayload(payload);
+  const registerInAll = isTrue(registerInAllWarehouses);
+  const selectedWarehouseId = Number(initialWarehouseId || 0);
 
-  if (!normalizedPayload.sku || !normalizedPayload.name) return fail(res, 400, 'SKU e nome do material são obrigatórios.');
-  if (!initialWarehouseId) return fail(res, 400, 'Selecione o estoque regional onde este material será cadastrado.');
+  if (!normalizedPayload.sku || !normalizedPayload.name) {
+    return fail(res, 400, 'SKU e nome do material são obrigatórios.');
+  }
+  if (!registerInAll && !selectedWarehouseId) {
+    return fail(res, 400, 'Selecione um estoque regional ou a opção Todos os estoques autorizados.');
+  }
 
-  try { assertWarehouseAccess(req.user, initialWarehouseId, 'Você não tem acesso ao estoque regional informado.'); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+  const warehouseScope = warehouseListWhere(req.user);
+  let warehouses = [];
 
-  const warehouse = await Warehouse.findByPk(initialWarehouseId);
-  if (!warehouse || warehouse.status !== 'ativo') return fail(res, 404, 'Estoque regional informado não existe ou está inativo.');
-  if (warehouse.isReverseLogistics) return fail(res, 400, 'O cadastro inicial de material não pode usar estoque de logística reversa. Cadastre o material e utilize a tela Entrada em Estoque.');
+  if (registerInAll) {
+    warehouses = await Warehouse.findAll({
+      where: {
+        [Op.and]: [
+          warehouseScope,
+          { status: 'ativo' },
+          { isReverseLogistics: false },
+        ],
+      },
+      order: [['city', 'ASC'], ['name', 'ASC'], ['id', 'ASC']],
+    });
+
+    if (!warehouses.length) {
+      return fail(res, 400, 'Nenhum estoque operacional autorizado foi encontrado para esta conta.');
+    }
+  } else {
+    const warehouse = await Warehouse.findOne({
+      where: {
+        [Op.and]: [
+          warehouseScope,
+          { id: selectedWarehouseId },
+          { status: 'ativo' },
+          { isReverseLogistics: false },
+        ],
+      },
+    });
+
+    if (!warehouse) {
+      return fail(res, 404, 'O estoque regional informado não existe, está inativo ou não está autorizado para esta conta.');
+    }
+
+    warehouses = [warehouse];
+  }
 
   const serials = normalizeSerials(initialSerialNumbers.length ? initialSerialNumbers : initialSerialsText);
   const requiresSerial = isTrue(normalizedPayload.requiresSerial);
-  // Materiais sem serial não recebem saldo no cadastro do catálogo. A quantidade real
-  // deve nascer exclusivamente pela tela Entrada em Estoque, evitando a unidade extra.
-  const quantity = requiresSerial ? serials.length : 0;
 
-  if (requiresSerial && quantity > 0 && serials.length !== quantity) return fail(res, 400, 'A quantidade de seriais precisa bater com a quantidade inicial.');
+  if (registerInAll && requiresSerial && serials.length > 0) {
+    return fail(
+      res,
+      400,
+      'Ao cadastrar em todos os estoques, o material serializado deve iniciar sem seriais. Registre os seriais depois pela Entrada em Estoque da cidade correta.',
+    );
+  }
+
+  // Materiais sem serial não recebem saldo no cadastro do catálogo. A quantidade real
+  // deve nascer exclusivamente pela tela Entrada em Estoque, evitando unidade extra.
+  const quantity = !registerInAll && requiresSerial ? serials.length : 0;
+
+  if (requiresSerial && quantity > 0 && serials.length !== quantity) {
+    return fail(res, 400, 'A quantidade de seriais precisa bater com a quantidade inicial.');
+  }
 
   const result = await sequelize.transaction(async (transaction) => {
     const material = await Material.create(normalizedPayload, { transaction });
     const unitCost = money(material.unitCost || 0);
 
+    // Cria o vínculo de saldo zero em todos os estoques escolhidos. Isso não movimenta
+    // estoque, mas garante que o novo material esteja inicializado em cada unidade.
+    for (const warehouse of warehouses) {
+      await StockBalance.findOrCreate({
+        where: {
+          materialId: material.id,
+          ownerType: 'estoque',
+          technicianId: null,
+          warehouseId: warehouse.id,
+        },
+        defaults: {
+          quantity: 0,
+          warehouseId: warehouse.id,
+        },
+        transaction,
+      });
+    }
+
     if (quantity > 0) {
-      if (isTrue(material.requiresSerial)) {
-        for (const serialNumber of serials) {
-          const existing = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
-          if (existing) throw new Error(`Serial duplicado: ${serialNumber}.`);
-          const asset = await SerializedAsset.create({
-            materialId: material.id,
-            serialNumber,
-            ownerType: 'estoque',
-            status: 'em_estoque',
-            warehouseId: initialWarehouseId,
-            acquisitionCost: unitCost,
-            lastMovementAt: new Date(),
-            notes: `Cadastro inicial direto no estoque ${warehouse.name}.`,
-          }, { transaction });
-          await StockMovement.create({
-            type: 'entrada',
-            materialId: material.id,
-            assetId: asset.id,
-            quantity: 1,
-            serialNumber,
-            toOwnerType: 'estoque',
-            toWarehouseId: initialWarehouseId,
-            reference: `CAD-MAT-${material.sku}`,
-            notes: `Cadastro inicial do material no estoque ${warehouse.name}.`,
-            createdById: req.user.id,
-          }, { transaction });
-        }
-      } else {
-        await adjustBalance({ materialId: material.id, ownerType: 'estoque', technicianId: null, warehouseId: initialWarehouseId, delta: quantity, transaction });
+      const warehouse = warehouses[0];
+
+      for (const serialNumber of serials) {
+        const existing = await SerializedAsset.findOne({ where: { serialNumber }, transaction });
+        if (existing) throw new Error(`Serial duplicado: ${serialNumber}.`);
+
+        const asset = await SerializedAsset.create({
+          materialId: material.id,
+          serialNumber,
+          ownerType: 'estoque',
+          status: 'em_estoque',
+          warehouseId: warehouse.id,
+          acquisitionCost: unitCost,
+          lastMovementAt: new Date(),
+          notes: `Cadastro inicial direto no estoque ${warehouse.name}.`,
+        }, { transaction });
+
         await StockMovement.create({
           type: 'entrada',
           materialId: material.id,
-          quantity,
+          assetId: asset.id,
+          quantity: 1,
+          serialNumber,
           toOwnerType: 'estoque',
-          toWarehouseId: initialWarehouseId,
+          toWarehouseId: warehouse.id,
           reference: `CAD-MAT-${material.sku}`,
           notes: `Cadastro inicial do material no estoque ${warehouse.name}.`,
           createdById: req.user.id,
@@ -225,20 +281,43 @@ exports.create = asyncHandler(async (req, res) => {
       }
     }
 
+    const warehouseSummary = warehouses.map((warehouse) => ({
+      id: warehouse.id,
+      name: warehouse.name,
+      code: warehouse.code,
+      city: warehouse.city,
+      state: warehouse.state,
+    }));
+    const targetDescription = registerInAll
+      ? `${warehouses.length} estoque(s) operacional(is) autorizado(s)`
+      : `estoque ${warehouses[0].name}`;
+
     await writeAudit({
       req,
       action: 'create',
       entity: 'Material',
       entityId: material.id,
-      message: `Material ${material.name} cadastrado diretamente no estoque ${warehouse.name}.`,
-      afterData: { ...material.toJSON(), initialWarehouse: warehouse.toJSON(), initialQuantity: quantity, initialSerials: serials },
+      message: `Material ${material.name} cadastrado em ${targetDescription}.`,
+      afterData: {
+        ...material.toJSON(),
+        registerInAllWarehouses: registerInAll,
+        initialWarehouses: warehouseSummary,
+        initialQuantity: quantity,
+        initialSerials: serials,
+      },
       transaction,
     });
 
     return material;
   });
 
-  return created(res, result, 'Material cadastrado no estoque regional.');
+  return created(
+    res,
+    result,
+    registerInAll
+      ? `Material cadastrado em ${warehouses.length} estoque(s) operacional(is) autorizado(s).`
+      : 'Material cadastrado no estoque regional.',
+  );
 });
 
 exports.update = asyncHandler(async (req, res) => {
