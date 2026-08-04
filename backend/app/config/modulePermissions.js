@@ -13,7 +13,8 @@ const MODULES = [
   { key: 'stock', label: 'Materiais/Estoque', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/estoque'] },
   { key: 'materialManage', label: 'Cadastrar/editar materiais', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'materialAllWarehouses', label: 'Cadastrar material em todos os estoques', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
-  { key: 'stockBatchEdit', label: 'Editar entradas de material', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
+  { key: 'stockBatchEdit', label: 'Editar dados documentais das entradas', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
+  { key: 'stockBatchQuantityEdit', label: 'Alterar quantidades de itens das entradas', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'patrimony', label: 'Patrimônio', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/patrimonio'] },
   { key: 'serialLife', label: 'Vida do serial', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista', 'tecnico'], routes: ['/vida-serial'] },
   { key: 'technicians', label: 'Técnicos', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/tecnicos'] },
@@ -39,7 +40,7 @@ const ASSIGNABLE_MODULE_KEYS = ALL_MODULE_KEYS.filter((key) => !ADMIN_ONLY_MODUL
 
 const DEFAULT_MODULES_BY_ROLE = {
   admin: ALL_MODULE_KEYS,
-  supervisor: ALL_MODULE_KEYS.filter((key) => !['users', 'materialAllWarehouses', 'technicianEdit', 'technicianTransferLimitManage', 'materialRequestDelivery', 'serviceOrderEquipmentReplace'].includes(key)),
+  supervisor: ALL_MODULE_KEYS.filter((key) => !['users', 'materialAllWarehouses', 'stockBatchQuantityEdit', 'technicianEdit', 'technicianTransferLimitManage', 'materialRequestDelivery', 'serviceOrderEquipmentReplace'].includes(key)),
   estoquista: [
     'operationsCockpit',
     'approvals',

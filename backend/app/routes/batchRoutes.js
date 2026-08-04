@@ -4,6 +4,6 @@ const { authenticate, requireRoles, requireModule } = require('../middlewares/au
 router.use(authenticate, requireModule('receiving'));
 router.get('/', controller.list);
 router.get('/:id', controller.get);
-router.put('/:id', requireModule('stockBatchEdit'), controller.update);
+router.put('/:id', requireModule('stockBatchEdit', 'stockBatchQuantityEdit'), controller.update);
 router.post('/', controller.create);
 module.exports = router;

@@ -1,0 +1,133 @@
+﻿ATUALIZAÇÃO 71 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-71-editar-quantidades-entrada-permissao.zip
+APLICAR-ATUALIZACAO-71.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-71-editar-quantidades-entrada-permissao.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-71.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/config/modulePermissions.js",
+    "backend/app/controllers/batchController.js",
+    "backend/app/routes/batchRoutes.js",
+    "backend/scripts/test-stock-batch-quantity-edit-permission.js",
+    "frontend/src/config/modulePermissions.js",
+    "frontend/src/pages/Receiving.jsx",
+    "frontend/build",
+    "ATUALIZACAO-71-EDITAR-QUANTIDADES-ENTRADA.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-71.txt",
+    "COMANDOS-ATUALIZACAO-71-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-71.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Permite corrigir quantidades das entradas com permissão"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização possui backend e frontend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente na conta testada;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. CONCEDER A PERMISSÃO
+-----------------------
+
+Após os redeploys:
+
+1. entrar como administrador;
+2. abrir Administração;
+3. abrir Usuários e permissões;
+4. editar o usuário;
+5. abrir Permissões especiais;
+6. marcar Alterar quantidades de itens das entradas;
+7. salvar.
+
+A permissão Editar dados documentais das entradas é independente.
+
+5. TESTE CONTROLADO
+-------------------
+
+1. use uma entrada de teste com material sem serial;
+2. anote o saldo atual do estoque;
+3. abra Entrada em Estoque;
+4. abra Detalhes da entrada;
+5. clique em Editar entrada;
+6. altere uma quantidade, por exemplo de 10 para 12;
+7. salve;
+8. confirme que o saldo aumentou somente 2 unidades;
+9. confirme que o total da entrada foi recalculado;
+10. confira Histórico de movimentações e Auditoria;
+11. retorne a quantidade para 10 e confirme redução de 2 unidades.
+
+Teste sem permissão:
+
+- a conta não deve conseguir editar as quantidades;
+- uma tentativa manual pela API deve receber erro 403.
+
+Teste com serial:
+
+- o campo de quantidade deve permanecer bloqueado.

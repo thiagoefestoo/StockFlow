@@ -12,6 +12,7 @@ const { isTrue } = require('../utils/booleans');
 const { assertUniqueOperationItems } = require('../utils/itemSelectionValidation');
 const { reverseWarehouseIds, warehouseOutsideReverse } = require('../utils/reverseLogistics');
 const { correctForcedInitialStock } = require('../services/initialStockCorrectionService');
+const { hasModuleAccess } = require('../config/modulePermissions');
 
 exports.list = asyncHandler(async (req, res) => {
   const reverseIds = await reverseWarehouseIds();
@@ -79,6 +80,25 @@ function cleanOptionalText(value) {
 }
 
 exports.update = asyncHandler(async (req, res) => {
+  const canEditDocuments = hasModuleAccess(req.user, 'stockBatchEdit');
+  const canEditQuantities = hasModuleAccess(req.user, 'stockBatchQuantityEdit');
+  const documentFieldsRequested = EDITABLE_BATCH_FIELDS.some((field) => req.body[field] !== undefined)
+    || req.body.warehouseId !== undefined;
+  const quantityEditRequested = req.body.items !== undefined;
+
+  if (documentFieldsRequested && !canEditDocuments) {
+    return fail(res, 403, 'Você não tem permissão para editar os dados documentais desta entrada.');
+  }
+  if (quantityEditRequested && !canEditQuantities) {
+    return fail(res, 403, 'Você não tem permissão para alterar as quantidades dos itens desta entrada.');
+  }
+  if (req.body.totalItems !== undefined || req.body.totalValue !== undefined) {
+    return fail(res, 400, 'Os totais da entrada são calculados automaticamente a partir dos itens.');
+  }
+  if (!documentFieldsRequested && !quantityEditRequested) {
+    return fail(res, 400, 'Nenhuma correção foi informada.');
+  }
+
   const reverseIds = await reverseWarehouseIds();
   const where = { id: req.params.id, [Op.and]: [stockWhereForUser(req.user), warehouseOutsideReverse(reverseIds)] };
 
@@ -95,15 +115,25 @@ exports.update = asyncHandler(async (req, res) => {
     }
 
     if (req.body.warehouseId !== undefined && Number(req.body.warehouseId) !== Number(batch.warehouseId)) {
-      const error = new Error('O estoque/região não pode ser alterado nesta correção porque o saldo já foi movimentado. Corrija somente os dados documentais da entrada.');
+      const error = new Error('O estoque/região não pode ser alterado nesta correção porque o saldo já foi movimentado.');
       error.statusCode = 400;
       throw error;
     }
-    if (req.body.items !== undefined || req.body.totalItems !== undefined || req.body.totalValue !== undefined) {
-      const error = new Error('Itens, quantidades e valores totais não podem ser alterados por esta edição porque já compõem o saldo do estoque.');
-      error.statusCode = 400;
-      throw error;
-    }
+
+    const batchItems = await StockBatchItem.findAll({
+      where: { batchId: batch.id },
+      include: [{ model: Material, attributes: ['id', 'name', 'sku', 'unit', 'category', 'requiresSerial'] }],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+      order: [['id', 'ASC']],
+    });
+
+    const beforeData = {
+      ...batch.toJSON(),
+      StockBatchItems: batchItems.map((item) => item.toJSON()),
+      proofAttachmentData: undefined,
+    };
+    const previousReceiptNumber = batch.receiptNumber;
 
     const next = {};
     for (const field of EDITABLE_BATCH_FIELDS) {
@@ -176,20 +206,73 @@ exports.update = asyncHandler(async (req, res) => {
       throw error;
     }
 
-    const batchItems = await StockBatchItem.findAll({
-      where: { batchId: batch.id },
-      attributes: ['id', 'materialId', 'quantity', 'unitCost', 'totalCost', 'serialNumbers'],
-      transaction,
-    });
-    const beforeData = { ...batch.toJSON(), StockBatchItems: batchItems.map((item) => item.toJSON()), proofAttachmentData: undefined };
-    const previousReceiptNumber = batch.receiptNumber;
-    const documentReference = next.fiscalDocumentNumber || next.invoiceAccessKey;
+    const requestedItems = quantityEditRequested ? req.body.items : null;
+    const quantityChanges = [];
 
-    await batch.update(next, { transaction });
+    if (quantityEditRequested) {
+      if (!Array.isArray(requestedItems) || requestedItems.length !== batchItems.length) {
+        const error = new Error('A correção deve manter exatamente os mesmos itens da entrada. Não é permitido adicionar ou remover materiais nesta tela.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const requestedById = new Map();
+      for (const requestedItem of requestedItems) {
+        const itemId = Number(requestedItem?.id);
+        if (!Number.isInteger(itemId) || itemId <= 0 || requestedById.has(itemId)) {
+          const error = new Error('A lista de itens da correção contém um identificador inválido ou repetido.');
+          error.statusCode = 400;
+          throw error;
+        }
+        requestedById.set(itemId, requestedItem);
+      }
+
+      for (const item of batchItems) {
+        const requestedItem = requestedById.get(Number(item.id));
+        if (!requestedItem) {
+          const error = new Error(`O item ${item.Material?.name || item.id} não foi enviado na correção.`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        if (
+          requestedItem.materialId !== undefined
+          && Number(requestedItem.materialId) !== Number(item.materialId)
+        ) {
+          const error = new Error(`O material do item ${item.Material?.name || item.id} não pode ser trocado.`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const previousQuantity = qty(item.quantity);
+        const nextQuantity = qty(requestedItem.quantity);
+
+        if (!Number.isFinite(Number(nextQuantity)) || Number(nextQuantity) <= 0) {
+          const error = new Error(`Informe uma quantidade maior que zero para ${item.Material?.name || 'o item'}.`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        if (isTrue(item.Material?.requiresSerial) && Number(nextQuantity) !== Number(previousQuantity)) {
+          const error = new Error(`A quantidade de ${item.Material?.name || 'material serializado'} não pode ser alterada nesta tela porque está vinculada a seriais. Corrija os seriais pelo fluxo específico.`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        if (!isTrue(item.Material?.requiresSerial) && Number(nextQuantity) !== Number(previousQuantity)) {
+          quantityChanges.push({
+            item,
+            previousQuantity,
+            nextQuantity,
+            delta: qty(Number(nextQuantity) - Number(previousQuantity)),
+          });
+        }
+      }
+    }
 
     const materialIds = Array.from(new Set(batchItems.map((item) => Number(item.materialId)).filter(Boolean)));
-    if (materialIds.length) {
-      const movements = await StockMovement.findAll({
+    const movements = materialIds.length
+      ? await StockMovement.findAll({
         where: {
           type: 'entrada',
           reference: { [Op.iLike]: previousReceiptNumber },
@@ -198,38 +281,106 @@ exports.update = asyncHandler(async (req, res) => {
         },
         transaction,
         lock: transaction.LOCK.UPDATE,
-      });
-      for (const movement of movements) {
-        await movement.update({
-          reference: next.receiptNumber,
-          notes: `Entrada por lote ${next.receiptNumber}. Documento: ${documentReference}.`,
-        }, { transaction });
+        order: [['id', 'ASC']],
+      })
+      : [];
+
+    for (const change of quantityChanges) {
+      const itemMovements = movements.filter((movement) => (
+        Number(movement.materialId) === Number(change.item.materialId)
+        && !movement.serialNumber
+        && !movement.assetId
+      ));
+
+      if (itemMovements.length !== 1) {
+        const error = new Error(`Não foi possível identificar com segurança a movimentação original de ${change.item.Material?.name || 'um item'}. A quantidade não foi alterada.`);
+        error.statusCode = 409;
+        throw error;
       }
+
+      await adjustBalance({
+        materialId: change.item.materialId,
+        ownerType: 'estoque',
+        technicianId: null,
+        warehouseId: batch.warehouseId,
+        delta: change.delta,
+        transaction,
+      });
+
+      change.item.quantity = change.nextQuantity;
+      change.item.totalCost = money(Number(change.nextQuantity) * Number(change.item.unitCost || 0));
+      await change.item.save({ transaction });
+
+      await itemMovements[0].update({
+        quantity: change.nextQuantity,
+      }, { transaction });
     }
 
-    const afterData = { ...batch.toJSON(), proofAttachmentData: undefined };
+    const documentReference = next.fiscalDocumentNumber || next.invoiceAccessKey;
+    for (const movement of movements) {
+      await movement.update({
+        reference: next.receiptNumber,
+        notes: `Entrada por lote ${next.receiptNumber}. Documento: ${documentReference}.`,
+      }, { transaction });
+    }
+
+    const totalItems = qty(batchItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
+    const totalValue = money(batchItems.reduce((sum, item) => sum + Number(item.totalCost || 0), 0));
+
+    await batch.update({
+      ...next,
+      totalItems,
+      totalValue,
+    }, { transaction });
+
+    const afterItems = await StockBatchItem.findAll({
+      where: { batchId: batch.id },
+      include: [{ model: Material, attributes: ['id', 'name', 'sku', 'unit', 'category', 'requiresSerial'] }],
+      transaction,
+      order: [['id', 'ASC']],
+    });
+    const afterData = {
+      ...batch.toJSON(),
+      StockBatchItems: afterItems.map((item) => item.toJSON()),
+      proofAttachmentData: undefined,
+    };
+
+    const quantitySummary = quantityChanges.map((change) => (
+      `${change.item.Material?.name || change.item.materialId}: ${change.previousQuantity} → ${change.nextQuantity}`
+    ));
+
     await writeAudit({
       req,
       action: 'update',
       entity: 'StockBatch',
       entityId: batch.id,
-      message: `Entrada de estoque ${previousReceiptNumber} corrigida para ${next.receiptNumber}. Itens, saldos e estoque de destino permaneceram inalterados.`,
+      message: quantitySummary.length
+        ? `Entrada de estoque ${previousReceiptNumber} corrigida. Quantidades alteradas: ${quantitySummary.join('; ')}. Saldo e movimentação de entrada ajustados pela diferença.`
+        : `Entrada de estoque ${previousReceiptNumber} corrigida para ${next.receiptNumber}. Quantidades e saldo permaneceram inalterados.`,
       beforeData,
       afterData,
       transaction,
     });
 
-    return batch.id;
+    return {
+      batchId: batch.id,
+      quantityChanges: quantitySummary,
+    };
   });
 
-  const updated = await StockBatch.findByPk(result, {
+  const updated = await StockBatch.findByPk(result.batchId, {
     include: [
       { model: StockBatchItem, include: [Material] },
       { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
       Warehouse,
     ],
   });
-  return ok(res, updated, 'Entrada de estoque atualizada com auditoria. Itens, saldo, valor total e estoque de destino não foram alterados.');
+
+  const message = result.quantityChanges.length
+    ? `Entrada atualizada com auditoria. ${result.quantityChanges.length} quantidade(s) corrigida(s), com ajuste correspondente no saldo do estoque.`
+    : 'Entrada de estoque atualizada com auditoria. Quantidades e saldo permaneceram inalterados.';
+
+  return ok(res, updated, message);
 });
 
 exports.create = asyncHandler(async (req, res) => {

@@ -56,6 +56,17 @@ function editFormFromBatch(batch) {
     proofAttachmentName: batch.proofAttachmentName || '',
     proofAttachmentData: batch.proofAttachmentData || '',
     notes: batch.notes || '',
+    items: (batch.StockBatchItems || []).map((item) => ({
+      id: item.id,
+      materialId: item.materialId,
+      materialName: item.Material?.name || `Item ${item.id}`,
+      materialUnit: item.Material?.unit || 'un',
+      requiresSerial: isSerialRequired(item.Material),
+      serialCount: Array.isArray(item.serialNumbers) ? item.serialNumbers.length : 0,
+      originalQuantity: Number(item.quantity || 0),
+      quantity: Number(item.quantity || 0),
+      unitCost: Number(item.unitCost || 0),
+    })),
   };
 }
 
@@ -98,7 +109,9 @@ function serialStatus(item) {
 
 export default function Receiving() {
   const { canAccessModule } = useAuth();
-  const canEditEntries = canAccessModule('stockBatchEdit');
+  const canEditEntryDocuments = canAccessModule('stockBatchEdit');
+  const canEditEntryQuantities = canAccessModule('stockBatchQuantityEdit');
+  const canEditEntries = canEditEntryDocuments || canEditEntryQuantities;
   const [materials, setMaterials] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [batches, setBatches] = useState([]);
@@ -142,6 +155,15 @@ export default function Receiving() {
     withProof: operationalBatches.filter((batch) => batch.proofAttachmentName).length,
   }), [operationalBatches]);
 
+  const editProjectedTotals = useMemo(() => {
+    const items = editForm?.items || [];
+    return {
+      quantity: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      value: items.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unitCost || 0)), 0),
+      changed: items.filter((item) => Number(item.quantity || 0) !== Number(item.originalQuantity || 0)).length,
+    };
+  }, [editForm]);
+
   async function openBatchDetails(batch) {
     setDetailsLoading(true);
     setMessage('');
@@ -162,6 +184,17 @@ export default function Receiving() {
     setMessage('');
   }
 
+  function updateEditItemQuantity(itemId, value) {
+    setEditForm((current) => ({
+      ...current,
+      items: (current?.items || []).map((item) => (
+        Number(item.id) === Number(itemId)
+          ? { ...item, quantity: value }
+          : item
+      )),
+    }));
+  }
+
   function onEditFile(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -175,11 +208,26 @@ export default function Receiving() {
   }
 
   function editValidationMessage() {
-    if (!editForm?.receiptNumber?.trim()) return 'Informe o número da entrada.';
-    if (!editForm?.sourceCompany?.trim()) return 'Informe a origem/fornecedor.';
-    if (!editForm?.receivedAt) return 'Informe a data de recebimento.';
-    if (!editForm?.fiscalDocumentNumber?.trim() && !editForm?.invoiceAccessKey?.trim()) return 'Informe o número do documento ou a chave da NF-e.';
-    if (!editForm?.proofAttachmentName || !editForm?.proofAttachmentData) return 'A entrada deve permanecer vinculada a um comprovante.';
+    if (canEditEntryDocuments) {
+      if (!editForm?.receiptNumber?.trim()) return 'Informe o número da entrada.';
+      if (!editForm?.sourceCompany?.trim()) return 'Informe a origem/fornecedor.';
+      if (!editForm?.receivedAt) return 'Informe a data de recebimento.';
+      if (!editForm?.fiscalDocumentNumber?.trim() && !editForm?.invoiceAccessKey?.trim()) return 'Informe o número do documento ou a chave da NF-e.';
+      if (!editForm?.proofAttachmentName || !editForm?.proofAttachmentData) return 'A entrada deve permanecer vinculada a um comprovante.';
+    }
+
+    if (canEditEntryQuantities) {
+      for (const item of editForm?.items || []) {
+        const quantity = Number(item.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) {
+          return `Informe uma quantidade inteira maior que zero para ${item.materialName}.`;
+        }
+        if (item.requiresSerial && quantity !== Number(item.originalQuantity)) {
+          return `A quantidade de ${item.materialName} está vinculada a seriais e não pode ser alterada nesta tela.`;
+        }
+      }
+    }
+
     return '';
   }
 
@@ -194,23 +242,37 @@ export default function Receiving() {
     setEditSaving(true);
     setMessage('');
     try {
-      const response = await api.put(`/batches/${editForm.id}`, {
-        receiptNumber: editForm.receiptNumber,
-        sourceCompany: editForm.sourceCompany,
-        receivedAt: editForm.receivedAt,
-        cycle: editForm.cycle,
-        fiscalDocumentType: editForm.fiscalDocumentType,
-        fiscalDocumentNumber: editForm.fiscalDocumentNumber,
-        fiscalDocumentDate: editForm.fiscalDocumentDate || null,
-        fiscalIssuer: editForm.fiscalIssuer,
-        invoiceAccessKey: editForm.invoiceAccessKey,
-        receivedByName: editForm.receivedByName,
-        conferenceStatus: editForm.conferenceStatus,
-        warehouseLocation: editForm.warehouseLocation,
-        proofAttachmentName: editForm.proofAttachmentName,
-        proofAttachmentData: editForm.proofAttachmentData,
-        notes: editForm.notes,
-      });
+      const payload = {};
+
+      if (canEditEntryDocuments) {
+        Object.assign(payload, {
+          receiptNumber: editForm.receiptNumber,
+          sourceCompany: editForm.sourceCompany,
+          receivedAt: editForm.receivedAt,
+          cycle: editForm.cycle,
+          fiscalDocumentType: editForm.fiscalDocumentType,
+          fiscalDocumentNumber: editForm.fiscalDocumentNumber,
+          fiscalDocumentDate: editForm.fiscalDocumentDate || null,
+          fiscalIssuer: editForm.fiscalIssuer,
+          invoiceAccessKey: editForm.invoiceAccessKey,
+          receivedByName: editForm.receivedByName,
+          conferenceStatus: editForm.conferenceStatus,
+          warehouseLocation: editForm.warehouseLocation,
+          proofAttachmentName: editForm.proofAttachmentName,
+          proofAttachmentData: editForm.proofAttachmentData,
+          notes: editForm.notes,
+        });
+      }
+
+      if (canEditEntryQuantities) {
+        payload.items = (editForm.items || []).map((item) => ({
+          id: item.id,
+          materialId: item.materialId,
+          quantity: Number(item.quantity),
+        }));
+      }
+
+      const response = await api.put(`/batches/${editForm.id}`, payload);
       const updated = response.data.data;
       setDetails(updated);
       setEditForm(null);
@@ -603,31 +665,95 @@ export default function Receiving() {
     >
       {editForm && <div className="form-stack receiving-form">
         <div className="alert info">
-          Esta edição corrige somente os dados documentais. O estoque de destino, os itens, as quantidades, os seriais e os valores já movimentados permanecem inalterados.
+          {canEditEntryQuantities
+            ? 'Quantidades de materiais sem serial podem ser corrigidas. O sistema movimentará somente a diferença no estoque, recalculará os totais e registrará a alteração na auditoria.'
+            : 'Sua conta pode corrigir os dados documentais, mas não possui permissão para alterar quantidades.'}
+          {' '}O estoque de destino e os materiais da entrada permanecem bloqueados.
         </div>
+
+        {canEditEntryQuantities && <div className="alert warning">
+          Ao reduzir uma quantidade, o estoque precisa possuir saldo suficiente naquele material. Itens vinculados a números de série permanecem bloqueados para evitar inconsistências de patrimônio.
+        </div>}
+
         <DetailGrid fields={[
           ['Estoque/região bloqueado', details?.Warehouse?.name || details?.warehouseLocation],
-          ['Itens registrados', formatQuantity(details?.totalItems)],
-          ['Valor registrado', brl(details?.totalValue)],
+          ['Quantidade atual', formatQuantity(details?.totalItems)],
+          ['Quantidade após correção', formatQuantity(editProjectedTotals.quantity)],
+          ['Itens com quantidade alterada', editProjectedTotals.changed],
+          ['Valor atual', brl(details?.totalValue)],
+          ['Valor após correção', brl(editProjectedTotals.value)],
         ]} />
+
+        <div className="subtoolbar">
+          <div>
+            <h4>Quantidades dos itens</h4>
+            <small>A inclusão, exclusão ou troca do material não é permitida nesta correção.</small>
+          </div>
+        </div>
+
+        {(editForm.items || []).map((item) => {
+          const quantity = Number(item.quantity || 0);
+          const difference = quantity - Number(item.originalQuantity || 0);
+          return <div className="item-card" key={item.id}>
+            <div className="item-head">
+              <div>
+                <strong>{item.materialName}</strong>
+                <small style={{ display: 'block', marginTop: '0.2rem' }}>
+                  Custo unitário: {brl(item.unitCost)} • Quantidade original: {formatQuantity(item.originalQuantity)} {item.materialUnit}
+                </small>
+              </div>
+              {item.requiresSerial
+                ? <span className="badge warning">Quantidade vinculada a {item.serialCount} serial(is)</span>
+                : difference === 0
+                  ? <span className="badge info">Sem alteração</span>
+                  : <span className={`badge ${difference > 0 ? 'success' : 'warning'}`}>
+                    {difference > 0 ? '+' : ''}{formatQuantity(difference)} {item.materialUnit}
+                  </span>}
+            </div>
+            <div className="form-grid">
+              <label>Material<input value={item.materialName} disabled /></label>
+              <label>Quantidade corrigida
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={item.quantity}
+                  disabled={!canEditEntryQuantities || item.requiresSerial}
+                  onChange={(event) => updateEditItemQuantity(item.id, event.target.value)}
+                />
+                <small>{item.requiresSerial ? 'Bloqueada porque o item possui serial.' : 'O saldo será ajustado apenas pela diferença.'}</small>
+              </label>
+              <label>Valor unitário<input value={brl(item.unitCost)} disabled /></label>
+              <label>Total após correção<input value={brl(quantity * Number(item.unitCost || 0))} disabled /></label>
+            </div>
+          </div>;
+        })}
+
+        <div className="subtoolbar">
+          <div>
+            <h4>Dados documentais</h4>
+            {!canEditEntryDocuments && <small>Bloqueados para esta conta. Libere “Editar dados documentais das entradas” na Administração.</small>}
+          </div>
+        </div>
+
         <div className="form-grid">
-          <label>Número da entrada<input value={editForm.receiptNumber} maxLength="80" onChange={(e) => setEditForm({ ...editForm, receiptNumber: e.target.value })} /></label>
+          <label>Número da entrada<input value={editForm.receiptNumber} maxLength="80" disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, receiptNumber: e.target.value })} /></label>
           <label>Estoque/região<input value={details?.Warehouse?.name || details?.warehouseLocation || ''} disabled /></label>
-          <label>Data de recebimento<input type="date" value={editForm.receivedAt} onChange={(e) => setEditForm({ ...editForm, receivedAt: e.target.value })} /></label>
-          <label>Ciclo<select value={editForm.cycle} onChange={(e) => setEditForm({ ...editForm, cycle: e.target.value })}><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option><option value="extra">Extra</option></select></label>
-          <label>Origem/fornecedor<input value={editForm.sourceCompany} onChange={(e) => setEditForm({ ...editForm, sourceCompany: e.target.value })} /></label>
-          <label>Status da conferência<select value={editForm.conferenceStatus} onChange={(e) => setEditForm({ ...editForm, conferenceStatus: e.target.value })}><option value="conferido">Conferido</option><option value="pendente_conferencia">Pendente</option><option value="divergente">Divergente</option></select></label>
-          <label>Tipo de documento<select value={editForm.fiscalDocumentType} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentType: e.target.value })}><option value="nota_fiscal">Nota fiscal</option><option value="termo_entrega">Termo de entrega</option><option value="romaneio">Romaneio</option><option value="recibo">Recibo</option><option value="outro">Outro</option></select></label>
-          <label>Número do documento<input value={editForm.fiscalDocumentNumber} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentNumber: e.target.value })} /></label>
-          <label>Data do documento<input type="date" value={editForm.fiscalDocumentDate || ''} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentDate: e.target.value })} /></label>
-          <label>Emissor do documento<input value={editForm.fiscalIssuer} onChange={(e) => setEditForm({ ...editForm, fiscalIssuer: e.target.value })} /></label>
-          <label>Chave da NF-e<input value={editForm.invoiceAccessKey} onChange={(e) => setEditForm({ ...editForm, invoiceAccessKey: e.target.value })} /></label>
-          <label>Recebido/conferido por<input value={editForm.receivedByName} onChange={(e) => setEditForm({ ...editForm, receivedByName: e.target.value })} /></label>
-          <label>Localização interna<input value={editForm.warehouseLocation} onChange={(e) => setEditForm({ ...editForm, warehouseLocation: e.target.value })} /></label>
-          <label className="full-span">Substituir comprovante<input type="file" accept="image/*,.pdf" onChange={onEditFile} /><small>Deixe sem selecionar para manter o comprovante atual.</small></label>
+          <label>Data de recebimento<input type="date" value={editForm.receivedAt} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, receivedAt: e.target.value })} /></label>
+          <label>Ciclo<select value={editForm.cycle} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, cycle: e.target.value })}><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option><option value="extra">Extra</option></select></label>
+          <label>Origem/fornecedor<input value={editForm.sourceCompany} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, sourceCompany: e.target.value })} /></label>
+          <label>Status da conferência<select value={editForm.conferenceStatus} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, conferenceStatus: e.target.value })}><option value="conferido">Conferido</option><option value="pendente_conferencia">Pendente</option><option value="divergente">Divergente</option></select></label>
+          <label>Tipo de documento<select value={editForm.fiscalDocumentType} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentType: e.target.value })}><option value="nota_fiscal">Nota fiscal</option><option value="termo_entrega">Termo de entrega</option><option value="romaneio">Romaneio</option><option value="recibo">Recibo</option><option value="outro">Outro</option></select></label>
+          <label>Número do documento<input value={editForm.fiscalDocumentNumber} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentNumber: e.target.value })} /></label>
+          <label>Data do documento<input type="date" value={editForm.fiscalDocumentDate || ''} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, fiscalDocumentDate: e.target.value })} /></label>
+          <label>Emissor do documento<input value={editForm.fiscalIssuer} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, fiscalIssuer: e.target.value })} /></label>
+          <label>Chave da NF-e<input value={editForm.invoiceAccessKey} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, invoiceAccessKey: e.target.value })} /></label>
+          <label>Recebido/conferido por<input value={editForm.receivedByName} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, receivedByName: e.target.value })} /></label>
+          <label>Localização interna<input value={editForm.warehouseLocation} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, warehouseLocation: e.target.value })} /></label>
+          <label className="full-span">Substituir comprovante<input type="file" accept="image/*,.pdf" disabled={!canEditEntryDocuments} onChange={onEditFile} /><small>Deixe sem selecionar para manter o comprovante atual.</small></label>
         </div>
         {editForm.proofAttachmentName && <AttachmentPreview compact name={editForm.proofAttachmentName} data={editForm.proofAttachmentData} label="Comprovante vinculado" />}
-        <label>Observações<textarea rows="3" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} /></label>
+        <label>Observações<textarea rows="3" value={editForm.notes} disabled={!canEditEntryDocuments} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} /></label>
       </div>}
     </Modal>
   </div>;

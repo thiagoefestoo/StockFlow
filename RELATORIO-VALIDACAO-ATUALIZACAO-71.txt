@@ -1,0 +1,87 @@
+ATUALIZAÇÃO 71 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main (1)(1).zip
+
+OBJETIVO
+--------
+Permitir corrigir quantidades de itens de entradas existentes, com permissão
+individual configurada na Administração da conta.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/config/modulePermissions.js
+backend/app/controllers/batchController.js
+backend/app/routes/batchRoutes.js
+backend/scripts/test-stock-batch-quantity-edit-permission.js
+frontend/src/config/modulePermissions.js
+frontend/src/pages/Receiving.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 111 arquivos JavaScript.
+
+2. Teste da permissão
+   Comando:
+   node backend/scripts/test-stock-batch-quantity-edit-permission.js
+
+   Resultado:
+   - administrador: permitido;
+   - supervisor padrão: bloqueado;
+   - estoquista padrão: bloqueado;
+   - técnico padrão: bloqueado;
+   - supervisor com permissão explícita: permitido;
+   - estoquista com permissão explícita: permitido;
+   - proteções essenciais presentes no controlador.
+
+3. Frontend
+   Arquivos validados pelo transpiler TypeScript com suporte a JSX:
+   - frontend/src/config/modulePermissions.js;
+   - frontend/src/pages/Receiving.jsx.
+
+   Resultado: JavaScript/JSX válido.
+
+4. Espaços e conflitos
+   Validação equivalente a git diff --check.
+   Resultado: aprovado.
+
+5. Segurança operacional
+   - quantidade somente com permissão específica;
+   - dados documentais continuam com permissão independente;
+   - backend retorna 403 sem autorização;
+   - materiais serializados ficam bloqueados;
+   - não permite adicionar, excluir ou trocar material;
+   - não permite editar custo unitário;
+   - não permite trocar o estoque;
+   - redução exige saldo disponível;
+   - ajuste realizado em transação;
+   - totais e movimentação original recalculados;
+   - auditoria registra antes e depois.
+
+6. Banco e produção
+   - nenhuma migration;
+   - nenhuma coluna nova;
+   - nenhuma entrada antiga alterada pela instalação;
+   - nenhum saldo alterado pela instalação;
+   - nenhum usuário não administrador recebe a permissão automaticamente;
+   - pacote sem .env, .git, node_modules, build e uploads de produção.
+
+BUILD DO FRONTEND
+-----------------
+A sintaxe JSX foi validada neste ambiente.
+
+A build completa não pôde ser executada aqui porque o repositório de pacotes
+do ambiente retornou erro 404 ao buscar uma dependência do package-lock.
+
+O aplicador executará a build completa no computador do usuário. A atualização
+somente será mantida se a build, o backend, o teste da permissão e o
+git diff --check terminarem com sucesso. Em caso de falha, os arquivos e a
+build anteriores serão restaurados automaticamente.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA COM BUILD LOCAL OBRIGATÓRIA.
