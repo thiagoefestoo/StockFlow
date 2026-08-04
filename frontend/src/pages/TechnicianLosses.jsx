@@ -29,8 +29,7 @@ const emptyForm = {
   technicianId: '',
   reason: '',
   notes: '',
-  attachmentName: '',
-  attachmentData: '',
+  attachments: [],
   items: [],
   toolIds: [],
 };
@@ -48,10 +47,11 @@ export default function TechnicianLosses() {
   const [toolSearch, setToolSearch] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingLossId, setUploadingLossId] = useState(null);
 
   async function openLossDetails(loss) {
     try {
-      const response = await api.get(`/transfers/${loss.id}`);
+      const response = await api.get(`/stock/technician-losses/${loss.id}`);
       setDetails(response.data.data);
     } catch (error) {
       setMessage(error.response?.data?.message || 'Não foi possível carregar os detalhes da perda.');
@@ -174,6 +174,22 @@ export default function TechnicianLosses() {
     });
   }
 
+  async function readFiles(fileList, currentCount = 0) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return [];
+    if (files.length > 8 || currentCount + files.length > 8) {
+      throw new Error('Selecione no máximo 8 documentos na abertura da perda. Depois, outros arquivos poderão ser adicionados pela fila.');
+    }
+    if (!files.every((file) => file.type === 'application/pdf' || file.type.startsWith('image/'))) {
+      throw new Error('Envie somente documentos PDF ou imagens.');
+    }
+    const totalSize = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    if (totalSize > 12 * 1024 * 1024) {
+      throw new Error('O conjunto de documentos deve ter no máximo 12 MB por envio.');
+    }
+    return Promise.all(files.map(readFile));
+  }
+
   function validate() {
     if (!form.technicianId) return 'Selecione o técnico.';
     if (!form.reason.trim()) return 'Informe o motivo da perda/desconto.';
@@ -244,15 +260,24 @@ export default function TechnicianLosses() {
     }
   }
 
-  async function signLoss(id, file) {
-    if (!file) return;
-    const attachment = await readFile(file);
-    await api.post(`/transfers/${id}/sign`, {
-      attachmentName: attachment.name,
-      attachmentData: attachment.data,
-      signatureResponsible: 'Documento de reconhecimento anexado',
-    });
-    await load();
+  async function signLoss(id, fileList) {
+    if (uploadingLossId) return;
+    try {
+      const attachments = await readFiles(fileList);
+      if (!attachments.length) return;
+      setUploadingLossId(id);
+      const response = await api.post(`/stock/technician-losses/${id}/attachments`, {
+        attachments,
+        signatureResponsible: 'Documentos de reconhecimento anexados',
+      });
+      setMessage(response.data?.message || `${attachments.length} documento(s) anexado(s) com sucesso.`);
+      await load();
+      if (details && Number(details.id) === Number(id)) await openLossDetails(details);
+    } catch (error) {
+      setMessage(error.response?.data?.message || error.message || 'Não foi possível anexar os documentos.');
+    } finally {
+      setUploadingLossId(null);
+    }
   }
 
   async function onSelectTechnician(value) {
@@ -343,7 +368,7 @@ export default function TechnicianLosses() {
                 <td>{formatQuantity(loss.totalQuantity)}</td>
                 <td>{brl(loss.totalValue)}</td>
                 <td><span className={`badge ${loss.status}`}>{loss.status}</span></td>
-                <td>{loss.attachmentName ? <span className="badge success">Anexado</span> : <input type="file" accept="image/*,.pdf" onChange={(e) => signLoss(loss.id, e.target.files?.[0])} />}</td>
+                <td><div className="attachment-cell">{loss.attachmentName ? <span className="badge success" title={transferAttachmentSummary(loss)}>{transferAttachmentSummary(loss)}</span> : <span className="badge warning">Pendente</span>}<input type="file" multiple accept="image/*,.pdf" disabled={uploadingLossId === loss.id} onChange={(e) => { signLoss(loss.id, e.target.files); e.target.value = ''; }} /><small>{uploadingLossId === loss.id ? 'Enviando documentos...' : 'É possível selecionar vários arquivos e adicionar novos depois.'}</small></div></td>
                 <td><div className="action-toolbar"><button className="info" onClick={() => openLossDetails(loss)}>Detalhes</button><Link className="ghost" to={`/perdas-tecnico/${loss.id}`}>Guia</Link></div></td>
               </tr>)}
               {!losses.length && <tr><td colSpan="9"><div className="empty-state">Nenhuma perda registrada.</div></td></tr>}
@@ -364,7 +389,7 @@ export default function TechnicianLosses() {
           <label>Técnico responsável<select value={form.technicianId} onChange={(e) => onSelectTechnician(e.target.value)}><option value="">Selecione</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
           <label>Motivo da perda/desconto<input list="loss-reason-options" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="loss-reason-options">{LOSS_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           <label className="span-2">Observações<textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Descreva detalhes da ocorrência, protocolo interno ou autorização." /></label>
-          <label className="span-2">Documento assinado/reconhecimento<input type="file" accept="image/*,.pdf" onChange={async (e) => { const file = await readFile(e.target.files?.[0]); if (file) setForm({ ...form, attachmentName: file.name, attachmentData: file.data }); }} /><small>Opcional na abertura: também será possível anexar depois na fila.</small></label>{form.attachmentName && <AttachmentPreview compact name={form.attachmentName} data={form.attachmentData} label="Documento selecionado" />}
+          <label className="span-2">Documentos assinados/reconhecimento<input type="file" multiple accept="image/*,.pdf" onChange={async (e) => { try { const attachments = await readFiles(e.target.files, form.attachments.length); if (attachments.length) setForm({ ...form, attachments: [...form.attachments, ...attachments] }); } catch (error) { setMessage(error.message); } finally { e.target.value = ''; } }} /><small>Opcional na abertura. Selecione vários PDFs ou imagens de uma vez; novos documentos também poderão ser adicionados depois.</small></label>{form.attachments.length > 0 && <div className="span-2 attachment-cell">{form.attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`} className="row-actions"><AttachmentPreview compact name={attachment.name} data={attachment.data} label={`Documento ${index + 1}`} /><button type="button" className="danger" onClick={() => setForm({ ...form, attachments: form.attachments.filter((_, itemIndex) => itemIndex !== index) })}>Remover</button></div>)}</div>}
         </div>
 
         {!form.technicianId && <div className="empty-state small">Selecione um técnico para carregar os itens sob responsabilidade dele.</div>}
@@ -413,7 +438,7 @@ export default function TechnicianLosses() {
           { label: 'Técnico responsável', value: selectedTechnician()?.name },
           { label: 'Tipo de baixa', value: form.lossType === 'ferramenta' ? 'Ferramenta da ficha' : 'Material da caixa' },
           { label: 'Motivo', value: form.reason },
-          { label: 'Documento', value: form.attachmentName || 'Será anexado posteriormente' },
+          { label: 'Documentos', value: form.attachments.length ? `${form.attachments.length} selecionado(s)` : 'Serão anexados posteriormente' },
         ]}
         items={reviewItems}
         totalQuantity={reviewQuantity}
@@ -426,7 +451,7 @@ export default function TechnicianLosses() {
       />
 
       <DetailsModal open={!!details} title={`Detalhes da perda ${details?.transferNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{details && <Link className="ghost" to={`/perdas-tecnico/${details.id}`}>Abrir guia</Link>}</>}>
-        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", lossNature(details)], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", transferAttachmentSummary(details)], ["Observações", details.notes]]} />{getTransferAttachments(details).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} label={`Documento ${index + 1}`} />)}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{lossItemName(item)}</b><span>{item.itemType === 'ferramenta' ? 'Ferramenta' : 'Material'} • Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
+        {details && <><DetailGrid fields={[["Guia", details.transferNumber], ["Tipo", lossNature(details)], ["Técnico", details.Technician?.name], ["Status", details.status], ["Data", details.deliveredAt], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor do desconto", brl(details.totalValue)], ["Documento", transferAttachmentSummary(details)], ["Observações", details.notes]]} />{getTransferAttachments(details).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} loadData={async () => { const response = await api.get(`/stock/technician-losses/${details.id}/attachments/${index}`); return response.data?.data?.data || ''; }} label={`Documento ${index + 1}`} />)}<DetailList title="Itens baixados por perda" items={details.TransferItems || []} render={(item) => <><b>{lossItemName(item)}</b><span>{item.itemType === 'ferramenta' ? 'Ferramenta' : 'Material'} • Qtd. {formatQuantity(item.quantity)} • {item.serialNumber || 'sem serial'} • {brl(item.totalCost)}</span></>} /></>}
       </DetailsModal>
     </div>
   );

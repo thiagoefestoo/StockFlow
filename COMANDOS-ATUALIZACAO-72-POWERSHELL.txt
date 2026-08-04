@@ -1,0 +1,123 @@
+﻿ATUALIZAÇÃO 72 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-72-multiplos-documentos-perda.zip
+APLICAR-ATUALIZACAO-72.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-72-multiplos-documentos-perda.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-72.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/stockController.js",
+    "backend/app/routes/stockRoutes.js",
+    "backend/scripts/test-loss-multiple-attachments.js",
+    "frontend/src/pages/TechnicianLosses.jsx",
+    "frontend/src/pages/LossPrint.jsx",
+    "frontend/build",
+    "ATUALIZACAO-72-MULTIPLOS-DOCUMENTOS-PERDA.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-72.txt",
+    "COMANDOS-ATUALIZACAO-72-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-72.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Permite vários documentos por perda do técnico"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização possui backend e frontend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente no sistema;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE CONTROLADO
+-------------------
+
+Nova perda:
+
+1. abrir Perdas/descontos;
+2. clicar em Registrar perda;
+3. selecionar o técnico e os itens;
+4. selecionar dois documentos no mesmo campo;
+5. conferir a lista de documentos selecionados;
+6. remover um documento e adicioná-lo novamente;
+7. confirmar a perda;
+8. abrir Detalhes e visualizar os dois documentos.
+
+Perda já existente:
+
+1. localizar uma perda que já tenha um documento;
+2. selecionar mais dois arquivos na coluna Documento;
+3. aguardar a atualização da lista;
+4. confirmar que o contador aumentou;
+5. abrir Detalhes;
+6. visualizar e baixar cada documento;
+7. abrir a Guia e conferir a seção Documentos anexados.
+
+Limites:
+
+- tentar selecionar mais de 8 arquivos em um envio;
+- tentar enviar um arquivo que não seja PDF nem imagem;
+- confirmar que o sistema bloqueia sem alterar os documentos existentes.

@@ -633,6 +633,126 @@ exports.moveFromTechnicianToClient = asyncHandler(async (req, res) => {
 });
 
 
+const LOSS_MAX_ATTACHMENTS_PER_REQUEST = 8;
+const LOSS_MAX_ATTACHMENTS_PER_RECORD = 30;
+const LOSS_MAX_ATTACHMENT_PAYLOAD_LENGTH = 18 * 1024 * 1024;
+
+function normalizeLossAttachmentEntry(entry = {}) {
+  const name = String(entry.name || entry.attachmentName || '').trim();
+  const data = String(entry.data || entry.attachmentData || '').trim();
+  if (!name || !data) return null;
+  if (!/^data:(image\/[^;,]+|application\/pdf)[;,]/i.test(data)) return null;
+  return {
+    name: name.slice(0, 255),
+    data,
+    uploadedAt: entry.uploadedAt || new Date().toISOString(),
+  };
+}
+
+function readLossAttachments(loss) {
+  const source = loss?.toJSON ? loss.toJSON() : (loss || {});
+  const raw = source.attachmentData;
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      const entries = Array.isArray(parsed)
+        ? parsed
+        : (Array.isArray(parsed?.attachments) ? parsed.attachments : []);
+      const normalized = entries.map(normalizeLossAttachmentEntry).filter(Boolean);
+      if (normalized.length) return normalized;
+    } catch (_) {
+      // Formato legado: um único data URL salvo diretamente na coluna.
+    }
+
+    const legacy = normalizeLossAttachmentEntry({
+      name: source.attachmentName || 'documento-anexado',
+      data: raw,
+      uploadedAt: source.signedAt || source.updatedAt || source.createdAt,
+    });
+    return legacy ? [legacy] : [];
+  }
+
+  const summary = String(source.attachmentName || '').trim();
+  const multipleMatch = summary.match(/^(\d+)\s+arquivos?\s+anexados?$/i);
+  if (multipleMatch) {
+    return Array.from({ length: Number(multipleMatch[1]) }, (_, index) => ({
+      name: `Anexo ${index + 1}`,
+      data: '',
+    }));
+  }
+  return summary ? [{ name: summary, data: '' }] : [];
+}
+
+function lossAttachmentSummary(attachments = []) {
+  if (!attachments.length) return null;
+  if (attachments.length === 1) return attachments[0].name;
+  return `${attachments.length} arquivos anexados`;
+}
+
+function lossWithAttachments(loss, includeData = false) {
+  const payload = loss?.toJSON ? loss.toJSON() : { ...(loss || {}) };
+  const attachments = readLossAttachments(payload);
+  payload.attachmentCount = attachments.length;
+  payload.attachmentNames = attachments.map((item) => item.name);
+  if (includeData) payload.attachments = attachments;
+  delete payload.attachmentData;
+  return payload;
+}
+
+function isTechnicianLossRecord(loss) {
+  return String(loss?.transferNumber || '').toUpperCase().startsWith('PERDA-');
+}
+
+function canAccessTechnicianLoss(user, loss) {
+  if (isPrivileged(user)) return true;
+  if (loss?.warehouseId) {
+    try {
+      assertWarehouseAccess(user, loss.warehouseId);
+      return true;
+    } catch (_) {
+      // Continua pela cidade do técnico.
+    }
+  }
+  return Boolean(
+    loss?.Technician
+      && filterTechniciansForUser(user, [loss.Technician]).length > 0,
+  );
+}
+
+function prepareIncomingLossAttachments(body = {}) {
+  const legacyProvided = Boolean(body.attachmentName || body.attachmentData);
+  const requested = Array.isArray(body.attachments)
+    ? body.attachments
+    : (legacyProvided ? [{ attachmentName: body.attachmentName, attachmentData: body.attachmentData }] : []);
+
+  if (requested.length > LOSS_MAX_ATTACHMENTS_PER_REQUEST) {
+    const error = new Error(`Envie no máximo ${LOSS_MAX_ATTACHMENTS_PER_REQUEST} arquivos por vez.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalized = requested.map(normalizeLossAttachmentEntry).filter(Boolean);
+  if (normalized.length !== requested.length) {
+    const error = new Error('Envie somente arquivos PDF ou imagens válidas, todos com nome e conteúdo.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return normalized;
+}
+
+function serializeLossAttachments(attachments = []) {
+  if (!attachments.length) return null;
+  const serialized = JSON.stringify(attachments);
+  if (serialized.length > LOSS_MAX_ATTACHMENT_PAYLOAD_LENGTH) {
+    const error = new Error('O conjunto de anexos excede o limite permitido. Reduza o tamanho ou envie menos arquivos por vez.');
+    error.statusCode = 413;
+    throw error;
+  }
+  return serialized;
+}
+
 function nextLossNumber() {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
@@ -657,7 +777,84 @@ exports.losses = asyncHandler(async (req, res) => {
   const visibleRows = isPrivileged(req.user)
     ? rows
     : rows.filter((row) => row.Technician && filterTechniciansForUser(req.user, [row.Technician]).length > 0);
-  return ok(res, visibleRows);
+  return ok(res, visibleRows.map((row) => lossWithAttachments(row, false)));
+});
+
+exports.getTechnicianLoss = asyncHandler(async (req, res) => {
+  const loss = await Transfer.findByPk(req.params.id, {
+    include: [
+      Technician,
+      Warehouse,
+      { model: TransferItem, include: [Material, SerializedAsset, TechnicianTool] },
+      { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] },
+    ],
+  });
+  if (!loss || !isTechnicianLossRecord(loss)) return fail(res, 404, 'Perda/desconto não encontrada.');
+  if (!canAccessTechnicianLoss(req.user, loss)) return fail(res, 403, 'Você não tem acesso à cidade desta perda.');
+  return ok(res, lossWithAttachments(loss, false));
+});
+
+exports.getTechnicianLossAttachment = asyncHandler(async (req, res) => {
+  const loss = await Transfer.findByPk(req.params.id, {
+    attributes: ['id', 'transferNumber', 'warehouseId', 'technicianId', 'attachmentName', 'attachmentData', 'signedAt', 'createdAt', 'updatedAt'],
+    include: [Technician],
+  });
+  if (!loss || !isTechnicianLossRecord(loss)) return fail(res, 404, 'Perda/desconto não encontrada.');
+  if (!canAccessTechnicianLoss(req.user, loss)) return fail(res, 403, 'Você não tem acesso à cidade desta perda.');
+
+  const attachments = readLossAttachments(loss);
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 0 || index >= attachments.length) {
+    return fail(res, 404, 'Anexo não encontrado nesta perda.');
+  }
+  return ok(res, attachments[index]);
+});
+
+exports.appendTechnicianLossAttachments = asyncHandler(async (req, res) => {
+  const loss = await Transfer.findByPk(req.params.id, { include: [Technician] });
+  if (!loss || !isTechnicianLossRecord(loss)) return fail(res, 404, 'Perda/desconto não encontrada.');
+  if (!canAccessTechnicianLoss(req.user, loss)) return fail(res, 403, 'Você não tem acesso à cidade desta perda.');
+
+  let incomingAttachments;
+  try {
+    incomingAttachments = prepareIncomingLossAttachments(req.body);
+  } catch (error) {
+    return fail(res, error.statusCode || 400, error.message);
+  }
+  if (!incomingAttachments.length) return fail(res, 400, 'Selecione pelo menos um arquivo PDF ou imagem válido.');
+
+  const before = lossWithAttachments(loss, false);
+  const existingAttachments = readLossAttachments(loss);
+  const combinedAttachments = [...existingAttachments, ...incomingAttachments];
+  if (combinedAttachments.length > LOSS_MAX_ATTACHMENTS_PER_RECORD) {
+    return fail(res, 400, `Uma perda pode possuir no máximo ${LOSS_MAX_ATTACHMENTS_PER_RECORD} anexos.`);
+  }
+
+  let serializedAttachments;
+  try {
+    serializedAttachments = serializeLossAttachments(combinedAttachments);
+  } catch (error) {
+    return fail(res, error.statusCode || 413, error.message);
+  }
+
+  loss.status = 'assinado';
+  loss.signedAt = loss.signedAt || new Date();
+  loss.attachmentName = lossAttachmentSummary(combinedAttachments);
+  loss.attachmentData = serializedAttachments;
+  loss.signatureResponsible = req.body.signatureResponsible || loss.signatureResponsible || 'Documentos de reconhecimento anexados';
+  await loss.save();
+
+  const safeLoss = lossWithAttachments(loss, false);
+  await writeAudit({
+    req,
+    action: 'loss_attachments_append',
+    entity: 'TechnicianLoss',
+    entityId: loss.id,
+    message: `${incomingAttachments.length} documento(s) anexado(s) à perda ${loss.transferNumber}. Total de anexos: ${combinedAttachments.length}.`,
+    beforeData: before,
+    afterData: safeLoss,
+  });
+  return ok(res, safeLoss, `${incomingAttachments.length} documento(s) anexado(s) com sucesso.`);
 });
 
 exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
@@ -686,6 +883,15 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
     return fail(res, 400, 'Selecione ao menos uma ferramenta da ficha do técnico.');
   }
 
+  let initialAttachments;
+  let serializedInitialAttachments;
+  try {
+    initialAttachments = prepareIncomingLossAttachments(req.body);
+    serializedInitialAttachments = serializeLossAttachments(initialAttachments);
+  } catch (error) {
+    return fail(res, error.statusCode || 400, error.message);
+  }
+
   const technician = await Technician.findByPk(technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
@@ -697,10 +903,10 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
       transferNumber: reference,
       technicianId,
       deliveredAt: occurredAt || new Date(),
-      status: attachmentData ? 'assinado' : 'pendente_assinatura',
-      signedAt: attachmentData ? new Date() : null,
-      attachmentName: attachmentName || null,
-      attachmentData: attachmentData || null,
+      status: initialAttachments.length ? 'assinado' : 'pendente_assinatura',
+      signedAt: initialAttachments.length ? new Date() : null,
+      attachmentName: lossAttachmentSummary(initialAttachments),
+      attachmentData: serializedInitialAttachments,
       signatureResponsible: signatureResponsible || technician.name,
       notes: `GUIA DE PERDA/DESCONTO DE ${typeLabel}. Motivo: ${reason}. ${notes || ''}`.trim(),
       stampText: 'Reconheço a perda do(s) item(ns) listado(s), autorizo a conferência/desconto conforme política interna e declaro ciência da baixa em minha ficha de responsabilidade.',
@@ -876,7 +1082,7 @@ exports.registerTechnicianLoss = asyncHandler(async (req, res) => {
       entity: 'TechnicianLoss',
       entityId: record.id,
       message: `Perda/desconto ${reference} baixou ${qty(totalQuantity)} item(ns) de ${lossType === 'ferramenta' ? 'ferramenta' : 'material'} da responsabilidade de ${technician.name}.`,
-      afterData: { transfer: record.toJSON(), technician: technician.toJSON(), lossType, reason, notes, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
+      afterData: { transfer: lossWithAttachments(record, false), technician: technician.toJSON(), lossType, reason, notes, totalQuantity: qty(totalQuantity), totalValue: money(totalValue), affected },
       transaction,
     });
 

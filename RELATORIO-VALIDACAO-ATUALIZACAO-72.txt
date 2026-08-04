@@ -1,0 +1,98 @@
+ATUALIZAÇÃO 72 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main (1)(2).zip
+
+OBJETIVO
+--------
+Permitir vários documentos por ocorrência na página Perdas/descontos do técnico,
+sem substituir anexos anteriores e sem depender da permissão de Transferências.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/stockController.js
+backend/app/routes/stockRoutes.js
+backend/scripts/test-loss-multiple-attachments.js
+frontend/src/pages/TechnicianLosses.jsx
+frontend/src/pages/LossPrint.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 112 arquivos JavaScript.
+
+2. Teste específico
+   Comando:
+   node backend/scripts/test-loss-multiple-attachments.js
+
+   Resultado:
+   - rotas específicas presentes;
+   - limite por envio presente;
+   - limite total presente;
+   - armazenamento em coleção presente;
+   - auditoria do acréscimo presente;
+   - seleção múltipla presente na tela;
+   - visualização individual presente;
+   - serialização de dois anexos validada.
+
+3. Frontend
+   Arquivos validados pelo transpiler TypeScript com suporte a JSX:
+   - frontend/src/pages/TechnicianLosses.jsx;
+   - frontend/src/pages/LossPrint.jsx.
+
+   Resultado: JavaScript/JSX válido.
+
+4. Integridade textual
+   - sem marcadores de conflito;
+   - sem espaços inválidos no final das linhas;
+   - sem linha extra indevida no final dos arquivos.
+
+5. Compatibilidade
+   - documento legado único preservado;
+   - múltiplos documentos armazenados em JSON;
+   - novos arquivos são acrescentados, não substituídos;
+   - detalhes carregam os nomes sem expor o conteúdo na listagem;
+   - conteúdo individual carregado sob demanda;
+   - status passa a assinado após o primeiro documento;
+   - novos documentos continuam permitidos após a assinatura.
+
+6. Segurança
+   - máximo de 8 arquivos por envio;
+   - máximo de 12 MB por envio no frontend;
+   - máximo de 30 documentos por perda no backend;
+   - somente PDF ou imagem;
+   - limite de conteúdo no backend;
+   - validação de acesso à cidade/técnico;
+   - rotas exclusivas do módulo Perdas/descontos;
+   - auditoria do envio posterior.
+
+7. Banco e produção
+   - nenhuma migration;
+   - nenhuma coluna nova;
+   - nenhum saldo alterado;
+   - nenhum valor de perda alterado;
+   - nenhum documento antigo apagado;
+   - pacote sem .env, .git, node_modules, build ou uploads de produção.
+
+BUILD DO FRONTEND
+-----------------
+A sintaxe JSX foi validada neste ambiente.
+
+A instalação das dependências não foi concluída porque o repositório interno do
+ambiente retornou erro 404 para uma dependência. Por isso, a build completa deve
+ser executada pelo aplicador no computador do usuário.
+
+O aplicador mantém a atualização somente se:
+- o backend passar na validação;
+- o teste específico passar;
+- a build do frontend concluir;
+- o git diff --check for aprovado.
+
+Em caso de falha, os arquivos e a build anteriores são restaurados.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA COM BUILD LOCAL OBRIGATÓRIA.

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import api from '../services/api';
 import AttachmentPreview from '../components/AttachmentPreview';
 import { formatQuantity } from '../utils/formatQuantity';
+import { getTransferAttachments } from '../utils/transferAttachments';
 
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function itemName(item) { return item?.itemDescription || item?.TechnicianTool?.name || item?.Material?.name || 'Item'; }
@@ -11,11 +12,18 @@ function itemType(item) { return item?.itemType === 'ferramenta' || item?.Techni
 export default function LossPrint() {
   const { id } = useParams();
   const [loss, setLoss] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
-  useEffect(() => { api.get(`/transfers/${id}`).then((r) => setLoss(r.data.data)); }, [id]);
+  useEffect(() => {
+    setLoadError('');
+    api.get(`/stock/technician-losses/${id}`)
+      .then((r) => setLoss(r.data.data))
+      .catch((error) => setLoadError(error.response?.data?.message || error.message || 'Não foi possível carregar a guia de perda.'));
+  }, [id]);
 
   const isToolLoss = useMemo(() => (loss?.TransferItems || []).some((item) => itemType(item) === 'Ferramenta'), [loss]);
 
+  if (loadError) return <div className="panel"><strong>Não foi possível carregar a guia.</strong><p>{loadError}</p></div>;
   if (!loss) return <div className="panel">Carregando guia de perda...</div>;
 
   const items = loss.TransferItems || [];
@@ -56,7 +64,7 @@ export default function LossPrint() {
         <div className="signature-area"><div><span></span><p>Assinatura do Técnico</p></div><div><span></span><p>Responsável pelo Estoque/Administração</p></div></div>
         <p className="paper-note no-print">Este documento registra a baixa do item por perda, extravio ou avaria, gerando histórico, auditoria e reflexo nos indicadores operacionais e financeiros.</p>
       </section>
-      {loss.attachmentData && <section className="panel no-print"><h3>Documento anexado</h3><AttachmentPreview name={loss.attachmentName} data={loss.attachmentData} label="Documento de reconhecimento" /></section>}
+      {getTransferAttachments(loss).length > 0 && <section className="panel no-print"><h3>Documentos anexados</h3>{getTransferAttachments(loss).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} loadData={async () => { const response = await api.get(`/stock/technician-losses/${loss.id}/attachments/${index}`); return response.data?.data?.data || ''; }} label={`Documento ${index + 1} de reconhecimento`} />)}</section>}
     </div>
   );
 }
