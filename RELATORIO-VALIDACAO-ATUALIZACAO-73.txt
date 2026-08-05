@@ -1,0 +1,71 @@
+ATUALIZAÇÃO 73 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(10).zip
+
+ERRO
+----
+FOR UPDATE cannot be applied to the nullable side of an outer join
+
+CAUSA CONFIRMADA
+----------------
+A consulta de StockBatchItem possuía `include: Material` e
+`lock: transaction.LOCK.UPDATE` no mesmo SELECT.
+
+O Sequelize gerava LEFT OUTER JOIN e o PostgreSQL recusava o FOR UPDATE.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/batchController.js
+backend/scripts/test-stock-batch-quantity-edit-permission.js
+
+CORREÇÃO
+--------
+- StockBatchItem é bloqueado sem include;
+- Material é carregado em consulta separada;
+- as duas consultas permanecem na mesma transação;
+- o restante do fluxo de quantidade, saldo, totais e auditoria foi preservado;
+- foi adicionada validação de integridade para material ausente.
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 112 arquivos JavaScript.
+
+2. Teste de regressão
+   Comando:
+   node backend/scripts/test-stock-batch-quantity-edit-permission.js
+
+   Resultado:
+   - permissão validada;
+   - proteções de quantidade validadas;
+   - consulta bloqueada contém FOR UPDATE;
+   - consulta bloqueada não contém include;
+   - carregamento separado de Material confirmado.
+
+3. Banco
+   - nenhuma migration;
+   - nenhuma coluna nova;
+   - nenhum saldo alterado pela instalação;
+   - nenhuma entrada antiga modificada automaticamente.
+
+4. Pacote
+   - sem .env;
+   - sem .git;
+   - sem node_modules;
+   - sem build;
+   - sem uploads de produção.
+
+REDEPLOY
+--------
+A atualização é somente de backend.
+
+Após o push, faça redeploy apenas do Render.
+Não é necessário redeploy da Vercel.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA.

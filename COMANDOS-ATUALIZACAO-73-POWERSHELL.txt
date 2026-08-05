@@ -1,0 +1,104 @@
+﻿ATUALIZAÇÃO 73 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-73-corrige-edicao-entrada-for-update.zip
+APLICAR-ATUALIZACAO-73.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-73-corrige-edicao-entrada-for-update.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-73.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/batchController.js",
+    "backend/scripts/test-stock-batch-quantity-edit-permission.js",
+    "ATUALIZACAO-73-CORRECAO-FOR-UPDATE-ENTRADA.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-73.txt",
+    "COMANDOS-ATUALIZACAO-73-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-73.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Corrige bloqueio ao editar entrada de estoque"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+Esta atualização altera somente o backend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. sair e entrar novamente no sistema;
+5. abrir a entrada e repetir a edição.
+
+Não é necessário redeploy da Vercel.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE CONTROLADO
+-------------------
+
+1. abrir Entrada em Estoque;
+2. abrir a mesma entrada que apresentou o erro;
+3. clicar em Editar entrada;
+4. alterar somente um campo documental;
+5. salvar e confirmar que não aparece o erro FOR UPDATE;
+6. alterar a quantidade de um material sem serial;
+7. salvar;
+8. confirmar o ajuste somente pela diferença;
+9. conferir o saldo e a auditoria;
+10. confirmar que material serializado continua bloqueado.

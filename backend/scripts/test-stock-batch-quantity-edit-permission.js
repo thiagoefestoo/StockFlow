@@ -24,4 +24,13 @@ assert.ok(controllerSource.includes('não pode ser alterada nesta tela porque es
 assert.ok(controllerSource.includes('totalItems'));
 assert.ok(controllerSource.includes('totalValue'));
 
+const lockedItemsStart = controllerSource.indexOf('const batchItems = await StockBatchItem.findAll({');
+const lockedItemsEnd = controllerSource.indexOf('const beforeData = {', lockedItemsStart);
+assert.ok(lockedItemsStart >= 0 && lockedItemsEnd > lockedItemsStart);
+const lockedItemsQuery = controllerSource.slice(lockedItemsStart, lockedItemsEnd);
+assert.ok(lockedItemsQuery.includes('lock: transaction.LOCK.UPDATE'));
+assert.ok(!lockedItemsQuery.includes('include:'), 'A consulta com FOR UPDATE não pode possuir include/OUTER JOIN.');
+assert.ok(lockedItemsQuery.includes('await Material.findAll({'));
+assert.ok(controllerSource.includes('PostgreSQL não permite aplicar FOR UPDATE'));
+
 console.log('Permissão e proteções da edição de quantidades validadas.');

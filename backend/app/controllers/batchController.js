@@ -120,17 +120,49 @@ exports.update = asyncHandler(async (req, res) => {
       throw error;
     }
 
+    // PostgreSQL não permite aplicar FOR UPDATE ao lado anulável de um
+    // OUTER JOIN. O include de Material gera LEFT OUTER JOIN no Sequelize.
+    // Bloqueie primeiro somente as linhas de StockBatchItem e carregue os
+    // materiais em uma consulta separada, dentro da mesma transação.
     const batchItems = await StockBatchItem.findAll({
       where: { batchId: batch.id },
-      include: [{ model: Material, attributes: ['id', 'name', 'sku', 'unit', 'category', 'requiresSerial'] }],
       transaction,
       lock: transaction.LOCK.UPDATE,
       order: [['id', 'ASC']],
     });
 
+    const batchMaterialIds = Array.from(new Set(
+      batchItems.map((item) => Number(item.materialId)).filter(Boolean),
+    ));
+    const batchMaterials = batchMaterialIds.length
+      ? await Material.findAll({
+        where: { id: { [Op.in]: batchMaterialIds } },
+        attributes: ['id', 'name', 'sku', 'unit', 'category', 'requiresSerial'],
+        transaction,
+      })
+      : [];
+    const batchMaterialById = new Map(
+      batchMaterials.map((material) => [Number(material.id), material]),
+    );
+
+    for (const item of batchItems) {
+      const material = batchMaterialById.get(Number(item.materialId));
+      if (!material) {
+        const error = new Error(`O material vinculado ao item ${item.id} não foi encontrado. A entrada não foi alterada.`);
+        error.statusCode = 409;
+        throw error;
+      }
+      // Mantém o mesmo acesso usado pelo restante do fluxo sem adicionar
+      // associação ao SELECT bloqueado e sem marcar campo persistente.
+      item.Material = material;
+    }
+
     const beforeData = {
       ...batch.toJSON(),
-      StockBatchItems: batchItems.map((item) => item.toJSON()),
+      StockBatchItems: batchItems.map((item) => ({
+        ...item.toJSON(),
+        Material: item.Material?.toJSON() || null,
+      })),
       proofAttachmentData: undefined,
     };
     const previousReceiptNumber = batch.receiptNumber;
