@@ -188,7 +188,9 @@ export default function TechnicianPortal() {
             quantity,
             serialCount: serials.length,
             serialPreview: serials.join(', '),
-            totalValue: quantity * Number(material?.unitCost || 0),
+            totalValue: material?.requiresSerial
+              ? serials.reduce((sum, serial) => sum + Number((stock?.assets || []).find((asset) => asset.serialNumber === serial)?.acquisitionCost || material?.unitCost || 0), 0)
+              : quantity * Number(material?.unitCost || 0),
           };
         })}
         warning="Após confirmar, os itens serão retirados da carga do técnico e vinculados ao registro do serviço."

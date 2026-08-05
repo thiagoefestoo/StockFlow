@@ -730,8 +730,11 @@ export default function Transfers() {
     })
     .filter(Boolean);
   const reviewQuantity = reviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const requiresDirectApproval = !form.materialRequestId
+    && selectedTechnician
+    && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500);
   const reviewWarningParts = [];
-  if (selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500)) {
+  if (requiresDirectApproval) {
     reviewWarningParts.push(`O valor ultrapassa o limite individual de ${brl(selectedTechnician.transferApprovalLimit ?? 500)}. Ao confirmar, a carga será enviada para aprovação antes de movimentar o estoque.`);
   } else if (zeroStockRelease) {
     reviewWarningParts.push('Todos os itens mantidos estão com quantidade zero. A solicitação será liberada sem movimentação de material.');
@@ -931,7 +934,7 @@ export default function Transfers() {
         totalValue={totalPreview}
         warning={reviewWarning}
         loading={saving}
-        confirmLabel={selectedTechnician && totalPreview > Number(selectedTechnician.transferApprovalLimit ?? 500) ? 'Confirmar e enviar para aprovação' : zeroStockRelease ? 'Confirmar liberação sem material' : 'Confirmar transferência'}
+        confirmLabel={requiresDirectApproval ? 'Confirmar e enviar para aprovação' : zeroStockRelease ? 'Confirmar liberação sem material' : 'Confirmar transferência'}
         onRemoveItem={requestLinked ? (item) => removeItem(item.sourceIndex) : undefined}
         removeItemLabel="Excluir da entrega"
         onCancel={() => setReviewOpen(false)}

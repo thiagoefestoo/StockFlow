@@ -264,6 +264,39 @@ export default function TechnicianInbox() {
     }
   }
 
+  function cleanRequestItems() {
+    return requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
+  }
+
+  function validateRequest() {
+    if (!selectedTech) return 'Selecione o técnico antes de solicitar material.';
+    if (!String(requestForm.requesterNotes || '').trim()) return 'Informe a justificativa da solicitação.';
+    const cleanItems = cleanRequestItems();
+    if (!cleanItems.length) return 'Adicione ao menos um material na solicitação.';
+    if (duplicateItemIds(cleanItems).length) return 'O mesmo material não pode aparecer mais de uma vez na solicitação.';
+    for (const item of cleanItems) {
+      const material = materialsCatalog.find((row) => Number(row.id) === Number(item.materialId));
+      if (!material) return 'Existe um material que não está mais disponível no catálogo.';
+      if (!Number.isInteger(Number(item.quantity)) || Number(item.quantity) <= 0) return `Informe uma quantidade inteira válida para ${material.name}.`;
+    }
+    return '';
+  }
+
+  const requestReviewItems = cleanRequestItems().map((item, index) => {
+    const material = materialsCatalog.find((row) => Number(row.id) === Number(item.materialId));
+    const quantity = Number(item.quantity || 0);
+    return {
+      key: `${item.materialId || 'empty'}-${index}`,
+      name: material?.name || `Item ${index + 1}`,
+      detail: `${material?.category || 'categoria não informada'} • unidade ${material?.unit || 'un'}`,
+      quantity,
+      unit: material?.unit || 'un',
+      totalValue: quantity * Number(material?.unitCost || 0),
+    };
+  });
+  const requestReviewQuantity = requestReviewItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const requestReviewValue = requestReviewItems.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
+
   function changeSelectedTechnician(value) {
     setSelectedTech(value);
     setStock(null);
@@ -272,26 +305,28 @@ export default function TechnicianInbox() {
   }
 
   function requestConfirmation() {
-    try {
-      if (!selectedTech) throw new Error('Selecione o técnico antes de solicitar material.');
-      if (!String(requestForm.requesterNotes || '').trim()) throw new Error('Informe a justificativa da solicitação.');
-      const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
-      if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
-      if (duplicateItemIds(cleanItems).length) throw new Error('O mesmo material não pode aparecer mais de uma vez na solicitação.');
-      setRequestModal(false);
-      setRequestConfirmOpen(true);
-    } catch (error) {
-      setMessage(error.message || 'Revise a solicitação.');
+    const validationError = validateRequest();
+    if (validationError) {
+      setMessage(validationError);
+      return;
     }
+    setMessage('');
+    setRequestModal(false);
+    setRequestConfirmOpen(true);
   }
 
   async function sendRequest() {
     if (submittingRequest) return;
+    const validationError = validateRequest();
+    if (validationError) {
+      setMessage(validationError);
+      setRequestConfirmOpen(false);
+      setRequestModal(true);
+      return;
+    }
     setSubmittingRequest(true);
     try {
-      const cleanItems = requestForm.items.filter((item) => item.materialId && Number(item.quantity || 0) > 0);
-      if (!cleanItems.length) throw new Error('Adicione ao menos um material na solicitação.');
-      if (duplicateItemIds(cleanItems).length) throw new Error('O mesmo material não pode aparecer mais de uma vez na solicitação.');
+      const cleanItems = cleanRequestItems();
       const response = await api.post('/material-requests', { ...requestForm, items: cleanItems, technicianId: selectedTech });
       setMessage(response.data?.message || 'Solicitação registrada.');
       setRequestConfirmOpen(false);
@@ -448,7 +483,9 @@ export default function TechnicianInbox() {
             quantity,
             serialCount: serials.length,
             serialPreview: serials.join(', '),
-            totalValue: quantity * Number(material?.unitCost || 0),
+            totalValue: material?.requiresSerial
+              ? serials.reduce((sum, serial) => sum + Number((stock?.assets || []).find((asset) => asset.serialNumber === serial)?.acquisitionCost || material?.unitCost || 0), 0)
+              : quantity * Number(material?.unitCost || 0),
           };
         })}
         warning="Após a confirmação, os materiais serão baixados da caixa do técnico e vinculados ao registro do serviço."
@@ -461,7 +498,7 @@ export default function TechnicianInbox() {
         {details?.type === 'request' && <DetailGrid fields={[["Solicitação", details.item.requestNumber], ["Status", statusLabel(details.item.status)], ["Prioridade", details.item.priority], ["Itens", formatQuantity(details.item.totalQuantity)], ["Valor", brl(details.item.totalValue)], ["Atualização", dt(details.item.updatedAt)], ["Observação", details.item.requesterNotes]]} />}
       </DetailsModal>
 
-      <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={requestConfirmation}>Enviar solicitação</button></>}>
+      <Modal open={requestModal} title="Solicitar reposição de carga" onClose={() => setRequestModal(false)} footer={<><button className="ghost" onClick={() => setRequestModal(false)}>Cancelar</button><button onClick={requestConfirmation}>Revisar solicitação</button></>}>
         <div className="form-stack">
           <label>Prioridade<select value={requestForm.priority} onChange={(e) => setRequestForm({ ...requestForm, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
           <label>Justificativa<textarea rows="3" value={requestForm.requesterNotes} onChange={(e) => setRequestForm({ ...requestForm, requesterNotes: e.target.value })} /></label>
@@ -471,21 +508,25 @@ export default function TechnicianInbox() {
         </div>
       </Modal>
 
-      <Modal
+      <OperationReviewModal
         open={requestConfirmOpen}
-        title="Confirmar solicitação"
-        onClose={() => { if (!submittingRequest) { setRequestConfirmOpen(false); setRequestModal(true); } }}
-        footer={<>
-          <button type="button" className="ghost" disabled={submittingRequest} onClick={() => { setRequestConfirmOpen(false); setRequestModal(true); }}>Não</button>
-          <button type="button" disabled={submittingRequest} onClick={sendRequest}>{submittingRequest ? 'Enviando...' : 'Sim, solicitar'}</button>
-        </>}
-      >
-        <p><strong>Deseja realmente solicitar esse pedido?</strong></p>
-        <div className="detail-grid compact">
-          <div className="detail-card"><span>Técnico</span><strong>{technicians.find((t) => String(t.id) === String(selectedTech))?.name || user?.name || '-'}</strong></div>
-          <div className="detail-card"><span>Itens</span><strong>{formatQuantity(requestForm.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0))}</strong></div>
-        </div>
-      </Modal>
+        title="Revisar solicitação de material"
+        description="Confira o técnico, a justificativa, os materiais e as quantidades antes de enviar a solicitação."
+        metadata={[
+          { label: 'Técnico', value: technicians.find((t) => String(t.id) === String(selectedTech))?.name || user?.name || '-' },
+          { label: 'Prioridade', value: requestForm.priority || 'media' },
+          { label: 'Justificativa', value: requestForm.requesterNotes || '-' },
+          { label: 'Tipos de material', value: requestReviewItems.length },
+        ]}
+        items={requestReviewItems}
+        totalQuantity={requestReviewQuantity}
+        totalValue={requestReviewValue}
+        warning="Ao confirmar, a solicitação será enviada para o fluxo de aprovação e ainda não movimentará o estoque."
+        loading={submittingRequest}
+        confirmLabel="Confirmar e enviar solicitação"
+        onCancel={() => { setRequestConfirmOpen(false); setRequestModal(true); }}
+        onConfirm={sendRequest}
+      />
     </div>
   );
 }

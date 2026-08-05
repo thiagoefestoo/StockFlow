@@ -486,6 +486,8 @@ export default function Receiving() {
         quantity,
         unitValue: unitCost,
         totalValue: quantity * unitCost,
+        serialCount: serials.length,
+        serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
         serials,
       };
     }
@@ -501,6 +503,8 @@ export default function Receiving() {
       quantity,
       unitValue: unitCost,
       totalValue: quantity * unitCost,
+      serialCount: serials.length,
+      serialPreview: serials.slice(0, 5).join(', ') + (serials.length > 5 ? ` +${serials.length - 5}` : ''),
       serials,
     };
   });

@@ -1,0 +1,87 @@
+ATUALIZAÇÃO 77 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(13).zip
+
+ESCOPO
+------
+Menus de revisão de itens antes da confirmação.
+
+FLUXOS AUDITADOS
+----------------
+1. Entrada de estoque
+2. Retorno do técnico
+3. Perda/desconto
+4. Baixa de OS — Portal do Técnico
+5. Baixa de OS — Caixa do Técnico
+6. Solicitação — Caixa do Técnico
+7. Transferência para técnico
+8. Ferramentas para ficha do técnico
+9. Ferramentas entre técnicos
+10. Transferência entre estoques
+11. Saída de logística reversa
+12. Baixa/devolução — Central da Caixa
+13. Solicitação de material
+
+PROBLEMAS CORRIGIDOS
+--------------------
+- seriais não apareciam corretamente na revisão da entrada;
+- solicitação pela Caixa do Técnico não mostrava a relação dos itens;
+- entrega de solicitação aprovada podia exibir mensagem de nova aprovação;
+- valor de serial na OS podia usar custo médio em vez do custo do equipamento;
+- confirmação geral não era bloqueada quando a lista ficava vazia;
+- valor numérico zero nos metadados podia aparecer como traço.
+
+ARQUIVOS ALTERADOS
+------------------
+frontend/src/components/OperationReviewModal.jsx
+frontend/src/pages/Receiving.jsx
+frontend/src/pages/Transfers.jsx
+frontend/src/pages/TechnicianInbox.jsx
+frontend/src/pages/TechnicianPortal.jsx
+frontend/scripts/test-operation-review-flows.js
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Sintaxe completa do frontend
+   Resultado: 62 de 62 arquivos JavaScript/JSX válidos.
+
+2. Sintaxe do backend
+   Comando: npm run check --prefix backend
+   Resultado: 117 arquivos JavaScript válidos.
+
+3. Teste dos fluxos de revisão
+   Comando: node frontend/scripts/test-operation-review-flows.js
+   Resultado:
+   - 12 modais padronizados encontrados;
+   - 1 revisão detalhada própria confirmada;
+   - todos os marcadores e proteções aprovados.
+
+4. Segurança
+   - cada função de confirmação mantém revalidação;
+   - nenhuma API é chamada apenas ao abrir a revisão;
+   - botão confirmar bloqueado sem itens;
+   - salvamento continua bloqueado durante processamento;
+   - nenhuma movimentação é feita pela instalação.
+
+BUILD COMPLETA
+--------------
+A build completa não pôde ser executada neste ambiente porque o repositório
+interno de pacotes retornou erro 404 para uma dependência do package-lock.
+
+O aplicador executará obrigatoriamente a build no computador do usuário.
+Caso a build, o teste ou o git diff --check falhem, os arquivos anteriores e
+a build anterior serão restaurados automaticamente.
+
+REDEPLOY
+--------
+A alteração é somente de frontend.
+
+Após o push, faça redeploy da Vercel.
+Não é necessário redeploy manual do Render.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA COM BUILD LOCAL OBRIGATÓRIA.

@@ -25,8 +25,11 @@ export default function OperationReviewModal({
   onCancel,
   onConfirm,
 }) {
-  const calculatedQuantity = totalQuantity ?? items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const calculatedValue = totalValue ?? items.reduce((sum, item) => sum + Number(item.totalValue || 0), 0);
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeMetadata = Array.isArray(metadata) ? metadata : [];
+  const calculatedQuantity = totalQuantity ?? safeItems.reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
+  const calculatedValue = totalValue ?? safeItems.reduce((sum, item) => sum + Number(item.totalValue ?? 0), 0);
+  const canConfirm = safeItems.length > 0 && typeof onConfirm === 'function';
 
   return (
     <Modal
@@ -36,7 +39,7 @@ export default function OperationReviewModal({
       footer={(
         <>
           <button type="button" className="ghost" disabled={loading} onClick={onCancel}>{cancelLabel}</button>
-          <button type="button" disabled={loading} onClick={onConfirm}>{loading ? 'Processando...' : confirmLabel}</button>
+          <button type="button" disabled={loading || !canConfirm} onClick={onConfirm}>{loading ? 'Processando...' : confirmLabel}</button>
         </>
       )}
     >
@@ -44,17 +47,17 @@ export default function OperationReviewModal({
         <div className="operation-review-intro">
           <span className="operation-review-icon">✓</span>
           <div>
-            <strong>Última conferência antes de movimentar o estoque</strong>
+            <strong>Última conferência antes de confirmar a operação</strong>
             <p>{description}</p>
           </div>
         </div>
 
-        {metadata.length > 0 && (
+        {safeMetadata.length > 0 && (
           <section className="operation-review-meta">
-            {metadata.filter((entry) => entry && entry.label).map((entry, index) => (
+            {safeMetadata.filter((entry) => entry && entry.label).map((entry, index) => (
               <article key={`${entry.label}-${index}`}>
                 <small>{entry.label}</small>
-                <strong>{entry.value || '-'}</strong>
+                <strong>{entry.value === 0 ? 0 : (entry.value || '-')}</strong>
                 {entry.hint && <span>{entry.hint}</span>}
               </article>
             ))}
@@ -65,7 +68,7 @@ export default function OperationReviewModal({
           <div className="subtoolbar">
             <div>
               <h4>Itens da operação</h4>
-              <small>{items.length} linha(s) para conferência</small>
+              <small>{safeItems.length} linha(s) para conferência</small>
             </div>
           </div>
           <div className="table-wrap">
@@ -81,38 +84,45 @@ export default function OperationReviewModal({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item, index) => (
-                  <tr key={item.key || `${item.name}-${index}`}>
-                    <td>{index + 1}</td>
-                    <td>
-                      <strong>{item.name || 'Item'}</strong>
-                      {item.detail && <><br /><small>{item.detail}</small></>}
-                    </td>
-                    <td>{formatQuantity(item.quantity || 0)} {item.unit || ''}</td>
-                    <td>
-                      {Number(item.serialCount || 0) > 0 ? (
-                        <>
-                          <strong>{formatQuantity(item.serialCount)} serial(is)</strong>
-                          {item.serialPreview && <><br /><small>{item.serialPreview}</small></>}
-                        </>
-                      ) : 'Não se aplica'}
-                    </td>
-                    <td>{brl(item.totalValue)}</td>
-                    {onRemoveItem && (
-                      <td className="action-cell">
-                        <button
-                          type="button"
-                          className="ghost danger-outline operation-review-remove"
-                          disabled={loading}
-                          onClick={() => onRemoveItem(item, index)}
-                        >
-                          🗑️ {removeItemLabel}
-                        </button>
+                {safeItems.map((item, index) => {
+                  const serials = Array.isArray(item.serials) ? item.serials.filter(Boolean) : [];
+                  const serialCount = Number(item.serialCount ?? serials.length ?? 0);
+                  const serialPreview = item.serialPreview || (serials.length
+                    ? `${serials.slice(0, 5).join(', ')}${serials.length > 5 ? ` +${serials.length - 5}` : ''}`
+                    : '');
+                  return (
+                    <tr key={item.key || `${item.name}-${index}`}>
+                      <td>{index + 1}</td>
+                      <td>
+                        <strong>{item.name || 'Item'}</strong>
+                        {item.detail && <><br /><small>{item.detail}</small></>}
                       </td>
-                    )}
-                  </tr>
-                ))}
-                {!items.length && <tr><td colSpan={onRemoveItem ? 6 : 5}><div className="empty-state">Nenhum item selecionado.</div></td></tr>}
+                      <td>{formatQuantity(item.quantity ?? 0)} {item.unit || ''}</td>
+                      <td>
+                        {serialCount > 0 ? (
+                          <>
+                            <strong>{formatQuantity(serialCount)} serial(is)</strong>
+                            {serialPreview && <><br /><small>{serialPreview}</small></>}
+                          </>
+                        ) : 'Não se aplica'}
+                      </td>
+                      <td>{brl(item.totalValue)}</td>
+                      {onRemoveItem && (
+                        <td className="action-cell">
+                          <button
+                            type="button"
+                            className="ghost danger-outline operation-review-remove"
+                            disabled={loading}
+                            onClick={() => onRemoveItem(item, index)}
+                          >
+                            🗑️ {removeItemLabel}
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+                {!safeItems.length && <tr><td colSpan={onRemoveItem ? 6 : 5}><div className="empty-state">Nenhum item selecionado. Volte e adicione pelo menos um item antes de confirmar.</div></td></tr>}
               </tbody>
             </table>
           </div>
