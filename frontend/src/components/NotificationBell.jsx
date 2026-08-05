@@ -15,6 +15,8 @@ const routeLabels = {
   '/solicitacoes-material': 'Solicitações de material',
   '/transferencias': 'Guias de transferência',
   '/perdas-tecnico': 'Perdas/descontos',
+  '/avaliacao-perdas': 'Avaliações de perda',
+  '/tecnicos': 'Documentação de técnicos',
   '/os': 'Ordens de serviço',
   '/caixa-tecnico': 'Minha caixa do técnico',
 };
@@ -30,6 +32,8 @@ function pendingMessage(route, count) {
   if (route === '/solicitacoes-material') return `${value} solicitação(ões) aguardando acompanhamento ou entrega.`;
   if (route === '/transferencias') return `${value} guia(s) aguardando assinatura ou conferência.`;
   if (route === '/perdas-tecnico') return `${value} guia(s) de perda/desconto aguardando assinatura.`;
+  if (route === '/avaliacao-perdas') return `${value} avaliação(ões) de perda aguardando análise.`;
+  if (route === '/tecnicos') return `${value} técnico(s) da sua cidade com documentação pendente.`;
   if (route === '/aprovacoes') return `${value} aprovação(ões) pendente(s).`;
   if (route === '/os') return `${value} OS aberta(s) ou pendente(s).`;
   return `${value} tarefa(s) pendente(s).`;

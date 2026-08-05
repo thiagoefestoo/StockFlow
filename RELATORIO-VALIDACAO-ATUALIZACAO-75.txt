@@ -1,0 +1,96 @@
+ATUALIZAÇÃO 75 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main(11).zip
+
+PROBLEMA
+--------
+Contas limitadas a uma cidade recebiam alarmes de documentação, solicitações,
+guias, ordens de serviço e notificações pertencentes a outras cidades.
+
+CORREÇÃO
+--------
+Foi criado um escopo operacional compartilhado baseado em:
+- warehouseIds efetivos da sessão;
+- cityAccess;
+- técnicos vinculados aos estoques autorizados;
+- technicianId da própria conta.
+
+O escopo é aplicado ao menu lateral, sino, dicas, documentação de técnicos,
+Cockpit, solicitações, aprovações, transferências, perdas e OS.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/notificationController.js
+backend/app/controllers/operationsController.js
+backend/app/services/intelligenceService.js
+backend/app/services/operationalScopeService.js
+backend/app/services/notificationScopeMatcher.js
+backend/app/services/notificationScopeService.js
+backend/scripts/test-alert-city-scope-and-inventory-tips.js
+frontend/src/components/LivePulse.jsx
+frontend/src/components/NotificationBell.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 117 arquivos JavaScript.
+
+2. Teste específico
+   Comando:
+   node backend/scripts/test-alert-city-scope-and-inventory-tips.js
+
+   Cenários aprovados:
+   - São Pedro não recebe alarme de Vila Velha;
+   - Vila Velha não recebe alarme de São Pedro;
+   - técnico fora do escopo é ocultado;
+   - técnico dentro do escopo é exibido;
+   - cidade diferente é ocultada;
+   - dicas gerais continuam visíveis;
+   - notificação individual do próprio usuário permanece visível;
+   - administrador mantém visão global.
+
+3. Frontend
+   Arquivos validados pelo transpiler TypeScript com suporte a JSX:
+   - frontend/src/components/LivePulse.jsx;
+   - frontend/src/components/NotificationBell.jsx.
+
+   Resultado: JavaScript/JSX válido.
+
+4. Diferenças
+   Validação equivalente a git diff --check.
+   Resultado: aprovado, sem conflitos ou espaços inválidos.
+
+5. Segurança
+   - leitura da notificação também valida escopo;
+   - notificações antigas são resolvidas por requestId, transferId, assetId ou OS;
+   - contas sem estoque autorizado não recebem alarmes regionais;
+   - administrador continua global;
+   - módulos liberados continuam sendo respeitados.
+
+6. Banco e produção
+   - nenhuma migration;
+   - nenhuma coluna nova;
+   - nenhum saldo alterado;
+   - nenhuma notificação apagada;
+   - pacote sem .env, .git, node_modules, build e uploads de produção.
+
+BUILD LOCAL
+-----------
+A sintaxe JSX foi validada neste ambiente.
+
+O aplicador executará a build completa do frontend no computador do usuário.
+A atualização somente será mantida se:
+- o backend passar na validação;
+- o teste de escopo passar;
+- a build do frontend concluir;
+- o git diff --check for aprovado.
+
+Em caso de falha, os arquivos e a build anteriores serão restaurados.
+
+RESULTADO
+---------
+PACOTE PREPARADO PARA APLICAÇÃO CONTROLADA E VALIDAÇÃO LOCAL.

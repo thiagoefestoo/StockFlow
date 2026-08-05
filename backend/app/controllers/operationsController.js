@@ -9,14 +9,14 @@ const {
   Material,
   Technician,
   ServiceOrder,
-  Notification,
   TechnicianToolDocument,
   TechnicianTool,
   Warehouse,
 } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok } = require('../utils/response');
-const { userWarehouseIds } = require('../utils/warehouseAccess');
+const { normalizeCityKey, resolveOperationalScope, requestScopeWhere, transferScopeWhere, serviceOrderScopeWhere } = require('../services/operationalScopeService');
+const { countVisibleUnreadNotifications } = require('../services/notificationScopeService');
 const { hasModuleAccess } = require('../config/modulePermissions');
 const { reverseWarehouseIds, movementOutsideReverse } = require('../utils/reverseLogistics');
 
@@ -25,41 +25,11 @@ function isManager(user) {
   return ['admin', 'supervisor', 'estoquista'].includes(user?.role);
 }
 
-function requestScopeFor(user) {
-  if (user?.role === 'tecnico') return { technicianId: user.technicianId || -1 };
-  if (user?.role === 'estoquista') {
-    const ids = userWarehouseIds(user);
-    return ids.length ? { warehouseId: { [Op.in]: ids } } : { warehouseId: -1 };
-  }
-  return {};
-}
-
-function transferScopeFor(user) {
-  if (user?.role === 'tecnico') return { technicianId: user.technicianId || -1 };
-  if (user?.role === 'estoquista') {
-    const ids = userWarehouseIds(user);
-    return ids.length ? { warehouseId: { [Op.in]: ids } } : { warehouseId: -1 };
-  }
-  return {};
-}
-
-function notificationVisibilityWhere(user) {
-  return {
-    [Op.or]: [
-      { userId: user.id },
-      { userId: null, role: 'todos' },
-      { userId: null, role: user.role },
-      ...(user.role === 'admin' ? [{ userId: null, role: 'supervisor' }] : []),
-    ],
-  };
-}
-
 function positiveOnly(value) {
   return Number(value || 0) > 0 ? Number(value || 0) : 0;
 }
 
-
-async function countTechniciansMissingToolTerm() {
+async function countTechniciansMissingToolTerm(scope) {
   const activeToolRows = await TechnicianTool.findAll({
     where: { status: 'com_tecnico' },
     attributes: ['technicianId'],
@@ -67,7 +37,11 @@ async function countTechniciansMissingToolTerm() {
     raw: true,
   }).catch(() => []);
 
-  const technicianIds = [...new Set(activeToolRows.map((row) => Number(row.technicianId)).filter((id) => Number.isFinite(id) && id > 0))];
+  let technicianIds = [...new Set(activeToolRows.map((row) => Number(row.technicianId)).filter((id) => Number.isFinite(id) && id > 0))];
+  if (!scope?.unrestricted) {
+    const allowed = new Set(scope?.technicianIds || []);
+    technicianIds = technicianIds.filter((id) => allowed.has(id));
+  }
   if (!technicianIds.length) return 0;
 
   const activeTechnicians = await Technician.findAll({
@@ -88,6 +62,32 @@ async function countTechniciansMissingToolTerm() {
   return activeIds.filter((id) => !documentedIds.has(id)).length;
 }
 
+async function countScopedPendingApprovals(scope, requestIds = [], warehouseIds = []) {
+  if (scope?.unrestricted && !warehouseIds.length) {
+    return ApprovalRequest.count({ where: { status: 'pendente' } });
+  }
+
+  const rows = await ApprovalRequest.findAll({
+    where: { status: 'pendente' },
+    attributes: ['entityType', 'entityId', 'payload'],
+    raw: true,
+  });
+  const requestSet = new Set(requestIds.map(String));
+  const warehouseSet = new Set((warehouseIds.length ? warehouseIds : scope?.warehouseIds || []).map(Number));
+
+  return rows.filter((row) => {
+    if (row.entityType === 'material_request') return requestSet.has(String(row.entityId));
+    const payload = row.payload || {};
+    if (row.entityType === 'warehouse_delete') {
+      return warehouseSet.has(Number(payload.warehouseId || payload.warehouse?.id));
+    }
+    if (row.entityType === 'warehouse_transfer') {
+      return warehouseSet.has(Number(payload.fromWarehouseId)) || warehouseSet.has(Number(payload.toWarehouseId));
+    }
+    return false;
+  }).length;
+}
+
 function setRouteIfAllowed(routes, user, moduleKey, route, value) {
   if (hasModuleAccess(user, moduleKey)) routes[route] = positiveOnly(value);
 }
@@ -95,10 +95,14 @@ function setRouteIfAllowed(routes, user, moduleKey, route, value) {
 exports.pendingMenu = asyncHandler(async (req, res) => {
   const user = req.user;
   const routes = {};
+  const scope = await resolveOperationalScope(user);
 
   if (isManager(user)) {
-    const requestScope = requestScopeFor(user);
-    const transferScope = transferScopeFor(user);
+    const requestWhere = requestScopeWhere(scope);
+    const transferWhere = transferScopeWhere(scope);
+    const orderWhere = serviceOrderScopeWhere(scope);
+    const scopedRequests = await MaterialRequest.findAll({ where: requestWhere, attributes: ['id'], raw: true });
+    const scopedRequestIds = scopedRequests.map((row) => String(row.id));
 
     const [
       pendingApprovals,
@@ -109,16 +113,16 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
       openOrders,
       techniciansMissingToolTerm,
     ] = await Promise.all([
-      ApprovalRequest.count({ where: { status: 'pendente' } }),
-      MaterialRequest.count({ where: { ...requestScope, status: 'aprovado' } }),
-      MaterialRequest.count({ where: { ...requestScope, status: 'pendente_aprovacao' } }),
-      Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura', transferNumber: { [Op.notILike]: 'PERDA-%' } } }),
-      Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura', transferNumber: { [Op.iLike]: 'PERDA-%' } } }),
-      ServiceOrder.count({ where: { status: { [Op.in]: ['aberta', 'pendente'] } } }),
-      countTechniciansMissingToolTerm(),
+      countScopedPendingApprovals(scope, scopedRequestIds),
+      MaterialRequest.count({ where: { [Op.and]: [requestWhere, { status: 'aprovado' }] } }),
+      MaterialRequest.count({ where: { [Op.and]: [requestWhere, { status: 'pendente_aprovacao' }] } }),
+      Transfer.count({ where: { [Op.and]: [transferWhere, { status: 'pendente_assinatura', transferNumber: { [Op.notILike]: 'PERDA-%' } }] } }),
+      Transfer.count({ where: { [Op.and]: [transferWhere, { status: 'pendente_assinatura', transferNumber: { [Op.iLike]: 'PERDA-%' } }] } }),
+      ServiceOrder.count({ where: { [Op.and]: [orderWhere, { status: { [Op.in]: ['aberta', 'pendente'] } }] } }),
+      countTechniciansMissingToolTerm(scope),
     ]);
 
-    setRouteIfAllowed(routes, user, 'approvals', '/aprovacoes', pendingApprovals || pendingRequestApprovals);
+    setRouteIfAllowed(routes, user, 'approvals', '/aprovacoes', Math.max(pendingApprovals, pendingRequestApprovals));
     setRouteIfAllowed(routes, user, 'materialRequests', '/solicitacoes-material', approvedMaterialRequests);
     setRouteIfAllowed(routes, user, 'transfers', '/transferencias', pendingTransferSignatures);
     setRouteIfAllowed(routes, user, 'technicianLosses', '/perdas-tecnico', pendingLossSignatures);
@@ -126,18 +130,13 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
     setRouteIfAllowed(routes, user, 'serviceOrders', '/os', openOrders);
     setRouteIfAllowed(routes, user, 'technicians', '/tecnicos', techniciansMissingToolTerm);
   } else if (user?.role === 'tecnico') {
-    const requestScope = requestScopeFor(user);
-    const transferScope = transferScopeFor(user);
+    const requestWhere = { technicianId: user.technicianId || -1 };
+    const transferWhere = { technicianId: user.technicianId || -1 };
 
-    const [
-      requestsInProgress,
-      pendingSignatures,
-      unreadNotifications,
-      openOrders,
-    ] = await Promise.all([
-      MaterialRequest.count({ where: { ...requestScope, status: { [Op.in]: ['pendente_aprovacao', 'aprovado'] } } }),
-      Transfer.count({ where: { ...transferScope, status: 'pendente_assinatura' } }),
-      Notification.count({ where: { ...notificationVisibilityWhere(user), status: 'nao_lida' } }),
+    const [requestsInProgress, pendingSignatures, unreadNotifications, openOrders] = await Promise.all([
+      MaterialRequest.count({ where: { ...requestWhere, status: { [Op.in]: ['pendente_aprovacao', 'aprovado'] } } }),
+      Transfer.count({ where: { ...transferWhere, status: 'pendente_assinatura' } }),
+      countVisibleUnreadNotifications(user),
       ServiceOrder.count({ where: { technicianId: user.technicianId || -1, status: { [Op.in]: ['aberta', 'pendente'] } } }),
     ]);
 
@@ -150,52 +149,58 @@ exports.pendingMenu = asyncHandler(async (req, res) => {
 });
 
 exports.cockpit = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const scope = await resolveOperationalScope(user);
   const selectedCity = String(req.query.city || '').trim();
+  const warehouseBaseWhere = { isReverseLogistics: false, status: 'ativo' };
+  if (!scope.unrestricted) warehouseBaseWhere.id = { [Op.in]: scope.warehouseIds.length ? scope.warehouseIds : [-1] };
+
   const operationalWarehouses = await Warehouse.findAll({
-    where: { isReverseLogistics: false, status: 'ativo' },
+    where: warehouseBaseWhere,
     attributes: ['id', 'city'],
     order: [['city', 'ASC'], ['name', 'ASC']],
     raw: true,
   });
   const cities = [...new Set(operationalWarehouses.map((row) => String(row.city || '').trim()).filter(Boolean))];
+  const selectedCityKey = normalizeCityKey(selectedCity);
   const cityWarehouseIds = selectedCity
-    ? operationalWarehouses.filter((row) => String(row.city || '').trim().toLowerCase() === selectedCity.toLowerCase()).map((row) => Number(row.id))
+    ? operationalWarehouses.filter((row) => normalizeCityKey(row.city) === selectedCityKey).map((row) => Number(row.id))
     : operationalWarehouses.map((row) => Number(row.id));
-  const cityTechnicians = selectedCity
+  const restrictOperationalData = Boolean(selectedCity) || !scope.unrestricted;
+  const cityTechnicians = restrictOperationalData
     ? await Technician.findAll({ where: { defaultWarehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } }, attributes: ['id'], raw: true })
     : [];
   const cityTechnicianIds = cityTechnicians.map((row) => Number(row.id));
 
-  const requestCityWhere = selectedCity ? {
+  const requestCityWhere = restrictOperationalData ? {
     [Op.or]: [
       { warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
       { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
     ],
   } : {};
-  const transferCityWhere = selectedCity ? {
+  const transferCityWhere = restrictOperationalData ? {
     [Op.or]: [
       { warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
       { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
+      { fromTechnicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
     ],
   } : {};
-  const orderCityWhere = selectedCity ? {
+  const orderCityWhere = restrictOperationalData ? {
     [Op.or]: [
-      { city: { [Op.iLike]: selectedCity } },
+      ...(selectedCity ? [{ city: { [Op.iLike]: selectedCity } }] : []),
       { warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
+      { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } },
     ],
   } : {};
 
   if (String(req.query.summaryOnly || '').toLowerCase() === 'true') {
-    const scopedRequests = selectedCity ? await MaterialRequest.findAll({ where: requestCityWhere, attributes: ['id'], raw: true }) : [];
+    const scopedRequests = await MaterialRequest.findAll({ where: requestCityWhere, attributes: ['id'], raw: true });
     const scopedIds = scopedRequests.map((row) => String(row.id));
-    const approvalWhere = selectedCity
-      ? { status: 'pendente', entityId: { [Op.in]: scopedIds.length ? scopedIds : ['-1'] } }
-      : { status: 'pendente' };
     const [pendingApprovals, pendingSignatures, openOrders, unreadNotifications] = await Promise.all([
-      ApprovalRequest.count({ where: approvalWhere }),
-      Transfer.count({ where: { ...transferCityWhere, status: 'pendente_assinatura' } }),
-      ServiceOrder.count({ where: { ...orderCityWhere, status: { [Op.in]: ['aberta', 'pendente'] } } }),
-      Notification.count({ where: { status: 'nao_lida' } }),
+      countScopedPendingApprovals(scope, scopedIds, restrictOperationalData ? cityWarehouseIds : []),
+      Transfer.count({ where: { [Op.and]: [transferCityWhere, { status: 'pendente_assinatura' }] } }),
+      ServiceOrder.count({ where: { [Op.and]: [orderCityWhere, { status: { [Op.in]: ['aberta', 'pendente'] } }] } }),
+      countVisibleUnreadNotifications(user),
     ]);
     return ok(res, {
       kpis: { pendingApprovals, pendingSignatures, openOrders, unreadNotifications },
@@ -211,11 +216,8 @@ exports.cockpit = asyncHandler(async (req, res) => {
 
   const requestRows = await MaterialRequest.findAll({ where: requestCityWhere, attributes: ['id'], raw: true });
   const requestIds = requestRows.map((row) => String(row.id));
-  const approvalWhere = selectedCity
-    ? { status: 'pendente', entityId: { [Op.in]: requestIds.length ? requestIds : ['-1'] } }
-    : { status: 'pendente' };
 
-  const movementCityWhere = selectedCity ? {
+  const movementCityWhere = restrictOperationalData ? {
     [Op.or]: [
       { fromWarehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
       { toWarehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } },
@@ -232,12 +234,12 @@ exports.cockpit = asyncHandler(async (req, res) => {
     MaterialRequest.count({ where: { ...requestCityWhere, status: 'pendente_aprovacao' } }),
     MaterialRequest.count({ where: { ...requestCityWhere, status: 'aprovado' } }),
     MaterialRequest.count({ where: { ...requestCityWhere, status: 'entregue' } }),
-    ApprovalRequest.count({ where: approvalWhere }),
+    countScopedPendingApprovals(scope, requestIds, restrictOperationalData ? cityWarehouseIds : []),
     Transfer.count({ where: { ...transferCityWhere, status: 'pendente_assinatura' } }),
     ServiceOrder.count({ where: { ...orderCityWhere, status: { [Op.in]: ['aberta', 'pendente'] } } }),
     ServiceOrder.count({ where: { ...orderCityWhere, status: 'concluida', completedAt: { [Op.gte]: last30 } } }),
-    Notification.count({ where: { status: 'nao_lida' } }),
-    SerializedAsset.findAll({ where: { ownerType: 'tecnico', ...(selectedCity ? { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } } : {}) }, include: [Material, Technician] }),
+    countVisibleUnreadNotifications(user),
+    SerializedAsset.findAll({ where: { ownerType: 'tecnico', ...(restrictOperationalData ? { technicianId: { [Op.in]: cityTechnicianIds.length ? cityTechnicianIds : [-1] } } : {}) }, include: [Material, Technician] }),
     SerializedAsset.findAll({ where: { ownerType: 'estoque', warehouseId: { [Op.in]: cityWarehouseIds.length ? cityWarehouseIds : [-1] } }, include: [Material] }),
     StockMovement.findAll({ where: { [Op.and]: [movementOutsideReverse(reverseIds), movementCityWhere] }, include: [Material, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }], order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']], limit: 12 }),
     MaterialRequest.findAll({ where: requestCityWhere, include: [Technician], order: [['createdAt', 'DESC'], ['id', 'DESC']], limit: 8 }),
@@ -245,8 +247,8 @@ exports.cockpit = asyncHandler(async (req, res) => {
   ]);
 
   const filteredBalances = balances.filter((row) => {
-    if (row.ownerType === 'estoque') return !reverseSet.has(Number(row.warehouseId)) && (!selectedCity || cityWarehouseIds.includes(Number(row.warehouseId)));
-    if (row.ownerType === 'tecnico') return !selectedCity || cityTechnicianIds.includes(Number(row.technicianId));
+    if (row.ownerType === 'estoque') return !reverseSet.has(Number(row.warehouseId)) && (!restrictOperationalData || cityWarehouseIds.includes(Number(row.warehouseId)));
+    if (row.ownerType === 'tecnico') return !restrictOperationalData || cityTechnicianIds.includes(Number(row.technicianId));
     return false;
   });
   const stockValue = filteredBalances.filter((row) => row.ownerType === 'estoque').reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0)

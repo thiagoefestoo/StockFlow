@@ -63,7 +63,7 @@ async function generateSmartNotifications() {
         title: `ONU parada com técnico: ${asset.serialNumber}`,
         message: `${asset.Material?.name || 'Equipamento'} está há ${days} dias com ${asset.Technician?.name || 'técnico'}. Verifique baixa por OS, devolução ou pendência.`,
         route: `/patrimonio?serial=${encodeURIComponent(asset.serialNumber)}`,
-        metadata: { assetId: asset.id, technicianId: asset.technicianId, days },
+        metadata: { assetId: asset.id, technicianId: asset.technicianId, warehouseId: asset.Technician?.defaultWarehouseId || null, days },
       }
     ));
   }
@@ -86,7 +86,7 @@ async function generateSmartNotifications() {
         title: `Guia sem assinatura: ${transfer.transferNumber}`,
         message: `A guia entregue para ${transfer.Technician?.name || 'técnico'} ainda não possui anexo assinado.`,
         route: `/transferencias/${transfer.id}`,
-        metadata: { transferId: transfer.id },
+        metadata: { transferId: transfer.id, warehouseId: transfer.warehouseId || transfer.Technician?.defaultWarehouseId || null, technicianId: transfer.technicianId || null },
       }
     ));
   }
@@ -126,7 +126,7 @@ async function generateSmartNotifications() {
         title: `Solicitação aguardando aprovação: ${request.requestNumber}`,
         message: `${request.Technician?.name || 'Técnico'} aguarda aprovação de material há mais de 24 horas.`,
         route: '/aprovacoes',
-        metadata: { requestId: request.id, requestNumber: request.requestNumber },
+        metadata: { requestId: request.id, requestNumber: request.requestNumber, warehouseId: request.warehouseId || request.Technician?.defaultWarehouseId || null, technicianId: request.technicianId || null },
       }
     ));
   }
@@ -149,7 +149,7 @@ async function generateSmartNotifications() {
         title: `Separação pendente: ${request.requestNumber}`,
         message: `A solicitação de ${request.Technician?.name || 'técnico'} já foi aprovada, mas ainda não foi entregue.`,
         route: '/solicitacoes-material',
-        metadata: { requestId: request.id, requestNumber: request.requestNumber },
+        metadata: { requestId: request.id, requestNumber: request.requestNumber, warehouseId: request.warehouseId || request.Technician?.defaultWarehouseId || null, technicianId: request.technicianId || null },
       }
     ));
   }

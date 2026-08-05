@@ -1,0 +1,127 @@
+﻿ATUALIZAÇÃO 75 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-75-alarmes-por-cidade-dicas-inventario.zip
+APLICAR-ATUALIZACAO-75.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-75-alarmes-por-cidade-dicas-inventario.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-75.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/notificationController.js",
+    "backend/app/controllers/operationsController.js",
+    "backend/app/services/intelligenceService.js",
+    "backend/app/services/operationalScopeService.js",
+    "backend/app/services/notificationScopeMatcher.js",
+    "backend/app/services/notificationScopeService.js",
+    "backend/scripts/test-alert-city-scope-and-inventory-tips.js",
+    "frontend/src/components/LivePulse.jsx",
+    "frontend/src/components/NotificationBell.jsx",
+    "frontend/build",
+    "ATUALIZACAO-75-ALARMES-POR-CIDADE-DICAS-INVENTARIO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-75.txt",
+    "COMANDOS-ATUALIZACAO-75-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-75.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Filtra alarmes por cidade e amplia dicas de inventario"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização possui backend e frontend.
+
+Ordem:
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente nas contas testadas;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE DE CIDADES
+-------------------
+
+Conta de São Pedro da Aldeia:
+
+1. entrar com a conta;
+2. abrir o sino;
+3. conferir o número no menu Técnicos;
+4. confirmar que aparecem somente técnicos e documentos da cidade;
+5. conferir Transferências, Solicitações, Perdas e OS;
+6. confirmar que nenhum registro de Vila Velha aparece.
+
+Conta de Vila Velha:
+
+1. repetir o mesmo processo;
+2. confirmar que nenhum alarme de São Pedro da Aldeia aparece.
+
+5. TESTE DAS DICAS
+------------------
+
+1. navegar por Entrada em Estoque;
+2. abrir Materiais/Estoque;
+3. abrir Central da Caixa;
+4. abrir Retorno Técnico;
+5. abrir Patrimônio;
+6. usar o botão Próxima nas dicas;
+7. conferir orientações de inventário, entradas, seriais e contagem.
