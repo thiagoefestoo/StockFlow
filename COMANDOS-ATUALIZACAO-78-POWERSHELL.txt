@@ -1,0 +1,82 @@
+﻿ATUALIZAÇÃO 78 — COMANDOS POWERSHELL
+=======================================
+
+1. APLICAR
+----------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-78-corrige-retorno-tecnico-validation-error.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-78.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. GITHUB
+---------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/stockController.js",
+    "backend/app/utils/operationReference.js",
+    "backend/scripts/test-technician-return-unique-guide.js",
+    "frontend/src/pages/TechnicianReturns.jsx",
+    "ATUALIZACAO-78-CORRIGE-RETORNO-TECNICO-VALIDATION-ERROR.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-78.txt",
+    "COMANDOS-ATUALIZACAO-78-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-78.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+git commit -m "Corrige numero unico da guia de retorno tecnico"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+1. redeploy do backend no Render;
+2. aguardar a API ficar saudável;
+3. redeploy do frontend na Vercel;
+4. sair e entrar novamente;
+5. pressionar Ctrl+F5;
+6. repetir o retorno.
+
+4. TESTE
+--------
+
+Use novamente a referência “Devolução de material”.
+A guia deverá receber um número automático iniciado por RETORNO-.

@@ -1,0 +1,61 @@
+ATUALIZAÇÃO 78 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE
+----
+Arquivo analisado: StockFlow-main(20260805-231127).zip
+
+DIAGNÓSTICO
+-----------
+Transfer.transferNumber possui restrição unique.
+
+O retorno utilizava:
+movementReference = reference || nextReturnNumber()
+transferNumber = movementReference
+
+A referência “Devolução de material” pode ser repetida e causava conflito.
+
+CORREÇÃO
+--------
+- número único da guia gerado independentemente da referência;
+- referência descritiva preservada nas observações e auditoria;
+- movimentos usam o número único da guia;
+- frontend esclarece que a referência pode se repetir.
+
+ARQUIVOS
+--------
+backend/app/controllers/stockController.js
+backend/app/utils/operationReference.js
+backend/scripts/test-technician-return-unique-guide.js
+frontend/src/pages/TechnicianReturns.jsx
+
+VALIDAÇÕES
+----------
+Backend:
+> stockflow-backend@1.0.0 check
+> node scripts/check-syntax.js
+
+Sintaxe validada em 119 arquivos JS.
+
+Teste específico:
+Teste aprovado: referência descritiva separada do número único da guia.
+Números únicos verificados: 5000
+
+Frontend:
+Marcadores e estrutura do fluxo validados; a build completa será executada pelo aplicador.
+
+Segurança:
+- transação preservada;
+- nenhuma migration;
+- nenhum saldo alterado pela instalação;
+- nenhum registro antigo modificado;
+- pacote sem .env, .git, node_modules, build ou uploads de produção.
+
+REDEPLOY
+--------
+A correção possui backend e frontend.
+
+Ordem:
+1. Render;
+2. Vercel;
+3. novo teste controlado do retorno.

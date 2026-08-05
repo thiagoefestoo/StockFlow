@@ -273,9 +273,10 @@ export default function TechnicianReturns() {
               {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} — {warehouse.city || '-'} — {warehouse.code || 'sem código'}</option>)}
             </select>
           </label>
-          <label>Referência
+          <label>Referência do retorno
             <input list="return-reference-options" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="Selecione ou digite uma referência" />
             <datalist id="return-reference-options">{RETURN_REFERENCE_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist>
+            <small>Pode ser repetida. O número único da guia será gerado automaticamente.</small>
           </label>
           <label>Motivo/observação
             <input list="return-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione ou digite o motivo do retorno" />
