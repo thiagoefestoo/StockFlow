@@ -1,0 +1,42 @@
+ATUALIZAÇÃO 76 V2 — RELATÓRIO DE VALIDAÇÃO
+============================================
+
+MOTIVO DA V2
+------------
+O primeiro aplicador restaurou corretamente os arquivos porque sua validação
+textual não encontrou uma frase com acentos ao ler JSX UTF-8 no Windows
+PowerShell 5.1.
+
+O código da funcionalidade estava presente no pacote.
+
+CORREÇÃO
+--------
+- leitura explícita com System.IO.File.ReadAllText e UTF-8;
+- marcador com acentos substituído por marcador técnico:
+  selectedIds.has(materialId);
+- frontend/build removido da relação de arquivos para git add;
+- backup e rollback preservados.
+
+ARQUIVO FUNCIONAL
+-----------------
+frontend/src/pages/Technicians.jsx
+
+VALIDAÇÕES ESTÁTICAS DO PACOTE
+------------------------------
+- Adicionar outra ferramenta: presente;
+- toolForm.items.map: presente;
+- OperationReviewModal: presente;
+- envio do array items: presente;
+- selectedIds.has(materialId): presente;
+- backend existente com suporte a req.body.items: confirmado;
+- pacote sem .env, .git, node_modules, build e uploads de produção.
+
+VALIDAÇÃO LOCAL OBRIGATÓRIA
+---------------------------
+O aplicador executará:
+- npm run check --prefix backend;
+- validação dos marcadores em UTF-8;
+- npm run build --prefix frontend;
+- git diff --check.
+
+A alteração somente será mantida após todas as etapas passarem.

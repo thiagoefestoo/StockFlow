@@ -1,0 +1,86 @@
+﻿ATUALIZAÇÃO 76 V2 — COMANDOS POWERSHELL
+==========================================
+
+IMPORTANTE
+----------
+O primeiro aplicador da Atualização 76 restaurou os arquivos.
+Use somente os arquivos V2 abaixo.
+
+ARQUIVOS EM DOWNLOADS
+---------------------
+atualizacao-76-v2-multiplas-ferramentas-por-tecnico.zip
+APLICAR-ATUALIZACAO-76-V2.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-76-v2-multiplas-ferramentas-por-tecnico.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-76-V2.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "frontend/src/pages/Technicians.jsx",
+    "ATUALIZACAO-76-V2-MULTIPLAS-FERRAMENTAS-POR-TECNICO.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-76-V2.txt",
+    "COMANDOS-ATUALIZACAO-76-V2-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-76-V2.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Permite transferir varias ferramentas para o tecnico"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+1. concluir o push no GitHub;
+2. fazer redeploy do frontend na Vercel;
+3. aguardar a publicação;
+4. sair e entrar novamente;
+5. pressionar Ctrl+F5.
+
+Não é necessário redeploy manual do Render.

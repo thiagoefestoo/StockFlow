@@ -6,6 +6,7 @@ import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid, DetailList } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
 import AttachmentPreview from '../components/AttachmentPreview';
+import OperationReviewModal from '../components/OperationReviewModal';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 import { prepareAuthSessionHandoff } from '../utils/authSession';
@@ -26,7 +27,13 @@ const empty = {
   transferApprovalLimit: 500,
 };
 
-const emptyTool = { materialId: '', warehouseId: '', quantity: 1, notes: '' };
+function newToolTransferItem() {
+  return { materialId: '', quantity: 1 };
+}
+
+function emptyToolTransferForm() {
+  return { warehouseId: '', notes: '', items: [newToolTransferItem()] };
+}
 const emptyRemoval = { status: 'devolvida', removalReason: '', replacementName: '', replacementSerial: '', replacementBrand: '', replacementValue: '' };
 const emptyToolDocument = { file: null, signedAt: '', notes: '' };
 const TOOL_STATUS_LABELS = { com_tecnico: 'Com o técnico', substituida: 'Substituída', perdida: 'Perdida', desgaste: 'Baixada por desgaste', devolvida: 'Devolvida' };
@@ -69,7 +76,8 @@ export default function Technicians() {
   const canEditTools = isAdmin || canAccessModule('technicianToolsEdit');
   const [tools, setTools] = useState([]);
   const [toolModal, setToolModal] = useState(false);
-  const [toolForm, setToolForm] = useState(emptyTool);
+  const [toolReviewOpen, setToolReviewOpen] = useState(false);
+  const [toolForm, setToolForm] = useState(() => emptyToolTransferForm());
   const [availableTools, setAvailableTools] = useState([]);
   const [availableToolsLoading, setAvailableToolsLoading] = useState(false);
   const [toolSaving, setToolSaving] = useState(false);
@@ -217,8 +225,12 @@ export default function Technicians() {
   async function openAddTool() {
     if (!details.technician) return;
     setToolError('');
+    setToolReviewOpen(false);
     setAvailableTools([]);
-    setToolForm({ ...emptyTool, warehouseId: details.technician.defaultWarehouseId || '' });
+    setToolForm({
+      ...emptyToolTransferForm(),
+      warehouseId: details.technician.defaultWarehouseId || '',
+    });
     setToolModal(true);
     setAvailableToolsLoading(true);
     try {
@@ -228,7 +240,12 @@ export default function Technicians() {
       setToolForm((current) => ({
         ...current,
         warehouseId: response.data.data?.warehouse?.id || current.warehouseId,
-        materialId: rows.length === 1 ? String(rows[0].materialId) : current.materialId,
+        items: [
+          {
+            ...newToolTransferItem(),
+            materialId: rows.length === 1 ? String(rows[0].materialId) : '',
+          },
+        ],
       }));
     } catch (err) {
       setToolError(err.response?.data?.message || 'Não foi possível carregar as ferramentas disponíveis no estoque.');
@@ -237,39 +254,101 @@ export default function Technicians() {
     }
   }
 
+  function updateToolTransferItem(index, patch) {
+    setToolForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => (
+        itemIndex === index ? { ...item, ...patch } : item
+      )),
+    }));
+  }
+
+  function addToolTransferItem() {
+    setToolForm((current) => ({
+      ...current,
+      items: [...current.items, newToolTransferItem()],
+    }));
+  }
+
+  function removeToolTransferItem(index) {
+    setToolForm((current) => {
+      const remaining = current.items.filter((_, itemIndex) => itemIndex !== index);
+      return {
+        ...current,
+        items: remaining.length ? remaining : [newToolTransferItem()],
+      };
+    });
+  }
+
+  function validateToolTransferForm() {
+    const rows = Array.isArray(toolForm.items) ? toolForm.items : [];
+    if (!rows.length) return 'Adicione ao menos uma ferramenta para transferir.';
+
+    const selectedIds = new Set();
+    for (let index = 0; index < rows.length; index += 1) {
+      const item = rows[index];
+      const materialId = Number(item.materialId || 0);
+      if (!materialId) return `Selecione a ferramenta do item ${index + 1}.`;
+      if (selectedIds.has(materialId)) return 'A mesma ferramenta não pode aparecer em duas linhas. Use uma única linha e ajuste a quantidade.';
+      selectedIds.add(materialId);
+
+      const selected = availableTools.find((row) => Number(row.materialId) === materialId);
+      if (!selected) return `A ferramenta do item ${index + 1} não está mais disponível no estoque.`;
+
+      const quantity = Number(item.quantity || 0);
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        return `Informe uma quantidade inteira maior que zero no item ${index + 1}.`;
+      }
+      if (quantity > Number(selected.availableQuantity || 0)) {
+        return `${selected.name}: a quantidade não pode ultrapassar o saldo disponível de ${formatQuantity(selected.availableQuantity)} ${selected.unit || 'un'}.`;
+      }
+    }
+
+    return null;
+  }
+
+  function openToolTransferReview() {
+    const validationError = validateToolTransferForm();
+    if (validationError) {
+      setToolError(validationError);
+      return;
+    }
+    setToolError('');
+    setToolReviewOpen(true);
+  }
+
   async function saveTool() {
     if (!details.technician) return;
-    const selected = availableTools.find((row) => Number(row.materialId) === Number(toolForm.materialId));
-    const quantity = Number(toolForm.quantity || 0);
-    if (!selected) {
-      setToolError('Selecione uma ferramenta com saldo disponível.');
+    const validationError = validateToolTransferForm();
+    if (validationError) {
+      setToolReviewOpen(false);
+      setToolError(validationError);
       return;
     }
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      setToolError('Informe uma quantidade inteira maior que zero.');
-      return;
-    }
-    if (quantity > Number(selected.availableQuantity || 0)) {
-      setToolError(`A quantidade não pode ultrapassar o saldo disponível de ${formatQuantity(selected.availableQuantity)} ${selected.unit || 'un'}.`);
-      return;
-    }
+
+    const items = toolForm.items.map((item) => ({
+      materialId: Number(item.materialId),
+      quantity: Number(item.quantity),
+    }));
+
     setToolSaving(true);
     setToolError('');
     try {
       await api.post(`/technicians/${details.technician.id}/tools`, {
-        materialId: Number(toolForm.materialId),
-        warehouseId: Number(toolForm.warehouseId || selected.warehouseId),
-        quantity,
+        warehouseId: Number(toolForm.warehouseId),
+        items,
         notes: toolForm.notes || null,
       });
+      setToolReviewOpen(false);
       setToolModal(false);
-      setToolForm(emptyTool);
+      setToolForm(emptyToolTransferForm());
       setAvailableTools([]);
       await Promise.all([loadTools(details.technician.id), load()]);
       const stock = (await api.get(`/technicians/${details.technician.id}/stock`)).data.data;
       setDetails((current) => ({ ...current, stock }));
     } catch (err) {
-      setToolError(err.response?.data?.message || 'Não foi possível transferir a ferramenta para a ficha do técnico.');
+      setToolReviewOpen(false);
+      setToolError(err.response?.data?.message || 'Não foi possível transferir as ferramentas para a ficha do técnico.');
     } finally {
       setToolSaving(false);
     }
@@ -401,7 +480,31 @@ export default function Technicians() {
     }
     return Array.from(rows.values());
   }, [tools]);
-  const selectedAvailableTool = availableTools.find((row) => Number(row.materialId) === Number(toolForm.materialId));
+  const selectedToolTransferRows = (toolForm.items || [])
+    .map((item, index) => {
+      const tool = availableTools.find((row) => Number(row.materialId) === Number(item.materialId));
+      if (!tool) return null;
+      const quantity = Number(item.quantity || 0);
+      return {
+        index,
+        item,
+        tool,
+        quantity,
+        totalValue: quantity * Number(tool.unitCost || 0),
+      };
+    })
+    .filter(Boolean);
+  const selectedToolTransferIds = new Set(selectedToolTransferRows.map((row) => Number(row.tool.materialId)));
+  const toolTransferTotalQuantity = selectedToolTransferRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  const toolTransferTotalValue = selectedToolTransferRows.reduce((sum, row) => sum + Number(row.totalValue || 0), 0);
+  const toolTransferReviewItems = selectedToolTransferRows.map((row) => ({
+    key: row.tool.materialId,
+    name: row.tool.name,
+    detail: `${row.tool.warehouseName || 'Estoque vinculado'} • saldo ${formatQuantity(row.tool.availableQuantity)} ${row.tool.unit || 'un'}`,
+    quantity: row.quantity,
+    unit: row.tool.unit || 'un',
+    totalValue: row.totalValue,
+  }));
   const cityOptions = useMemo(() => Array.from(new Set(warehouses.map((w) => String(w.city || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [warehouses]);
   function selectedServiceCities() { return textToCities(form.serviceCitiesText); }
   function toggleServiceCity(city) {
@@ -583,27 +686,172 @@ export default function Technicians() {
         {documentPreview && <AttachmentPreview name={documentPreview.documentName} data={documentPreview.documentData} label="Termo assinado" />}
       </Modal>
 
-      <Modal open={toolModal} title={`Adicionar ferramentas na ficha: ${details.technician?.name || ''}`} onClose={() => !toolSaving && setToolModal(false)} footer={<><button className="ghost" disabled={toolSaving} onClick={() => setToolModal(false)}>Cancelar</button><button disabled={toolSaving || availableToolsLoading || !availableTools.length} onClick={saveTool}>{toolSaving ? 'Transferindo...' : 'Transferir para a ficha'}</button></>}>
+      <Modal
+        open={toolModal}
+        title={`Adicionar ferramentas na ficha: ${details.technician?.name || ''}`}
+        onClose={() => {
+          if (toolSaving) return;
+          setToolReviewOpen(false);
+          setToolModal(false);
+        }}
+        footer={(
+          <>
+            <button
+              className="ghost"
+              disabled={toolSaving}
+              onClick={() => {
+                setToolReviewOpen(false);
+                setToolModal(false);
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              disabled={toolSaving || availableToolsLoading || !availableTools.length}
+              onClick={openToolTransferReview}
+            >
+              Revisar transferência
+            </button>
+          </>
+        )}
+      >
         <div className="form-stack">
           {toolError && <div className="alert danger">{toolError}</div>}
           <div className="viz-callout">
-            As ferramentas abaixo são carregadas somente do estoque vinculado ao técnico e aparecem apenas quando possuem entrada registrada e saldo disponível. Elas não entram na Caixa do Técnico.
+            Selecione uma ou mais ferramentas do estoque vinculado ao técnico. Cada item pode possuir uma quantidade diferente e todos serão registrados em uma única guia.
           </div>
           {availableToolsLoading && <div className="empty-state">Carregando ferramentas disponíveis...</div>}
           {!availableToolsLoading && availableTools.length === 0 && !toolError && <div className="empty-state">Nenhuma ferramenta com entrada e saldo disponível no estoque vinculado.</div>}
-          {!availableToolsLoading && availableTools.length > 0 && <>
-            <div className="form-grid">
-              <label>Ferramenta disponível<select value={toolForm.materialId} onChange={(e) => setToolForm({ ...toolForm, materialId: e.target.value, quantity: 1 })}><option value="">Selecione a ferramenta</option>{availableTools.map((tool) => <option key={tool.materialId} value={tool.materialId}>{tool.name} • saldo {formatQuantity(tool.availableQuantity)} {tool.unit || 'un'}</option>)}</select></label>
-              <label>Quantidade<input type="number" min="1" max={selectedAvailableTool?.availableQuantity || 1} step="1" value={toolForm.quantity} onChange={(e) => setToolForm({ ...toolForm, quantity: e.target.value })} /></label>
-            </div>
-            {selectedAvailableTool && <div className="panel-soft">
-              <b>{selectedAvailableTool.name}</b>
-              <p style={{ margin: '0.35rem 0 0' }}><small>Estoque: {selectedAvailableTool.warehouseName} • saldo disponível: {formatQuantity(selectedAvailableTool.availableQuantity)} {selectedAvailableTool.unit || 'un'} • valor unitário: {brl(selectedAvailableTool.unitCost)}</small></p>
-            </div>}
-            <label>Observações<textarea rows={2} value={toolForm.notes} onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })} placeholder="Ex.: entregue na admissão, conferido com o responsável." /></label>
-          </>}
+          {!availableToolsLoading && availableTools.length > 0 && (
+            <>
+              <div className="subtoolbar">
+                <div>
+                  <h4>Ferramentas da transferência</h4>
+                  <small>Adicione uma linha para cada tipo de ferramenta.</small>
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={toolForm.items.length >= availableTools.length}
+                  onClick={addToolTransferItem}
+                >
+                  Adicionar outra ferramenta
+                </button>
+              </div>
+
+              {(toolForm.items || []).map((item, index) => {
+                const selectedTool = availableTools.find((row) => Number(row.materialId) === Number(item.materialId));
+                const selectedByOtherRows = new Set(
+                  (toolForm.items || [])
+                    .filter((_, otherIndex) => otherIndex !== index)
+                    .map((row) => Number(row.materialId || 0))
+                    .filter(Boolean),
+                );
+                const rowOptions = availableTools.filter((tool) => (
+                  Number(tool.materialId) === Number(item.materialId)
+                  || !selectedByOtherRows.has(Number(tool.materialId))
+                ));
+
+                return (
+                  <section className="panel-soft" key={`tool-transfer-item-${index}`}>
+                    <div className="subtoolbar">
+                      <div>
+                        <h4>Item {index + 1}</h4>
+                        <small>{selectedTool ? selectedTool.name : 'Selecione a ferramenta'}</small>
+                      </div>
+                      {toolForm.items.length > 1 && (
+                        <button
+                          type="button"
+                          className="ghost danger-outline"
+                          onClick={() => removeToolTransferItem(index)}
+                        >
+                          Remover
+                        </button>
+                      )}
+                    </div>
+                    <div className="form-grid">
+                      <label>
+                        Ferramenta disponível
+                        <select
+                          value={item.materialId}
+                          onChange={(e) => updateToolTransferItem(index, { materialId: e.target.value, quantity: 1 })}
+                        >
+                          <option value="">Selecione a ferramenta</option>
+                          {rowOptions.map((tool) => (
+                            <option key={tool.materialId} value={tool.materialId}>
+                              {tool.name} • saldo {formatQuantity(tool.availableQuantity)} {tool.unit || 'un'}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Quantidade
+                        <input
+                          type="number"
+                          min="1"
+                          max={selectedTool?.availableQuantity || 1}
+                          step="1"
+                          value={item.quantity}
+                          onChange={(e) => updateToolTransferItem(index, { quantity: e.target.value })}
+                        />
+                      </label>
+                    </div>
+                    {selectedTool && (
+                      <div className="detail-row">
+                        <b>{selectedTool.name}</b>
+                        <span>
+                          Estoque: {selectedTool.warehouseName} • disponível: {formatQuantity(selectedTool.availableQuantity)} {selectedTool.unit || 'un'}
+                        </span>
+                        <small>
+                          Valor unitário: {brl(selectedTool.unitCost)} • subtotal: {brl(Number(item.quantity || 0) * Number(selectedTool.unitCost || 0))}
+                        </small>
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+
+              <label>
+                Observações gerais
+                <textarea
+                  rows={2}
+                  value={toolForm.notes}
+                  onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })}
+                  placeholder="Ex.: ferramentas entregues na admissão e conferidas com o responsável."
+                />
+              </label>
+
+              <div className="submit-bar">
+                <span>
+                  Tipos selecionados: <strong>{selectedToolTransferIds.size}</strong> •
+                  quantidade total: <strong>{formatQuantity(toolTransferTotalQuantity)}</strong> •
+                  valor: <strong>{brl(toolTransferTotalValue)}</strong>
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
+
+      <OperationReviewModal
+        open={toolReviewOpen}
+        title="Revisar transferência de ferramentas para o técnico"
+        description="Confira cada ferramenta e quantidade. A confirmação gerará uma única guia e atualizará a ficha do técnico."
+        metadata={[
+          { label: 'Técnico', value: details.technician?.name, hint: details.technician?.ContractorCompany?.name || 'Ficha de ferramentas' },
+          { label: 'Estoque de origem', value: selectedToolTransferRows[0]?.tool?.warehouseName || 'Estoque vinculado' },
+          { label: 'Tipos de ferramenta', value: selectedToolTransferIds.size },
+          { label: 'Observações', value: toolForm.notes || 'Não informado' },
+        ]}
+        items={toolTransferReviewItems}
+        totalQuantity={toolTransferTotalQuantity}
+        totalValue={toolTransferTotalValue}
+        warning="Ao confirmar, todas as quantidades serão retiradas do estoque e adicionadas à ficha do técnico em uma única guia. Confira a contagem física antes de continuar."
+        loading={toolSaving}
+        confirmLabel="Confirmar transferência para a ficha"
+        onCancel={() => setToolReviewOpen(false)}
+        onConfirm={saveTool}
+      />
 
       <Modal open={documentModal} title={`Anexar termo assinado: ${details.technician?.name || ''}`} onClose={() => !documentSaving && setDocumentModal(false)} footer={<><button className="ghost" disabled={documentSaving} onClick={() => setDocumentModal(false)}>Cancelar</button><button disabled={documentSaving} onClick={saveToolDocument}>{documentSaving ? 'Anexando...' : 'Anexar termo assinado'}</button></>}>
         <div className="form-stack">
