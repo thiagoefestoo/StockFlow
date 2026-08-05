@@ -1,0 +1,111 @@
+﻿ATUALIZAÇÃO 74 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-74-inativar-usuario-limite-contas-ativas.zip
+APLICAR-ATUALIZACAO-74.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-74-inativar-usuario-limite-contas-ativas.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-74.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/userController.js",
+    "backend/app/services/runtimeSchemaService.js",
+    "backend/app/services/userAccountLimitService.js",
+    "backend/scripts/test-user-inactivation-active-limit.js",
+    "frontend/src/pages/Users.jsx",
+    "frontend/build",
+    "ATUALIZACAO-74-INATIVAR-USUARIO-LIMITE-CONTAS-ATIVAS.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-74.txt",
+    "COMANDOS-ATUALIZACAO-74-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-74.ps1"
+)
+
+git add -- $arquivos
+
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Adiciona inativação e conta somente usuários ativos"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização possui backend e frontend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente no sistema;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE CONTROLADO
+-------------------
+
+1. entrar como administrador;
+2. abrir Administração → Usuários e permissões;
+3. anotar o número de contas ativas e vagas;
+4. escolher uma conta de teste;
+5. clicar em Inativar;
+6. informar o motivo;
+7. confirmar que a conta aparece como Inativa;
+8. confirmar que uma vaga foi liberada;
+9. tentar acessar com a conta inativada e confirmar o bloqueio;
+10. conferir que entradas, transferências, ordens e auditorias permanecem;
+11. clicar em Ativar;
+12. confirmar que a conta volta a ocupar uma vaga.
+
+Com 30 contas ativas, a ativação de uma conta inativa deve ser bloqueada.

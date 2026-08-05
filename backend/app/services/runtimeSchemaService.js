@@ -551,19 +551,40 @@ async function ensureRuntimeSchema() {
     await sequelize.query(`
       CREATE OR REPLACE FUNCTION enforce_user_account_limit()
       RETURNS trigger AS $$
+      DECLARE
+        active_count integer;
       BEGIN
-        LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
-        IF (SELECT COUNT(*) FROM users) >= 30 THEN
-          RAISE EXCEPTION 'Limite máximo de 30 contas atingido. Entre em contato com o Engenheiro de Software do Sistema para mais informações.'
-            USING ERRCODE = 'check_violation';
+        IF NEW.status = 'ativo' AND NEW."blockedAt" IS NULL AND NEW."deletedAt" IS NULL THEN
+          LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+
+          IF TG_OP = 'INSERT' THEN
+            SELECT COUNT(*) INTO active_count
+            FROM users
+            WHERE status = 'ativo'
+              AND "blockedAt" IS NULL
+              AND "deletedAt" IS NULL;
+          ELSE
+            SELECT COUNT(*) INTO active_count
+            FROM users
+            WHERE status = 'ativo'
+              AND "blockedAt" IS NULL
+              AND "deletedAt" IS NULL
+              AND id <> NEW.id;
+          END IF;
+
+          IF active_count >= 30 THEN
+            RAISE EXCEPTION 'Limite máximo de 30 contas ativas atingido. Inative uma conta ou entre em contato com o Engenheiro de Software do Sistema para mais informações.'
+              USING ERRCODE = 'check_violation';
+          END IF;
         END IF;
+
         RETURN NEW;
       END;
       $$ LANGUAGE plpgsql;
 
       DROP TRIGGER IF EXISTS users_account_limit_30 ON users;
       CREATE TRIGGER users_account_limit_30
-      BEFORE INSERT ON users
+      BEFORE INSERT OR UPDATE OF status, "blockedAt", "deletedAt" ON users
       FOR EACH ROW
       EXECUTE FUNCTION enforce_user_account_limit();
     `);

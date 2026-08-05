@@ -5,7 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
 const { writeAudit } = require('../services/auditService');
 const { normalizeModulePermissions } = require('../config/modulePermissions');
-const { getUserAccountCapacity, assertUserAccountCapacity } = require('../services/userAccountLimitService');
+const { getUserAccountCapacity, assertUserAccountCapacity, isActiveAccount } = require('../services/userAccountLimitService');
 
 function computedStatus(user) {
   if (user.deletedAt) return 'excluido';
@@ -172,7 +172,7 @@ exports.create = asyncHandler(async (req, res) => {
   if (!name || !email || !password) return fail(res, 400, 'Nome, e-mail e senha são obrigatórios.');
   if (String(password).length < 6) return fail(res, 400, 'A senha precisa ter pelo menos 6 caracteres.');
   if (!['admin', 'supervisor', 'estoquista', 'tecnico'].includes(role)) return fail(res, 400, 'Perfil inválido.');
-  await assertUserAccountCapacity();
+  if (status === 'ativo') await assertUserAccountCapacity();
   await assertEmailAvailable(email);
   const normalizedWarehouseIds = Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : [];
   const normalizedCityAccess = Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : [];
@@ -207,6 +207,9 @@ exports.update = asyncHandler(async (req, res) => {
   const before = hide(user);
   const { name, email, password, role, technicianId, status, phone, jobTitle, notes, mustChangePassword, warehouseIds, cityAccess, approvalLimit, companyName = '', modulePermissions } = req.body;
   const nextRole = role || user.role;
+  const nextStatus = status === undefined ? user.status : status;
+  const willBeActive = nextStatus === 'ativo' && !user.blockedAt && !user.deletedAt;
+  if (!isActiveAccount(user) && willBeActive) await assertUserAccountCapacity();
   if (email && email !== user.email) await assertEmailAvailable(String(email).toLowerCase().trim(), user.id);
   const normalizedWarehouseIds = warehouseIds === undefined ? user.warehouseIds : (Array.isArray(warehouseIds) ? warehouseIds.map(Number).filter(Boolean) : []);
   const normalizedCityAccess = cityAccess === undefined ? user.cityAccess : (Array.isArray(cityAccess) ? cityAccess.filter(Boolean) : []);
@@ -249,6 +252,10 @@ exports.setStatus = asyncHandler(async (req, res) => {
     return fail(res, 409, 'Você não pode bloquear, inativar ou excluir sua própria conta logada.');
   }
 
+  if (['activate', 'unblock', 'restore'].includes(action) && !isActiveAccount(user)) {
+    await assertUserAccountCapacity();
+  }
+
   if (action === 'activate') {
     user.status = 'ativo';
     user.blockedAt = null;
@@ -279,7 +286,7 @@ exports.setStatus = asyncHandler(async (req, res) => {
 
   await user.save();
   const updated = await User.findByPk(user.id, { include: [{ model: Technician, include: [ContractorCompany] }] });
-  await writeAudit({ req, action: `user_${action}`, entity: 'User', entityId: user.id, message: `Status do usuário ${user.email} alterado para ${computedStatus(updated)}.`, beforeData: before, afterData: hide(updated) });
+  await writeAudit({ req, action: `user_${action}`, entity: 'User', entityId: user.id, message: `Status do usuário ${user.email} alterado para ${computedStatus(updated)}.${reason ? ` Motivo: ${reason}` : ''}`, beforeData: before, afterData: { ...hide(updated), statusReason: reason || null } });
   return ok(res, hide(updated), 'Status atualizado.');
 });
 

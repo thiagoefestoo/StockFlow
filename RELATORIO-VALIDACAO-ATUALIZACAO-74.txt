@@ -1,0 +1,96 @@
+ATUALIZAÇÃO 74 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+Arquivo recebido: StockFlow-main (1)(3).zip
+
+COMPORTAMENTO ANTERIOR
+----------------------
+- Excluir usuário já realizava exclusão lógica.
+- Os dados históricos permaneciam no banco.
+- O limite de 30 contas usava User.count() sem filtro.
+- O trigger do PostgreSQL contava todas as linhas de users.
+- O backend já possuía a ação deactivate, mas a lista não exibia botão Inativar.
+
+ALTERAÇÕES
+----------
+- botão Inativar adicionado à Administração de usuários;
+- confirmação explica que os dados serão preservados;
+- sessão da conta inativada é recusada pelo middleware existente;
+- limite passa a contar somente contas realmente ativas;
+- inativos, bloqueados e excluídos não ocupam vaga;
+- ativação, desbloqueio e restauração validam vaga disponível;
+- trigger do PostgreSQL protege INSERT e reativação concorrente;
+- auditoria registra ação e motivo.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/userController.js
+backend/app/services/runtimeSchemaService.js
+backend/app/services/userAccountLimitService.js
+backend/scripts/test-user-inactivation-active-limit.js
+frontend/src/pages/Users.jsx
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: node backend/scripts/check-syntax.js
+   Resultado: sintaxe validada em 113 arquivos JavaScript.
+
+2. Teste específico
+   Comando:
+   node backend/scripts/test-user-inactivation-active-limit.js
+
+   Resultado:
+   - filtro de contas ativas confirmado;
+   - inativos fora da contagem;
+   - bloqueados fora da contagem;
+   - excluídos fora da contagem;
+   - criação ativa protegida;
+   - ativação, desbloqueio e restauração protegidos;
+   - trigger de INSERT/UPDATE confirmado;
+   - botão Inativar confirmado;
+   - aviso de preservação de dados confirmado.
+
+3. Frontend
+   Users.jsx validado pelo transpiler TypeScript com suporte a JSX.
+   Resultado: JSX válido.
+
+4. Formatação
+   Arquivos alterados verificados sem espaços residuais.
+
+5. Segurança operacional
+   - não permite inativar a própria conta conectada;
+   - dados relacionados não são apagados;
+   - nenhum usuário é inativado durante a instalação;
+   - reativação acima do limite é bloqueada;
+   - proteção na aplicação e no banco.
+
+6. Pacote
+   - sem .env;
+   - sem .git;
+   - sem node_modules;
+   - sem build pré-existente;
+   - sem uploads de produção.
+
+BUILD LOCAL
+-----------
+O aplicador executará a build completa do frontend no computador do usuário.
+A atualização somente será mantida se backend, teste específico, build e
+git diff --check forem aprovados. Em caso de falha, restaura os arquivos e a
+build anteriores.
+
+REDEPLOY
+--------
+A atualização possui backend e frontend.
+
+1. redeploy do Render;
+2. aguardar a API;
+3. redeploy da Vercel;
+4. sair e entrar novamente;
+5. Ctrl+F5.
+
+RESULTADO
+---------
+APROVADO PARA APLICAÇÃO CONTROLADA.

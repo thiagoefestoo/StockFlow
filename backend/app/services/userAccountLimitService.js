@@ -1,10 +1,27 @@
 const { User } = require('../models');
 
 const USER_ACCOUNT_LIMIT = 30;
-const USER_ACCOUNT_LIMIT_MESSAGE = 'Limite máximo de 30 contas atingido. Entre em contato com o Engenheiro de Software do Sistema para mais informações.';
+const USER_ACCOUNT_LIMIT_MESSAGE = 'Limite máximo de 30 contas ativas atingido. Inative uma conta ou entre em contato com o Engenheiro de Software do Sistema para mais informações.';
 
-async function getUserAccountCapacity() {
-  const used = await User.count();
+const ACTIVE_ACCOUNT_WHERE = {
+  status: 'ativo',
+  blockedAt: null,
+  deletedAt: null,
+};
+
+function isActiveAccount(user) {
+  return !!user
+    && user.status === 'ativo'
+    && !user.blockedAt
+    && !user.deletedAt;
+}
+
+async function getUserAccountCapacity(options = {}) {
+  const used = await User.count({
+    where: ACTIVE_ACCOUNT_WHERE,
+    transaction: options.transaction,
+  });
+
   return {
     limit: USER_ACCOUNT_LIMIT,
     used,
@@ -13,8 +30,8 @@ async function getUserAccountCapacity() {
   };
 }
 
-async function assertUserAccountCapacity() {
-  const capacity = await getUserAccountCapacity();
+async function assertUserAccountCapacity(options = {}) {
+  const capacity = await getUserAccountCapacity(options);
   if (capacity.reached) {
     const error = new Error(USER_ACCOUNT_LIMIT_MESSAGE);
     error.statusCode = 409;
@@ -27,6 +44,8 @@ async function assertUserAccountCapacity() {
 module.exports = {
   USER_ACCOUNT_LIMIT,
   USER_ACCOUNT_LIMIT_MESSAGE,
+  ACTIVE_ACCOUNT_WHERE,
+  isActiveAccount,
   getUserAccountCapacity,
   assertUserAccountCapacity,
 };

@@ -79,6 +79,44 @@ function permissionSummary(keys) {
   const selected = Array.isArray(keys) ? keys : [];
   return selected.length ? `${selected.length} módulo(s) liberado(s)` : 'Nenhum módulo liberado';
 }
+function statusActionInfo(action) {
+  return ({
+    deactivate: {
+      title: 'Inativar usuário',
+      description: 'O usuário perderá o acesso imediatamente, deixará de contar no limite de 30 contas ativas e todos os registros históricos permanecerão intactos.',
+      confirmLabel: 'Inativar usuário',
+    },
+    activate: {
+      title: 'Ativar usuário',
+      description: 'O acesso será restaurado e a conta voltará a ocupar uma vaga do limite de 30 contas ativas.',
+      confirmLabel: 'Ativar usuário',
+    },
+    block: {
+      title: 'Bloquear usuário',
+      description: 'O acesso será interrompido imediatamente. Os registros anteriores permanecerão intactos.',
+      confirmLabel: 'Bloquear usuário',
+    },
+    unblock: {
+      title: 'Desbloquear usuário',
+      description: 'O acesso será restaurado e a conta voltará a ocupar uma vaga do limite de contas ativas.',
+      confirmLabel: 'Desbloquear usuário',
+    },
+    delete: {
+      title: 'Excluir usuário',
+      description: 'A exclusão é lógica: o acesso será removido, mas registros, movimentações e auditorias permanecerão preservados.',
+      confirmLabel: 'Excluir usuário',
+    },
+    restore: {
+      title: 'Restaurar usuário',
+      description: 'A conta excluída será restaurada, voltará a ter acesso e ocupará uma vaga do limite de contas ativas.',
+      confirmLabel: 'Restaurar usuário',
+    },
+  }[action] || {
+    title: 'Confirmar alteração de acesso',
+    description: 'Toda alteração de acesso fica registrada na auditoria.',
+    confirmLabel: 'Confirmar',
+  });
+}
 
 export default function Users() {
   const { user: loggedUser, isAdmin } = useAuth();
@@ -95,7 +133,7 @@ export default function Users() {
 
   const filteredUsers = useMemo(() => users, [users]);
   const accountLimitReached = !!stats.accountLimitReached;
-  const accountLimitMessage = `Limite máximo de ${stats.accountLimit || 30} contas atingido. Entre em contato com o Engenheiro de Software do Sistema para mais informações.`;
+  const accountLimitMessage = `Limite máximo de ${stats.accountLimit || 30} contas ativas atingido. Inative uma conta para liberar uma vaga.`;
   const cityOptions = useMemo(() => {
     const values = new Set();
     warehouses.forEach((w) => { if (w.city) values.add(String(w.city).trim()); });
@@ -236,7 +274,8 @@ export default function Users() {
       } else {
         await api.patch(`/users/${statusModal.user.id}/status`, { action: statusModal.action, reason: statusModal.reason });
       }
-      setMessage('✅ Status do usuário atualizado.');
+      const actionInfo = statusActionInfo(statusModal.action);
+      setMessage(`✅ ${actionInfo.confirmLabel} concluído com sucesso.`);
       setStatusModal({ open: false, user: null, action: '', reason: '' });
       await load();
     } catch (error) {
@@ -257,7 +296,7 @@ export default function Users() {
         <div>
           <span className="eyebrow">🔐 Administração de acesso</span>
           <h2>Gerenciamento completo de usuários</h2>
-          <p>Crie contas, vincule usuários técnicos, edite perfis, redefina senhas, bloqueie acessos e consulte o histórico de alterações.</p>
+          <p>Crie contas, vincule usuários técnicos, edite perfis, redefina senhas, inative acessos sem apagar históricos e consulte a auditoria.</p>
         </div>
         <div className="row-actions">
           <button className="ghost" onClick={() => exportUsers(filteredUsers)}>⬇️ Exportar CSV</button>
@@ -270,10 +309,10 @@ export default function Users() {
       {accountLimitReached && <div className="alert warning">{accountLimitMessage}</div>}
 
       <div className="kpi-grid small">
-        <KpiCard label="Contas cadastradas" value={`${stats.accountUsed ?? stats.total ?? 0}/${stats.accountLimit || 30}`} hint={`${stats.accountRemaining ?? 0} vaga(s) disponível(is)`} tone={accountLimitReached ? 'warning' : 'default'} />
-        <KpiCard label="Ativos" value={stats.ativos || 0} />
-        <KpiCard label="Bloqueados" value={stats.bloqueados || 0} />
-        <KpiCard label="Técnicos" value={stats.tecnicos || 0} />
+        <KpiCard label="Contas ativas" value={`${stats.accountUsed ?? stats.ativos ?? 0}/${stats.accountLimit || 30}`} hint={`${stats.accountRemaining ?? 0} vaga(s) disponível(is)`} tone={accountLimitReached ? 'warning' : 'default'} />
+        <KpiCard label="Inativos" value={stats.inativos || 0} hint="Não ocupam vaga" />
+        <KpiCard label="Bloqueados" value={stats.bloqueados || 0} hint="Não ocupam vaga" />
+        <KpiCard label="Excluídos" value={stats.excluidos || 0} hint="Histórico preservado" />
       </div>
 
       <section className="panel filters user-filters">
@@ -330,6 +369,7 @@ export default function Users() {
                       <button className="info" onClick={() => openDetails(u)}>🔎 Detalhes</button>
                       {!u.deletedAt && <button className="ghost" onClick={() => openEdit(u)}>✏️ Editar</button>}
                       {!u.deletedAt && <button className="soft" onClick={() => setPasswordModal({ open: true, user: u, password: '', mustChangePassword: true })}>🔑 Senha</button>}
+                      {['ativo', 'bloqueado'].includes(u.accessStatus) && !u.deletedAt && Number(u.id) !== Number(loggedUser?.id) && <button className="soft" onClick={() => askStatus(u, 'deactivate')}>⏸️ Inativar</button>}
                       {u.accessStatus === 'ativo' && Number(u.id) !== Number(loggedUser?.id) && <button className="danger-outline" onClick={() => askStatus(u, 'block')}>🚫 Bloquear</button>}
                       {u.accessStatus === 'bloqueado' && <button className="success-btn" onClick={() => askStatus(u, 'unblock')}>✅ Desbloquear</button>}
                       {u.accessStatus === 'inativo' && <button className="success-btn" onClick={() => askStatus(u, 'activate')}>✅ Ativar</button>}
@@ -430,11 +470,12 @@ export default function Users() {
         </div>
       </Modal>
 
-      <Modal open={statusModal.open} title="Confirmar alteração de acesso" onClose={() => setStatusModal({ open: false, user: null, action: '', reason: '' })} footer={<><button className="ghost" onClick={() => setStatusModal({ open: false, user: null, action: '', reason: '' })}>Cancelar</button><button className={['block', 'delete', 'deactivate'].includes(statusModal.action) ? 'danger-outline' : ''} onClick={runStatusAction}>Confirmar</button></>}>
+      <Modal open={statusModal.open} title={statusActionInfo(statusModal.action).title} onClose={() => setStatusModal({ open: false, user: null, action: '', reason: '' })} footer={<><button className="ghost" onClick={() => setStatusModal({ open: false, user: null, action: '', reason: '' })}>Cancelar</button><button className={['block', 'delete', 'deactivate'].includes(statusModal.action) ? 'danger-outline' : ''} onClick={runStatusAction}>{statusActionInfo(statusModal.action).confirmLabel}</button></>}>
         <div className="form-stack">
           <p>Usuário: <strong>{statusModal.user?.name}</strong> — {statusModal.user?.email}</p>
+          <div className="viz-callout">{statusActionInfo(statusModal.action).description}</div>
           <label>Motivo/observação<textarea rows="3" value={statusModal.reason} onChange={(e) => setStatusModal({ ...statusModal, reason: e.target.value })} placeholder="Motivo para auditoria" /></label>
-          <div className="viz-callout">Toda alteração de status fica registrada na auditoria do sistema.</div>
+          <div className="alert warning">Nenhuma movimentação, entrada, transferência, ordem de serviço ou auditoria criada por este usuário será apagada.</div>
         </div>
       </Modal>
 
