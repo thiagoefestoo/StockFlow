@@ -271,6 +271,7 @@ export default function Warehouses() {
   const [rows, setRows] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [availableAssets, setAvailableAssets] = useState([]);
+  const [transferInventoryLoading, setTransferInventoryLoading] = useState(false);
   const [form, setForm] = useState(empty);
   const [modal, setModal] = useState(false);
   const [details, setDetails] = useState(null);
@@ -291,25 +292,62 @@ export default function Warehouses() {
   const canManageStructure = isAdmin || user?.role === 'supervisor';
 
   async function load() {
-    const [w, m] = await Promise.all([
-      api.get('/warehouses'),
-      api.get('/materials').catch(() => ({ data: { data: [] } })),
-    ]);
-    setRows(sortRecentFirst(w.data.data || [], ['createdAt']));
-    setMaterials(m.data.data || []);
+    const response = await api.get('/warehouses');
+    setRows(sortRecentFirst(response.data.data || [], ['createdAt']));
   }
 
-  async function loadAssets(fromWarehouseId = transferForm.fromWarehouseId) {
+  async function loadTransferInventory(fromWarehouseId) {
     if (!fromWarehouseId) {
+      setMaterials([]);
       setAvailableAssets([]);
       return;
     }
-    const res = await api.get(`/stock/assets?ownerType=estoque&status=em_estoque&warehouseId=${fromWarehouseId}&limit=2500`);
-    setAvailableAssets(sortRecentFirst(res.data.data || [], ['updatedAt', 'createdAt']));
+
+    try {
+      setTransferInventoryLoading(true);
+      const [materialResponse, assetResponse] = await Promise.all([
+        api.get('/materials', {
+          params: {
+            warehouseId: fromWarehouseId,
+            availableOnly: true,
+            activeOnly: true,
+          },
+        }),
+        api.get('/stock/assets', {
+          params: {
+            ownerType: 'estoque',
+            status: 'em_estoque',
+            warehouseId: fromWarehouseId,
+            limit: 2500,
+          },
+        }),
+      ]);
+
+      setMaterials(materialResponse.data.data || []);
+      setAvailableAssets(
+        sortRecentFirst(
+          assetResponse.data.data || [],
+          ['updatedAt', 'createdAt'],
+        ),
+      );
+    } catch (error) {
+      setMaterials([]);
+      setAvailableAssets([]);
+      setMessage(
+        error.response?.data?.message
+        || 'Não foi possível carregar o saldo do estoque de origem.',
+      );
+    } finally {
+      setTransferInventoryLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { if (transferModal) loadAssets(transferForm.fromWarehouseId); }, [transferModal, transferForm.fromWarehouseId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (transferModal) {
+      loadTransferInventory(transferForm.fromWarehouseId);
+    }
+  }, [transferModal, transferForm.fromWarehouseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const operationalRows = useMemo(() => rows.filter((row) => !row.isReverseLogistics), [rows]);
   const reverseRows = useMemo(() => rows.filter((row) => row.isReverseLogistics), [rows]);
@@ -375,13 +413,52 @@ export default function Warehouses() {
       return;
     }
     setTransferForm(emptyTransfer(row?.id || ''));
+    setMaterials([]);
     setAvailableAssets([]);
     setAssetSearch('');
+    setTransferReviewOpen(false);
     setTransferModal(true);
   }
 
+  function changeTransferSourceWarehouse(fromWarehouseId) {
+    setTransferReviewOpen(false);
+    setAssetSearch('');
+    setMaterials([]);
+    setAvailableAssets([]);
+    setTransferForm((current) => ({
+      ...current,
+      fromWarehouseId,
+      toWarehouseId: String(current.toWarehouseId) === String(fromWarehouseId)
+        ? ''
+        : current.toWarehouseId,
+      items: [],
+    }));
+  }
+
   function addTransferItem() {
-    setTransferForm((current) => ({ ...current, items: [...current.items, { materialId: materials[0]?.id || '', quantity: 1, serialNumbers: [] }] }));
+    if (!transferForm.fromWarehouseId) {
+      setMessage('Selecione primeiro o estoque de origem.');
+      return;
+    }
+
+    const selected = new Set(
+      transferForm.items.map((item) => String(item.materialId || '')),
+    );
+    const firstAvailable = materials.find(
+      (material) => !selected.has(String(material.id)),
+    );
+
+    setTransferForm((current) => ({
+      ...current,
+      items: [
+        ...current.items,
+        {
+          materialId: firstAvailable?.id || '',
+          quantity: 1,
+          serialNumbers: [],
+        },
+      ],
+    }));
   }
 
   function removeTransferItem(index) {
@@ -407,17 +484,61 @@ export default function Warehouses() {
   function validateWarehouseTransfer() {
     if (!transferForm.fromWarehouseId) return 'Selecione o estoque de origem.';
     if (!transferForm.toWarehouseId) return 'Selecione o estoque de destino.';
-    if (String(transferForm.fromWarehouseId) === String(transferForm.toWarehouseId)) return 'O estoque de origem e o destino precisam ser diferentes.';
-    if (!transferForm.items.length) return 'Adicione pelo menos um item à transferência.';
-    if (duplicateItemIds(transferForm.items).length) return 'O mesmo material não pode ser selecionado mais de uma vez.';
-    const repeatedSerials = duplicateSerials(transferForm.items);
-    if (repeatedSerials.length) return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
-    for (const item of transferForm.items) {
-      const material = materials.find((row) => Number(row.id) === Number(item.materialId));
-      if (!material) return 'Selecione o material em todos os itens.';
-      const quantity = material.requiresSerial ? (item.serialNumbers || []).length : Number(item.quantity || 0);
-      if (quantity <= 0) return `Informe uma quantidade válida para ${material.name}.`;
+    if (String(transferForm.fromWarehouseId) === String(transferForm.toWarehouseId)) {
+      return 'O estoque de origem e o destino precisam ser diferentes.';
     }
+    if (transferInventoryLoading) return 'Aguarde o carregamento do saldo do estoque de origem.';
+    if (!transferForm.items.length) return 'Adicione pelo menos um item à transferência.';
+    if (duplicateItemIds(transferForm.items).length) {
+      return 'O mesmo material não pode ser selecionado mais de uma vez.';
+    }
+
+    const repeatedSerials = duplicateSerials(transferForm.items);
+    if (repeatedSerials.length) {
+      return `O mesmo serial não pode ser selecionado mais de uma vez: ${repeatedSerials.join(', ')}.`;
+    }
+
+    for (const item of transferForm.items) {
+      const material = materials.find(
+        (row) => Number(row.id) === Number(item.materialId),
+      );
+
+      if (!material) {
+        return 'Existe item que não pertence mais ao saldo do estoque de origem.';
+      }
+
+      if (material.requiresSerial) {
+        const serialNumbers = item.serialNumbers || [];
+        if (!serialNumbers.length) {
+          return `Selecione ao menos um serial de ${material.name}.`;
+        }
+
+        const invalidSerial = serialNumbers.find((serialNumber) => {
+          const asset = availableAssets.find(
+            (row) => String(row.serialNumber) === String(serialNumber),
+          );
+          return !asset || Number(asset.materialId) !== Number(material.id);
+        });
+
+        if (invalidSerial) {
+          return `O serial ${invalidSerial} não está mais disponível para ${material.name} no estoque de origem.`;
+        }
+
+        continue;
+      }
+
+      const quantity = Number(item.quantity || 0);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return `Informe uma quantidade válida para ${material.name}.`;
+      }
+      if (!Number.isInteger(quantity)) {
+        return `A quantidade de ${material.name} precisa ser um número inteiro.`;
+      }
+      if (quantity > Number(material.mainStock || 0)) {
+        return `Quantidade maior que o saldo de ${material.name}. Disponível: ${formatQuantity(material.mainStock, material.unit)}.`;
+      }
+    }
+
     return '';
   }
 
@@ -441,12 +562,21 @@ export default function Warehouses() {
           return { ...item, quantity: Number(serialNumbers.length || item.quantity || 0), serialNumbers };
         }),
       };
-      await api.post('/warehouses/transfer-stock', payload);
+      const response = await api.post('/warehouses/transfer-stock', payload);
+      const operationNumber = response.data?.data?.plan?.operationNumber
+        || response.data?.data?.plan?.reference
+        || '';
       setTransferReviewOpen(false);
       setTransferModal(false);
       setTransferForm(emptyTransfer());
+      setMaterials([]);
+      setAvailableAssets([]);
       await load();
-      setMessage('Solicitação enviada para aprovação do administrador. O saldo será movimentado somente após aprovação.');
+      setMessage(
+        operationNumber
+          ? `Solicitação ${operationNumber} enviada para aprovação. O saldo será movimentado somente após aprovação.`
+          : 'Solicitação enviada para aprovação do administrador. O saldo será movimentado somente após aprovação.',
+      );
     } catch (e) {
       setMessage(e.response?.data?.message || e.message || 'Erro ao transferir entre estoques.');
     } finally {
@@ -772,14 +902,16 @@ export default function Warehouses() {
       <div className="form-stack warehouse-transfer-form">
         <div className="alert warning">A transferência entre estoques ficará pendente na Central de aprovações. Somente o admin executa a movimentação do saldo.</div>
         <div className="form-grid">
-          <label>Estoque de origem<select value={transferForm.fromWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, fromWarehouseId: e.target.value, items: transferForm.items.map((item) => ({ ...item, serialNumbers: [] })) })}><option value="">Selecione</option>{operationalRows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
-          <label>Estoque de destino<select value={transferForm.toWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, toWarehouseId: e.target.value })}><option value="">Selecione</option>{operationalRows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
-          <label>Referência<input value={transferForm.reference} onChange={(e) => setTransferForm({ ...transferForm, reference: e.target.value })} placeholder="TE-SPA-001" /></label>
-          <label>Buscar serial<input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Serial, MAC, modelo..." /></label>
+          <label>Estoque de origem<select value={transferForm.fromWarehouseId} onChange={(e) => changeTransferSourceWarehouse(e.target.value)}><option value="">Selecione</option>{operationalRows.map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
+          <label>Estoque de destino<select value={transferForm.toWarehouseId} onChange={(e) => setTransferForm({ ...transferForm, toWarehouseId: e.target.value })}><option value="">Selecione</option>{operationalRows.filter((w) => String(w.id) !== String(transferForm.fromWarehouseId)).map((w) => <option key={w.id} value={w.id}>{w.code} • {w.name} • {w.city || w.region || '-'}</option>)}</select></label>
+          <label>Referência/motivo<input value={transferForm.reference} onChange={(e) => setTransferForm({ ...transferForm, reference: e.target.value })} placeholder="Ex.: reposição Vila Velha" /><small>Pode ser repetida. O número único da operação será gerado automaticamente.</small></label>
+          <label>Buscar serial<input value={assetSearch} disabled={!transferForm.fromWarehouseId || transferInventoryLoading} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Serial, MAC, modelo..." /></label>
         </div>
         <label>Observação<textarea rows="2" value={transferForm.notes} onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })} placeholder="Motivo da transferência, responsável, rota..." /></label>
-        <div className="subtoolbar"><h4>Itens transferidos</h4><button type="button" className="ghost" onClick={addTransferItem}>Adicionar item</button></div>
-        {transferForm.items.length === 0 && <div className="empty-state">Adicione materiais para montar a transferência do estoque central para a unidade escolhida.</div>}
+        <div className="subtoolbar"><h4>Itens transferidos</h4><button type="button" className="ghost" disabled={!transferForm.fromWarehouseId || transferInventoryLoading || materials.length === 0} onClick={addTransferItem}>Adicionar item</button></div>
+        {transferInventoryLoading && <div className="empty-state">Carregando materiais e seriais do estoque de origem...</div>}
+        {!transferInventoryLoading && transferForm.fromWarehouseId && materials.length === 0 && <div className="empty-state">O estoque de origem não possui materiais disponíveis para transferência.</div>}
+        {!transferInventoryLoading && transferForm.items.length === 0 && materials.length > 0 && <div className="empty-state">Adicione os materiais que serão enviados para o estoque de destino.</div>}
         {transferForm.items.map((item, index) => {
           const material = materials.find((m) => Number(m.id) === Number(item.materialId));
           const availableMaterials = optionsWithoutSelected(materials, transferForm.items, index);
@@ -813,7 +945,8 @@ export default function Warehouses() {
       metadata={[
         { label: 'Estoque de origem', value: transferSourceWarehouse?.name, hint: transferSourceWarehouse?.code },
         { label: 'Estoque de destino', value: transferTargetWarehouse?.name, hint: transferTargetWarehouse?.code },
-        { label: 'Referência', value: transferForm.reference || 'Gerada automaticamente' },
+        { label: 'Referência/motivo', value: transferForm.reference || 'Transferência entre estoques' },
+        { label: 'Número da operação', value: 'Gerado automaticamente após confirmar' },
         { label: 'Observação', value: transferForm.notes || 'Não informada' },
       ]}
       items={transferReviewItems}

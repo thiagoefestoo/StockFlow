@@ -246,8 +246,14 @@ exports.get = asyncHandler(async (req, res) => {
 
 exports.approve = asyncHandler(async (req, res) => {
   const approval = await ApprovalRequest.findByPk(req.params.id);
-  if (!approval) return fail(res, 404, 'Aprovação não encontrada.');
-  if (approval.status !== 'pendente') return fail(res, 409, 'Esta aprovação já foi decidida.');
+
+  if (!approval) {
+    return fail(res, 404, 'Aprovação não encontrada.');
+  }
+
+  if (approval.status !== 'pendente') {
+    return fail(res, 409, 'Esta aprovação já foi decidida.');
+  }
 
   if (approval.entityType === 'material_request') {
     try {
@@ -257,9 +263,17 @@ exports.approve = asyncHandler(async (req, res) => {
         notes: req.body?.notes || req.body?.approvalNotes,
       });
       const refreshed = await ApprovalRequest.findByPk(approval.id);
-      return ok(res, { approval: await enrichApproval(refreshed), request }, 'Solicitação aprovada com sucesso.');
+      return ok(
+        res,
+        { approval: await enrichApproval(refreshed), request },
+        'Solicitação aprovada com sucesso.',
+      );
     } catch (error) {
-      return fail(res, error.statusCode || 500, error.message || 'Não foi possível aprovar a solicitação.');
+      return fail(
+        res,
+        error.statusCode || 500,
+        error.message || 'Não foi possível aprovar a solicitação.',
+      );
     }
   }
 
@@ -269,15 +283,97 @@ exports.approve = asyncHandler(async (req, res) => {
 
   if (approval.entityType === 'warehouse_transfer') {
     try {
-      await executeWarehouseTransferPlan(approval.payload, { req, approvalId: approval.id });
+      const result = await sequelize.transaction(async (transaction) => {
+        const lockedApproval = await ApprovalRequest.findByPk(req.params.id, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        if (!lockedApproval) {
+          const error = new Error('Aprovação não encontrada.');
+          error.statusCode = 404;
+          throw error;
+        }
+
+        if (lockedApproval.status !== 'pendente') {
+          const error = new Error('Esta aprovação já foi decidida.');
+          error.statusCode = 409;
+          throw error;
+        }
+
+        const transfer = await executeWarehouseTransferPlan(
+          lockedApproval.payload,
+          {
+            req,
+            approvalId: lockedApproval.id,
+            transaction,
+          },
+        );
+
+        lockedApproval.status = 'aprovado';
+        lockedApproval.decidedAt = new Date();
+        lockedApproval.decidedById = req.user.id;
+        lockedApproval.decisionNotes = (
+          req.body?.notes
+          || req.body?.approvalNotes
+          || 'Aprovado pelo administrador.'
+        );
+
+        await lockedApproval.save({ transaction });
+
+        await writeAudit({
+          req,
+          action: 'approval_approved',
+          entity: 'ApprovalRequest',
+          entityId: lockedApproval.id,
+          message: [
+            `Aprovação ${lockedApproval.workflowCode} aprovada e executada.`,
+            `Referência: ${transfer.operationReference}.`,
+            `${transfer.totalQuantity} item(ns) movimentado(s)`,
+            `de ${transfer.fromWarehouse.name} para ${transfer.toWarehouse.name}.`,
+          ].join(' '),
+          afterData: {
+            approval: lockedApproval.toJSON(),
+            transfer,
+          },
+          transaction,
+        });
+
+        return {
+          approval: lockedApproval,
+          transfer,
+        };
+      });
+
+      return ok(
+        res,
+        {
+          approval: await enrichApproval(result.approval),
+          transfer: result.transfer,
+        },
+        `Transferência ${result.transfer.operationNumber} executada com sucesso.`,
+      );
     } catch (error) {
-      return fail(res, 409, `Não foi possível executar a transferência: ${error.message}`);
+      return fail(
+        res,
+        error.statusCode || 409,
+        `Não foi possível executar a transferência: ${error.message}`,
+      );
     }
-  } else if (approval.entityType === 'warehouse_delete') {
+  }
+
+  if (approval.entityType === 'warehouse_delete') {
     try {
-      await executeWarehouseDelete(approval.payload, { req, approvalId: approval.id });
+      await executeWarehouseDelete(approval.payload, {
+        req,
+        approvalId: approval.id,
+      });
     } catch (error) {
-      return fail(res, 409, `Não foi possível excluir o estoque: ${error.message}`);
+      return fail(
+        res,
+        409,
+        `Não foi possível excluir o estoque: ${error.message}`,
+      );
     }
   } else {
     return fail(res, 400, 'Tipo de aprovação não suportado.');
@@ -286,7 +382,11 @@ exports.approve = asyncHandler(async (req, res) => {
   approval.status = 'aprovado';
   approval.decidedAt = new Date();
   approval.decidedById = req.user.id;
-  approval.decisionNotes = req.body?.notes || req.body?.approvalNotes || 'Aprovado pelo administrador.';
+  approval.decisionNotes = (
+    req.body?.notes
+    || req.body?.approvalNotes
+    || 'Aprovado pelo administrador.'
+  );
   await approval.save();
 
   await writeAudit({
@@ -298,8 +398,13 @@ exports.approve = asyncHandler(async (req, res) => {
     afterData: approval.toJSON(),
   });
 
-  return ok(res, await enrichApproval(approval), 'Aprovação executada com sucesso.');
+  return ok(
+    res,
+    await enrichApproval(approval),
+    'Aprovação executada com sucesso.',
+  );
 });
+
 
 exports.reject = asyncHandler(async (req, res) => {
   const result = await sequelize.transaction(async (transaction) => {

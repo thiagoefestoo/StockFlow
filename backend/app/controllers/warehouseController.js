@@ -1,4 +1,5 @@
 const { Op } = require('sequelize');
+const sequelize = require('../../config/db');
 const {
   Warehouse,
   User,
@@ -324,42 +325,113 @@ exports.requestDelete = asyncHandler(async (req, res) => {
 
 exports.transferStock = asyncHandler(async (req, res) => {
   const { fromWarehouseId, toWarehouseId, items = [] } = req.body;
-  try { assertUniqueOperationItems(items); } catch (error) { return fail(res, error.statusCode || 400, error.message); }
+
+  try {
+    assertUniqueOperationItems(items);
+  } catch (error) {
+    return fail(res, error.statusCode || 400, error.message);
+  }
 
   const [fromWarehouse, toWarehouse] = await Promise.all([
     Warehouse.findByPk(fromWarehouseId),
     Warehouse.findByPk(toWarehouseId),
   ]);
-  if (!fromWarehouse || !toWarehouse) return fail(res, 404, 'Estoque de origem ou destino não encontrado.');
+
+  if (!fromWarehouse || !toWarehouse) {
+    return fail(res, 404, 'Estoque de origem ou destino não encontrado.');
+  }
+
   if (fromWarehouse.isReverseLogistics || toWarehouse.isReverseLogistics) {
-    return fail(res, 400, 'Estoque de logística reversa não participa de transferências. Use apenas entrada e saída para fornecedor.');
+    return fail(
+      res,
+      400,
+      'Estoque de logística reversa não participa de transferências. Use apenas entrada e saída para fornecedor.',
+    );
   }
 
   try {
     if (!isPrivileged(req.user)) {
-      assertWarehouseAccess(req.user, fromWarehouseId, 'Você não tem acesso ao estoque de origem desta transferência.');
-      assertWarehouseAccess(req.user, toWarehouseId, 'Você só pode solicitar reposição para um estoque vinculado ao seu usuário.');
+      assertWarehouseAccess(
+        req.user,
+        fromWarehouseId,
+        'Você não tem acesso ao estoque de origem desta transferência.',
+      );
+      assertWarehouseAccess(
+        req.user,
+        toWarehouseId,
+        'Você só pode solicitar reposição para um estoque vinculado ao seu usuário.',
+      );
     }
   } catch (error) {
     return fail(res, error.statusCode || 403, error.message);
   }
 
   let plan;
-  try { plan = await buildWarehouseTransferPlan(req.body); } catch (error) { return fail(res, 400, error.message); }
 
-  const approval = await ApprovalRequest.create({
-    workflowCode: plan.reference,
-    entityType: 'warehouse_transfer',
-    entityId: plan.reference,
-    title: `Aprovar transferência ${plan.reference}`,
-    description: `Transferência de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`,
-    status: 'pendente',
-    priority: Number(plan.totalValue || 0) >= 500 ? 'alta' : 'media',
-    amount: plan.totalValue,
-    requestedById: req.user.id,
-    payload: { ...plan, requestedByName: req.user.name, requestedByEmail: req.user.email, approvalRequired: true, approvalReason: 'Transferência entre estoques exige aprovação do administrador antes de movimentar saldo.' },
-  });
+  try {
+    plan = await buildWarehouseTransferPlan(req.body);
+  } catch (error) {
+    return fail(res, error.statusCode || 400, error.message);
+  }
 
-  await writeAudit({ req, action: 'warehouse_transfer_requested', entity: 'ApprovalRequest', entityId: approval.id, message: `Solicitada aprovação para transferência ${plan.reference} de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`, afterData: approval.toJSON() });
-  return created(res, { approval, plan }, 'Transferência enviada para aprovação do administrador. O saldo só será movimentado após aprovação.');
+  try {
+    const approval = await sequelize.transaction(async (transaction) => {
+      const createdApproval = await ApprovalRequest.create({
+        workflowCode: plan.operationNumber,
+        entityType: 'warehouse_transfer',
+        entityId: plan.operationNumber,
+        title: `Aprovar transferência ${plan.operationNumber}`,
+        description: [
+          `Transferência de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`,
+          `Referência: ${plan.operationReference}.`,
+        ].join(' '),
+        status: 'pendente',
+        priority: Number(plan.totalValue || 0) >= 500 ? 'alta' : 'media',
+        amount: plan.totalValue,
+        requestedById: req.user.id,
+        payload: {
+          ...plan,
+          requestedByName: req.user.name,
+          requestedByEmail: req.user.email,
+          approvalRequired: true,
+          approvalReason: 'Transferência entre estoques exige aprovação do administrador antes de movimentar saldo.',
+        },
+      }, { transaction });
+
+      await writeAudit({
+        req,
+        action: 'warehouse_transfer_requested',
+        entity: 'ApprovalRequest',
+        entityId: createdApproval.id,
+        message: [
+          `Solicitada aprovação para transferência ${plan.operationNumber}`,
+          `de ${plan.fromWarehouse.name} para ${plan.toWarehouse.name}.`,
+          `Referência: ${plan.operationReference}.`,
+        ].join(' '),
+        afterData: createdApproval.toJSON(),
+        transaction,
+      });
+
+      return createdApproval;
+    });
+
+    return created(
+      res,
+      { approval, plan },
+      `Transferência ${plan.operationNumber} enviada para aprovação do administrador. O saldo só será movimentado após aprovação.`,
+    );
+  } catch (error) {
+    if (
+      error?.name === 'SequelizeUniqueConstraintError'
+      || error?.name === 'SequelizeValidationError'
+    ) {
+      return fail(
+        res,
+        409,
+        'Não foi possível gerar a solicitação da transferência. Reabra a janela e tente novamente para gerar um novo número de operação.',
+      );
+    }
+
+    throw error;
+  }
 });

@@ -1,0 +1,86 @@
+ATUALIZAÇÃO 79 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+StockFlow-main(20260806-122325).zip
+
+ESCOPO
+------
+Transferência entre estoques e aprovação administrativa.
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/controllers/warehouseController.js
+backend/app/controllers/approvalController.js
+backend/app/services/warehouseTransferService.js
+backend/scripts/test-warehouse-transfer-flow.js
+frontend/src/pages/Warehouses.jsx
+
+PROBLEMAS CORRIGIDOS
+--------------------
+- referência descritiva separada do número único;
+- número antigo com precisão de apenas um segundo;
+- itens antigos mantidos ao trocar origem;
+- catálogo geral usado no lugar do saldo da origem;
+- aprovação e saldo em transações separadas;
+- ausência de bloqueio de saldo e serial;
+- serial sem confirmação explícita do material;
+- mensagens genéricas de erro na criação da solicitação.
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: npm run check --prefix backend
+   Resultado: sintaxe validada em 120 arquivos JavaScript.
+
+2. Teste específico
+   Comando:
+   node backend/scripts/test-warehouse-transfer-flow.js
+
+   Resultado:
+   - 5.000 números únicos gerados;
+   - nenhuma duplicação;
+   - separação entre referência e número confirmada;
+   - transação externa confirmada;
+   - bloqueio de aprovação confirmado;
+   - bloqueio de saldo e serial confirmado;
+   - filtro por estoque de origem confirmado.
+
+3. Frontend
+   Todos os arquivos em frontend/src foram validados pelo transpiler TypeScript.
+
+   Resultado:
+   62 de 62 arquivos JavaScript/JSX válidos.
+
+4. Integridade operacional
+   - solicitação não movimenta saldo;
+   - aprovação revalida os dados;
+   - origem e destino são atualizados na mesma transação;
+   - falha em qualquer item desfaz a operação;
+   - aprovação duplicada é bloqueada;
+   - mudança de origem limpa a montagem anterior.
+
+BUILD COMPLETA
+--------------
+A build completa não foi executada neste ambiente porque as dependências do
+frontend não estão instaladas na pasta analisada.
+
+O aplicador executará obrigatoriamente:
+
+npm run build --prefix frontend
+
+A atualização somente será mantida se a build, o teste do backend e o
+git diff --check forem aprovados. Em caso de falha, os arquivos e a build
+anteriores serão restaurados.
+
+BANCO
+-----
+- nenhuma migration;
+- nenhuma coluna nova;
+- nenhum saldo alterado pela instalação;
+- nenhuma aprovação antiga apagada.
+
+RESULTADO
+---------
+PACOTE PREPARADO PARA APLICAÇÃO CONTROLADA COM BUILD LOCAL OBRIGATÓRIA.

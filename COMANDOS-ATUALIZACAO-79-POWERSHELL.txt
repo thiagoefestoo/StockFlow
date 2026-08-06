@@ -1,0 +1,113 @@
+﻿ATUALIZAÇÃO 79 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS EM DOWNLOADS
+---------------------
+atualizacao-79-corrige-transferencia-entre-estoques.zip
+APLICAR-ATUALIZACAO-79.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-79-corrige-transferencia-entre-estoques.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-79.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/controllers/warehouseController.js",
+    "backend/app/controllers/approvalController.js",
+    "backend/app/services/warehouseTransferService.js",
+    "backend/scripts/test-warehouse-transfer-flow.js",
+    "frontend/src/pages/Warehouses.jsx",
+    "ATUALIZACAO-79-CORRECAO-TRANSFERENCIA-ENTRE-ESTOQUES.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-79.txt",
+    "COMANDOS-ATUALIZACAO-79-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-79.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Corrige fluxo de transferencia entre estoques"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização altera backend e frontend.
+
+Ordem:
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente;
+6. pressionar Ctrl+F5.
+
+Teste do Render:
+
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "https://stockflow-backend-6gxl.onrender.com/api/health"
+
+4. TESTE CONTROLADO
+-------------------
+
+1. abrir Estoques regionais;
+2. clicar em Transferir entre estoques;
+3. escolher o estoque de origem;
+4. confirmar que aparecem somente itens com saldo naquela origem;
+5. adicionar materiais ou seriais;
+6. trocar o estoque de origem;
+7. confirmar que os itens anteriores são apagados;
+8. montar novamente a transferência;
+9. usar uma referência já usada anteriormente;
+10. revisar e solicitar aprovação;
+11. abrir a Central de Aprovações como administrador;
+12. aprovar;
+13. conferir a saída na origem;
+14. conferir a entrada no destino;
+15. confirmar que todas as movimentações possuem o mesmo número TE-;
+16. tentar aprovar novamente e confirmar o bloqueio.
