@@ -4,6 +4,7 @@ import { sortRecentFirst } from '../utils/recentFirst';
 import Modal from '../components/Modal';
 import DetailsModal, { DetailGrid } from '../components/DetailsModal';
 import KpiCard from '../components/KpiCard';
+import FloatingAlert from '../components/FloatingAlert';
 import { useAuth } from '../contexts/AuthContext';
 import { formatQuantity, formatQuantityInput, formatQuantityLabel } from '../utils/formatQuantity';
 
@@ -95,6 +96,7 @@ function MaterialField({ label, children, hint, className = '' }) {
 export default function Stock() {
   const { isAdmin, canAccessModule } = useAuth();
   const canManageMaterials = isAdmin || canAccessModule('materialManage');
+  const canDeleteMaterials = isAdmin || canAccessModule('materialDelete');
   const canRegisterInAllWarehouses = isAdmin || canAccessModule('materialAllWarehouses');
   const [materials, setMaterials] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -103,6 +105,11 @@ export default function Stock() {
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [pageMessage, setPageMessage] = useState('');
+  const [deleteModal, setDeleteModal] = useState({ open: false, material: null, check: null });
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteError, setDeleteError] = useState('');
   const [filters, setFilters] = useState({ search: '', city: '', warehouseId: '', category: '', stockStatus: '' });
 
   async function load() {
@@ -344,6 +351,49 @@ export default function Stock() {
     }
   }
 
+  async function openDeleteMaterial(material) {
+    setDetails(null);
+    setDeleteConfirmation('');
+    setDeleteError('');
+    setDeleteModal({ open: true, material, check: null });
+    setDeleteLoading(true);
+    try {
+      const response = await api.get(`/materials/${material.id}/deletion-check`);
+      setDeleteModal({ open: true, material, check: response.data.data });
+    } catch (err) {
+      setDeleteError(err.response?.data?.message || 'Não foi possível verificar se o material pode ser excluído.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
+  async function confirmDeleteMaterial() {
+    const material = deleteModal.material;
+    if (!material || deleteLoading) return;
+    if (deleteConfirmation.trim().toUpperCase() !== String(material.sku || '').trim().toUpperCase()) {
+      setDeleteError(`Digite exatamente o SKU ${material.sku} para confirmar.`);
+      return;
+    }
+
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      await api.delete(`/materials/${material.id}`, {
+        data: { confirmationSku: deleteConfirmation.trim() },
+      });
+      setDeleteModal({ open: false, material: null, check: null });
+      setDeleteConfirmation('');
+      setPageMessage(`Material ${material.name} (${material.sku}) excluído permanentemente.`);
+      await load();
+    } catch (err) {
+      const check = err.response?.data?.deletionCheck;
+      if (check) setDeleteModal((current) => ({ ...current, check }));
+      setDeleteError(err.response?.data?.message || 'Não foi possível excluir o material.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
   return (
     <div className="page-grid stock-page">
       <div className="toolbar">
@@ -353,6 +403,7 @@ export default function Stock() {
         </div>
         {canManageMaterials && <button onClick={openCreate}>➕ Novo material</button>}
       </div>
+      <FloatingAlert message={pageMessage} type="success" onClose={() => setPageMessage('')} />
 
       <section className="panel filters stock-filter-panel">
         <div className="subtoolbar"><div><h3>Filtros de materiais e estoque</h3><small>Os resultados respeitam somente as cidades e estoques vinculados à sua conta.</small></div><button type="button" className="ghost" onClick={clearFilters}>Limpar filtros</button></div>
@@ -420,7 +471,7 @@ export default function Stock() {
                   <td>{formatQuantity(m.minStock)}</td>
                   <td>{brl(m.unitCost)}</td>
                   <td><span className={`badge ${m.movementPolicy || 'livre'}`}>{m.movementPolicy || 'livre'}</span></td>
-                  <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>Detalhes</button>{canManageMaterials && <button className="ghost" onClick={() => openEdit(m)}>Editar</button>}</div></td>
+                  <td><div className="action-toolbar"><button className="info" onClick={() => setDetails(m)}>Detalhes</button>{canManageMaterials && <button className="ghost" onClick={() => openEdit(m)}>Editar</button>}{canDeleteMaterials && <button className="ghost danger-outline" onClick={() => openDeleteMaterial(m)}>Excluir</button>}</div></td>
                 </tr>
               ))}
               {filteredMaterials.length === 0 && <tr><td colSpan="10"><div className="empty-state">Nenhum material corresponde aos filtros selecionados.</div></td></tr>}
@@ -550,7 +601,44 @@ export default function Stock() {
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes do material ${details?.sku || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canManageMaterials && details && <button onClick={() => { openEdit(details); setDetails(null); }}>Editar material</button>}</>}>
+      <Modal
+        open={deleteModal.open}
+        title={`Excluir material: ${deleteModal.material?.sku || ''}`}
+        onClose={() => !deleteLoading && setDeleteModal({ open: false, material: null, check: null })}
+        footer={(
+          <>
+            <button className="ghost" disabled={deleteLoading} onClick={() => setDeleteModal({ open: false, material: null, check: null })}>Cancelar</button>
+            <button
+              className="danger-outline"
+              disabled={deleteLoading || !deleteModal.check?.canDelete || deleteConfirmation.trim().toUpperCase() !== String(deleteModal.material?.sku || '').trim().toUpperCase()}
+              onClick={confirmDeleteMaterial}
+            >
+              {deleteLoading ? 'Verificando...' : 'Excluir permanentemente'}
+            </button>
+          </>
+        )}
+      >
+        <div className="form-stack">
+          {deleteError && <div className="alert danger">{deleteError}</div>}
+          {deleteLoading && !deleteModal.check && <div className="empty-state">Verificando saldos, seriais e histórico do material...</div>}
+          {deleteModal.material && <div className="detail-row"><b>{deleteModal.material.name}</b><span>SKU: {deleteModal.material.sku}</span><small>A exclusão é permanente e não poderá ser desfeita.</small></div>}
+          {deleteModal.check && !deleteModal.check.canDelete && (
+            <div className="alert danger">
+              <strong>Este material não pode ser excluído.</strong>
+              <p>Ele possui saldo ou histórico. Edite o cadastro e desmarque “Material ativo” para impedir novas utilizações sem apagar registros antigos.</p>
+              <ul>{(deleteModal.check.blockers || []).map((blocker) => <li key={blocker.key}>{blocker.label}: {blocker.count}</li>)}</ul>
+            </div>
+          )}
+          {deleteModal.check?.canDelete && (
+            <>
+              <div className="viz-callout">O material não possui saldo, serial, entrada, movimentação, guia, OS, solicitação, ferramenta de técnico ou aprovação pendente. {deleteModal.check.removableZeroBalanceRows || 0} linha(s) de saldo zero serão removidas junto com o cadastro.</div>
+              <label>Digite o SKU para confirmar<input value={deleteConfirmation} onChange={(e) => setDeleteConfirmation(e.target.value)} placeholder={deleteModal.material?.sku || ''} autoComplete="off" /><small>Digite exatamente: <b>{deleteModal.material?.sku}</b></small></label>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <DetailsModal open={!!details} title={`Detalhes do material ${details?.sku || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canDeleteMaterials && details && <button className="ghost danger-outline" onClick={() => openDeleteMaterial(details)}>Excluir material</button>}{canManageMaterials && details && <button onClick={() => { openEdit(details); setDetails(null); }}>Editar material</button>}</>}>
         {details && <>
           <DetailGrid fields={[
             ['SKU', details.sku], ['Nome', details.name], ['Nome comercial', details.commercialName], ['Categoria', details.category], ['Unidade', details.unit], ['Exige serial', booleanValue(details.requiresSerial) ? 'Sim' : 'Não'],

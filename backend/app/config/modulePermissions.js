@@ -12,6 +12,7 @@ const MODULES = [
   { key: 'technicianReturns', label: 'Retorno caixa para estoque', group: 'Operação', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/retorno-caixa-estoque'] },
   { key: 'stock', label: 'Materiais/Estoque', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: ['/estoque'] },
   { key: 'materialManage', label: 'Cadastrar/editar materiais', group: 'Cadastros e estoque', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
+  { key: 'materialDelete', label: 'Excluir materiais sem saldo e sem histórico', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'materialAllWarehouses', label: 'Cadastrar material em todos os estoques', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'stockBatchEdit', label: 'Editar dados documentais das entradas', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
   { key: 'stockBatchQuantityEdit', label: 'Alterar quantidades de itens das entradas', group: 'Permissões especiais', roles: ['admin', 'supervisor', 'estoquista'], routes: [] },
@@ -40,7 +41,7 @@ const ASSIGNABLE_MODULE_KEYS = ALL_MODULE_KEYS.filter((key) => !ADMIN_ONLY_MODUL
 
 const DEFAULT_MODULES_BY_ROLE = {
   admin: ALL_MODULE_KEYS,
-  supervisor: ALL_MODULE_KEYS.filter((key) => !['users', 'materialAllWarehouses', 'stockBatchQuantityEdit', 'technicianEdit', 'technicianTransferLimitManage', 'materialRequestDelivery', 'serviceOrderEquipmentReplace'].includes(key)),
+  supervisor: ALL_MODULE_KEYS.filter((key) => !['users', 'materialDelete', 'materialAllWarehouses', 'stockBatchQuantityEdit', 'technicianEdit', 'technicianTransferLimitManage', 'materialRequestDelivery', 'serviceOrderEquipmentReplace'].includes(key)),
   estoquista: [
     'operationsCockpit',
     'approvals',

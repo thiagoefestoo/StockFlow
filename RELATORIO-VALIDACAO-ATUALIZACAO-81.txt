@@ -1,0 +1,90 @@
+ATUALIZAÇÃO 81 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+StockFlow-main(20260806-133833).zip
+
+ARQUIVOS ALTERADOS
+------------------
+backend/app/config/modulePermissions.js
+backend/app/controllers/batchController.js
+backend/app/controllers/materialController.js
+backend/app/routes/materialRoutes.js
+backend/scripts/test-update-81-stock-usability.js
+frontend/src/config/modulePermissions.js
+frontend/src/index.js
+frontend/src/pages/Receiving.jsx
+frontend/src/pages/Stock.jsx
+frontend/src/pages/Technicians.jsx
+frontend/src/styles.css
+frontend/src/utils/numberInputWheelGuard.js
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+1. Backend
+   Comando: npm run check --prefix backend
+   Resultado: sintaxe validada em 122 arquivos JavaScript.
+
+2. Teste específico
+   Comando:
+   node backend/scripts/test-update-81-stock-usability.js
+
+   Resultado:
+   - filtros paginados confirmados;
+   - bloqueio global do scroll confirmado;
+   - botão de adicionar ferramenta confirmado abaixo dos itens;
+   - exclusão segura e permissão específica confirmadas.
+
+3. Frontend
+   Todos os arquivos JavaScript e JSX de frontend/src foram analisados pelo
+   transpiler TypeScript com suporte a JSX.
+
+   Resultado: 63 de 63 arquivos válidos.
+
+4. Segurança da exclusão
+   O backend consulta:
+   - StockBalance;
+   - SerializedAsset;
+   - StockBatchItem;
+   - StockMovement;
+   - TransferItem;
+   - ServiceOrderMaterial;
+   - MaterialRequestItem;
+   - TechnicianTool;
+   - ServiceOrderEquipmentReplacement;
+   - ApprovalRequest pendente.
+
+   A exclusão é bloqueada quando qualquer vínculo é encontrado.
+
+5. Integridade
+   - confirmação pelo SKU;
+   - transação no banco;
+   - remoção apenas de linhas de saldo zero;
+   - auditoria administrativa da exclusão;
+   - nenhuma remoção automática;
+   - nenhuma migration.
+
+BUILD COMPLETA
+--------------
+A build completa não foi executada neste ambiente porque as dependências do
+frontend não estão instaladas na cópia analisada.
+
+O aplicador executará obrigatoriamente:
+
+npm run build --prefix frontend
+
+Caso a build, os testes ou o git diff --check falhem, os arquivos anteriores e
+a build anterior serão restaurados automaticamente.
+
+REDEPLOY
+--------
+A atualização altera backend e frontend.
+
+Ordem:
+1. Render;
+2. Vercel.
+
+RESULTADO
+---------
+PACOTE PREPARADO PARA APLICAÇÃO CONTROLADA.

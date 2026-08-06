@@ -2914,3 +2914,12 @@ input[readonly], textarea[readonly] {
 .stock-filter-summary { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
 @media (max-width: 1180px) { .stock-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .stock-filter-grid { grid-template-columns: 1fr; } }
+
+
+.tool-add-more-button {
+  width: 100%;
+  min-height: 46px;
+  margin: 0.75rem 0;
+  border-style: dashed;
+  font-weight: 700;
+}

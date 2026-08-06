@@ -16,6 +16,20 @@ import { useAuth } from '../contexts/AuthContext';
 function brl(value) { return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function splitSerials(value) { return String(value || '').split(/[\r\n\t,;]+/).map((s) => s.trim()).filter(Boolean); }
 function today() { return new Date().toISOString().slice(0, 10); }
+function emptyListFilters() {
+  return {
+    search: '',
+    warehouseId: '',
+    materialId: '',
+    dateFrom: '',
+    dateTo: '',
+    sourceCompany: '',
+    conferenceStatus: '',
+    fiscalDocumentType: '',
+    hasProof: '',
+  };
+}
+
 function emptyForm() {
   return {
     receiptNumber: '',
@@ -128,11 +142,17 @@ export default function Receiving() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
   const [loadingList, setLoadingList] = useState(false);
+  const [listFilters, setListFilters] = useState(emptyListFilters());
+  const [appliedListFilters, setAppliedListFilters] = useState(emptyListFilters());
 
-  async function load(targetPage = page, refreshReferences = false) {
+  async function load(targetPage = page, refreshReferences = false, activeFilters = appliedListFilters) {
     setLoadingList(true);
     try {
-      const requests = [api.get('/batches', { params: { page: targetPage, pageSize: 15 } })];
+      const params = { page: targetPage, pageSize: 15 };
+      Object.entries(activeFilters || {}).forEach(([key, value]) => {
+        if (String(value ?? '').trim()) params[key] = value;
+      });
+      const requests = [api.get('/batches', { params })];
       if (refreshReferences || !materials.length || !warehouses.length) {
         requests.push(api.get('/materials'), api.get('/warehouses').catch(() => ({ data: { data: [] } })));
       }
@@ -146,7 +166,7 @@ export default function Receiving() {
       setLoadingList(false);
     }
   }
-  useEffect(() => { load(1, true); }, []);
+  useEffect(() => { load(1, true, emptyListFilters()); }, []);
 
   const operationalBatches = useMemo(() => batches.filter((batch) => !batch.Warehouse?.isReverseLogistics), [batches]);
   const totals = useMemo(() => ({
@@ -278,7 +298,7 @@ export default function Receiving() {
       setEditForm(null);
       setEditModal(false);
       setMessage(response.data.message || 'Entrada atualizada com auditoria.');
-      await load(page, false);
+      await load(page, false, appliedListFilters);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Não foi possível atualizar a entrada.');
     } finally {
@@ -465,12 +485,32 @@ export default function Receiving() {
       setReviewOpen(false);
       setModal(false);
       setForm(emptyForm());
-      load(1, true);
+      load(1, true, appliedListFilters);
     } catch (error) {
       setMessage(error.response?.data?.message || error.message || 'Erro ao registrar entrada.');
     } finally {
       setSaving(false);
     }
+  }
+
+  function applyListFilters(event) {
+    event?.preventDefault?.();
+    setMessage('');
+    if (listFilters.dateFrom && listFilters.dateTo && listFilters.dateFrom > listFilters.dateTo) {
+      setMessage('A data inicial do filtro não pode ser posterior à data final.');
+      return;
+    }
+    const nextFilters = { ...listFilters };
+    setAppliedListFilters(nextFilters);
+    load(1, false, nextFilters);
+  }
+
+  function clearListFilters() {
+    const cleared = emptyListFilters();
+    setListFilters(cleared);
+    setAppliedListFilters(cleared);
+    setMessage('');
+    load(1, false, cleared);
   }
 
   const selectedWarehouse = warehouses.find((warehouse) => String(warehouse.id) === String(form.warehouseId));
@@ -515,8 +555,25 @@ export default function Receiving() {
   return <div className="page-grid erp-page">
     <section className="toolbar"><div><span className="eyebrow">Entrada fiscal e logística</span><h2>Entrada completa de material</h2><p>Registre materiais diretamente no estoque regional de destino, com documento fiscal, valor obrigatório e seriais conferidos.</p></div><button onClick={() => { setForm({ ...emptyForm(), warehouseId: warehouses[0]?.id || '' }); setModal(true); }}>Nova entrada</button></section>
     <FloatingAlert message={message} type={message.startsWith('Entrada registrada') || message.startsWith('Entrada atualizada') || message.includes('atualizada com auditoria') || message.includes('serial(is) colado(s)') ? 'success' : 'danger'} onClose={() => setMessage('')} />
-    <div className="kpi-grid small"><KpiCard label="Entradas nesta página" value={operationalBatches.length} /><KpiCard label="Itens nesta página" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor desta página" value={brl(totals.totalValue)} /><KpiCard label="Total de entradas" value={pagination.total || 0} /></div>
-    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens recebidos</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td><strong>Total: {formatQuantity(b.totalItems)}</strong><div className="receiving-items-summary">{(b.StockBatchItems || []).map((item) => <small key={item.id} style={{ display: 'block', marginTop: '0.2rem' }}>{entryItemLabel(item)}</small>)}</div></td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <span className="badge info">Anexo disponível</span> : '-'}</td><td><button className="info" disabled={detailsLoading} onClick={() => openBatchDetails(b)}>Detalhes</button></td></tr>)}</tbody></table></div><Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
+    <div className="kpi-grid small"><KpiCard label="Entradas nesta página" value={operationalBatches.length} /><KpiCard label="Itens nesta página" value={formatQuantity(totals.totalItems)} /><KpiCard label="Valor desta página" value={brl(totals.totalValue)} /><KpiCard label="Total conforme filtros" value={pagination.total || 0} /></div>
+
+    <form className="panel filters stock-filter-panel" onSubmit={applyListFilters}>
+      <div className="subtoolbar"><div><h3>Filtros das entradas</h3><small>Pesquise por documento, fornecedor, operador, material, período e estoque autorizado.</small></div><div className="action-toolbar"><button type="button" className="ghost" disabled={loadingList} onClick={clearListFilters}>Limpar filtros</button><button type="submit" disabled={loadingList}>{loadingList ? 'Filtrando...' : 'Aplicar filtros'}</button></div></div>
+      <div className="form-grid stock-filter-grid">
+        <label>Pesquisar<input value={listFilters.search} onChange={(e) => setListFilters({ ...listFilters, search: e.target.value })} placeholder="Entrada, NF, fornecedor, operador ou material" /></label>
+        <label>Estoque<select value={listFilters.warehouseId} onChange={(e) => setListFilters({ ...listFilters, warehouseId: e.target.value })}><option value="">Todos os autorizados</option>{warehouses.filter((warehouse) => !warehouse.isReverseLogistics).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} • {warehouse.city || warehouse.code}</option>)}</select></label>
+        <label>Material<select value={listFilters.materialId} onChange={(e) => setListFilters({ ...listFilters, materialId: e.target.value })}><option value="">Todos os materiais</option>{[...materials].sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'pt-BR')).map((material) => <option key={material.id} value={material.id}>{material.name} • {material.sku}</option>)}</select></label>
+        <label>Origem/fornecedor<input value={listFilters.sourceCompany} onChange={(e) => setListFilters({ ...listFilters, sourceCompany: e.target.value })} placeholder="Ex.: Companhia Telecom" /></label>
+        <label>Data inicial<input type="date" value={listFilters.dateFrom} onChange={(e) => setListFilters({ ...listFilters, dateFrom: e.target.value })} /></label>
+        <label>Data final<input type="date" value={listFilters.dateTo} onChange={(e) => setListFilters({ ...listFilters, dateTo: e.target.value })} /></label>
+        <label>Conferência<select value={listFilters.conferenceStatus} onChange={(e) => setListFilters({ ...listFilters, conferenceStatus: e.target.value })}><option value="">Todas</option><option value="conferido">Conferido</option><option value="pendente_conferencia">Pendente</option><option value="divergente">Divergente</option></select></label>
+        <label>Tipo de documento<select value={listFilters.fiscalDocumentType} onChange={(e) => setListFilters({ ...listFilters, fiscalDocumentType: e.target.value })}><option value="">Todos</option><option value="nota_fiscal">Nota fiscal</option><option value="termo_entrega">Termo de entrega</option><option value="romaneio">Romaneio</option><option value="recibo">Recibo</option><option value="outro">Outro</option></select></label>
+        <label>Comprovante<select value={listFilters.hasProof} onChange={(e) => setListFilters({ ...listFilters, hasProof: e.target.value })}><option value="">Todos</option><option value="yes">Com anexo</option><option value="no">Sem anexo</option></select></label>
+      </div>
+      <div className="stock-filter-summary"><strong>{pagination.total || 0}</strong> entrada(s) encontrada(s) • página <strong>{page}</strong> de <strong>{pagination.totalPages || 1}</strong></div>
+    </form>
+
+    <section className="panel"><div className="table-wrap"><table><thead><tr><th>Documento</th><th>Data</th><th>Estoque/região</th><th>Origem</th><th>Itens recebidos</th><th>Valor</th><th>Comprovante</th><th>Opções</th></tr></thead><tbody>{batches.map((b) => <tr key={b.id} className={b.Warehouse?.isReverseLogistics ? 'reverse-logistics-row' : ''}><td><strong>{b.receiptNumber}</strong><br /><small>{b.fiscalDocumentNumber || b.invoiceAccessKey || '-'}</small></td><td>{b.receivedAt}</td><td>{b.Warehouse?.name || b.warehouseLocation || '-'}{b.Warehouse?.isReverseLogistics && <><br /><span className="reverse-logistics-badge">Logística reversa</span></>}</td><td>{b.sourceCompany}</td><td><strong>Total: {formatQuantity(b.totalItems)}</strong><div className="receiving-items-summary">{(b.StockBatchItems || []).map((item) => <small key={item.id} style={{ display: 'block', marginTop: '0.2rem' }}>{entryItemLabel(item)}</small>)}</div></td><td>{brl(b.totalValue)}</td><td>{b.proofAttachmentName ? <span className="badge info">Anexo disponível</span> : '-'}</td><td><button className="info" disabled={detailsLoading} onClick={() => openBatchDetails(b)}>Detalhes</button></td></tr>)}{!loadingList && batches.length === 0 && <tr><td colSpan="8"><div className="empty-state">Nenhuma entrada corresponde aos filtros aplicados.</div></td></tr>}</tbody></table></div><Pagination {...pagination} page={page} loading={loadingList} onPageChange={(targetPage) => load(targetPage, false, appliedListFilters)} /></section>
 
     <Modal open={modal} title="Nova entrada com comprovante" onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>Revisar entrada</button></>}>
       <div className="form-stack receiving-form">

@@ -727,16 +727,8 @@ export default function Technicians() {
               <div className="subtoolbar">
                 <div>
                   <h4>Ferramentas da transferência</h4>
-                  <small>Adicione uma linha para cada tipo de ferramenta.</small>
+                  <small>Adicione uma linha para cada tipo de ferramenta. O botão para incluir outra linha fica depois do último item.</small>
                 </div>
-                <button
-                  type="button"
-                  className="ghost"
-                  disabled={toolForm.items.length >= availableTools.length}
-                  onClick={addToolTransferItem}
-                >
-                  Adicionar outra ferramenta
-                </button>
               </div>
 
               {(toolForm.items || []).map((item, index) => {
@@ -810,6 +802,15 @@ export default function Technicians() {
                   </section>
                 );
               })}
+
+              <button
+                type="button"
+                className="ghost tool-add-more-button"
+                disabled={toolForm.items.length >= availableTools.length}
+                onClick={addToolTransferItem}
+              >
+                ＋ Adicionar mais uma ferramenta
+              </button>
 
               <label>
                 Observações gerais

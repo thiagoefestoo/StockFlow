@@ -16,7 +16,106 @@ const { hasModuleAccess } = require('../config/modulePermissions');
 
 exports.list = asyncHandler(async (req, res) => {
   const reverseIds = await reverseWarehouseIds();
-  const where = { [Op.and]: [stockWhereForUser(req.user, req.query.warehouseId), warehouseOutsideReverse(reverseIds)] };
+  const filters = [
+    stockWhereForUser(req.user, req.query.warehouseId),
+    warehouseOutsideReverse(reverseIds),
+  ];
+
+  const dateFrom = String(req.query.dateFrom || '').trim();
+  const dateTo = String(req.query.dateTo || '').trim();
+  const sourceCompany = String(req.query.sourceCompany || '').trim();
+  const conferenceStatus = String(req.query.conferenceStatus || '').trim();
+  const fiscalDocumentType = String(req.query.fiscalDocumentType || '').trim();
+  const hasProof = String(req.query.hasProof || '').trim().toLowerCase();
+  const searchText = String(req.query.search || '').trim();
+  const requestedMaterialId = Number(req.query.materialId || 0);
+
+  if (dateFrom || dateTo) {
+    const receivedAt = {};
+    if (dateFrom) receivedAt[Op.gte] = dateFrom;
+    if (dateTo) receivedAt[Op.lte] = dateTo;
+    filters.push({ receivedAt });
+  }
+  if (sourceCompany) filters.push({ sourceCompany: { [Op.iLike]: `%${sourceCompany}%` } });
+  if (conferenceStatus) filters.push({ conferenceStatus });
+  if (fiscalDocumentType) filters.push({ fiscalDocumentType });
+  if (hasProof === 'yes') {
+    filters.push({
+      [Op.and]: [
+        { proofAttachmentName: { [Op.ne]: null } },
+        { proofAttachmentName: { [Op.ne]: '' } },
+      ],
+    });
+  }
+  if (hasProof === 'no') {
+    filters.push({
+      [Op.or]: [
+        { proofAttachmentName: null },
+        { proofAttachmentName: '' },
+      ],
+    });
+  }
+
+  if (requestedMaterialId > 0) {
+    const rows = await StockBatchItem.findAll({
+      where: { materialId: requestedMaterialId },
+      attributes: ['batchId'],
+      raw: true,
+    });
+    const batchIds = Array.from(new Set(rows.map((row) => Number(row.batchId)).filter(Boolean)));
+    filters.push({ id: { [Op.in]: batchIds.length ? batchIds : [-1] } });
+  }
+
+  if (searchText) {
+    const search = `%${searchText}%`;
+    const [matchingMaterials, matchingUsers] = await Promise.all([
+      Material.findAll({
+        where: {
+          [Op.or]: [
+            { sku: { [Op.iLike]: search } },
+            { name: { [Op.iLike]: search } },
+            { commercialName: { [Op.iLike]: search } },
+          ],
+        },
+        attributes: ['id'],
+        raw: true,
+      }),
+      User.findAll({
+        where: {
+          [Op.or]: [
+            { name: { [Op.iLike]: search } },
+            { email: { [Op.iLike]: search } },
+          ],
+        },
+        attributes: ['id'],
+        raw: true,
+      }),
+    ]);
+    const matchingMaterialIds = matchingMaterials.map((material) => Number(material.id)).filter(Boolean);
+    const matchingUserIds = matchingUsers.map((user) => Number(user.id)).filter(Boolean);
+    const matchingBatchRows = matchingMaterialIds.length
+      ? await StockBatchItem.findAll({
+        where: { materialId: { [Op.in]: matchingMaterialIds } },
+        attributes: ['batchId'],
+        raw: true,
+      })
+      : [];
+    const matchingBatchIds = Array.from(new Set(matchingBatchRows.map((row) => Number(row.batchId)).filter(Boolean)));
+    const searchFilters = [
+      { receiptNumber: { [Op.iLike]: search } },
+      { sourceCompany: { [Op.iLike]: search } },
+      { fiscalDocumentNumber: { [Op.iLike]: search } },
+      { invoiceAccessKey: { [Op.iLike]: search } },
+      { fiscalIssuer: { [Op.iLike]: search } },
+      { receivedByName: { [Op.iLike]: search } },
+      { notes: { [Op.iLike]: search } },
+    ];
+    if (matchingBatchIds.length) searchFilters.push({ id: { [Op.in]: matchingBatchIds } });
+    if (matchingUserIds.length) searchFilters.push({ createdById: { [Op.in]: matchingUserIds } });
+    filters.push({ [Op.or]: searchFilters });
+  }
+
+  const where = { [Op.and]: filters };
   const pagination = paginationFromQuery(req.query);
   const limit = pagination.enabled ? pagination.limit : Math.min(Math.max(Number(req.query.limit || 150), 1), 300);
   const [batches, total] = await Promise.all([

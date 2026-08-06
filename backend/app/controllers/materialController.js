@@ -1,6 +1,19 @@
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
-const { Material, StockBalance, SerializedAsset, StockMovement, Warehouse } = require('../models');
+const {
+  Material,
+  StockBalance,
+  SerializedAsset,
+  StockMovement,
+  StockBatchItem,
+  TransferItem,
+  ServiceOrderMaterial,
+  MaterialRequestItem,
+  TechnicianTool,
+  ApprovalRequest,
+  ServiceOrderEquipmentReplacement,
+  Warehouse,
+} = require('../models');
 const { crudController } = require('./crudHelpers');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, created, fail } = require('../utils/response');
@@ -347,4 +360,159 @@ exports.update = asyncHandler(async (req, res) => {
   });
 
   return ok(res, material, 'Material atualizado.');
+});
+
+function payloadReferencesMaterial(value, materialId, key = '') {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value)) return value.some((item) => payloadReferencesMaterial(item, materialId, key));
+  if (typeof value !== 'object') {
+    return /materialid$/i.test(String(key)) && Number(value) === Number(materialId);
+  }
+  return Object.entries(value).some(([childKey, childValue]) => (
+    payloadReferencesMaterial(childValue, materialId, childKey)
+  ));
+}
+
+async function materialDeletionCheck(materialId, transaction = null) {
+  const queryOptions = transaction ? { transaction } : {};
+  const [
+    nonZeroBalances,
+    zeroBalances,
+    serializedAssets,
+    stockBatchItems,
+    stockMovements,
+    transferItems,
+    serviceOrderMaterials,
+    materialRequestItems,
+    technicianTools,
+    equipmentReplacements,
+    pendingApprovals,
+  ] = await Promise.all([
+    StockBalance.count({ where: { materialId, quantity: { [Op.ne]: 0 } }, ...queryOptions }),
+    StockBalance.count({ where: { materialId, quantity: 0 }, ...queryOptions }),
+    SerializedAsset.count({ where: { materialId }, ...queryOptions }),
+    StockBatchItem.count({ where: { materialId }, ...queryOptions }),
+    StockMovement.count({ where: { materialId }, ...queryOptions }),
+    TransferItem.count({ where: { materialId }, ...queryOptions }),
+    ServiceOrderMaterial.count({ where: { materialId }, ...queryOptions }),
+    MaterialRequestItem.count({ where: { materialId }, ...queryOptions }),
+    TechnicianTool.count({ where: { materialId }, ...queryOptions }),
+    ServiceOrderEquipmentReplacement.count({
+      where: {
+        [Op.or]: [
+          { oldMaterialId: materialId },
+          { newMaterialId: materialId },
+        ],
+      },
+      ...queryOptions,
+    }),
+    ApprovalRequest.findAll({
+      where: { status: 'pendente' },
+      attributes: ['id', 'workflowCode', 'payload'],
+      ...queryOptions,
+    }),
+  ]);
+
+  const pendingApprovalCount = pendingApprovals.filter((approval) => (
+    payloadReferencesMaterial(approval.payload, materialId)
+  )).length;
+
+  const dependencyRows = [
+    ['nonZeroBalances', 'Saldo atual em estoque ou técnico', nonZeroBalances],
+    ['serializedAssets', 'Equipamentos/seriais vinculados', serializedAssets],
+    ['stockBatchItems', 'Entradas de estoque', stockBatchItems],
+    ['stockMovements', 'Histórico de movimentações', stockMovements],
+    ['transferItems', 'Guias e transferências', transferItems],
+    ['serviceOrderMaterials', 'Ordens de serviço', serviceOrderMaterials],
+    ['materialRequestItems', 'Solicitações de material', materialRequestItems],
+    ['technicianTools', 'Fichas de ferramentas de técnicos', technicianTools],
+    ['equipmentReplacements', 'Substituições de equipamentos em OS', equipmentReplacements],
+    ['pendingApprovals', 'Aprovações pendentes', pendingApprovalCount],
+  ];
+
+  const blockers = dependencyRows
+    .filter(([, , count]) => Number(count || 0) > 0)
+    .map(([key, label, count]) => ({ key, label, count: Number(count) }));
+
+  return {
+    canDelete: blockers.length === 0,
+    blockers,
+    removableZeroBalanceRows: Number(zeroBalances || 0),
+  };
+}
+
+exports.deletionCheck = asyncHandler(async (req, res) => {
+  const material = await Material.findByPk(req.params.id, {
+    attributes: ['id', 'sku', 'name', 'active', 'requiresSerial', 'createdAt'],
+  });
+  if (!material) return fail(res, 404, 'Material não encontrado.');
+
+  const check = await materialDeletionCheck(material.id);
+  return ok(res, { material, ...check });
+});
+
+exports.remove = asyncHandler(async (req, res) => {
+  const confirmationSku = String(req.body?.confirmationSku || '').trim().toUpperCase();
+
+  try {
+    const result = await sequelize.transaction(async (transaction) => {
+      const material = await Material.findByPk(req.params.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!material) {
+        const error = new Error('Material não encontrado.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (!confirmationSku || confirmationSku !== String(material.sku || '').trim().toUpperCase()) {
+        const error = new Error(`Digite exatamente o SKU ${material.sku} para confirmar a exclusão.`);
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const check = await materialDeletionCheck(material.id, transaction);
+      if (!check.canDelete) {
+        const error = new Error('Este material não pode ser excluído porque possui saldo, histórico ou vínculo operacional. Edite o cadastro e marque-o como inativo.');
+        error.statusCode = 409;
+        error.extra = { deletionCheck: check };
+        throw error;
+      }
+
+      const before = material.toJSON();
+      await StockBalance.destroy({
+        where: { materialId: material.id, quantity: 0 },
+        transaction,
+      });
+      await material.destroy({ transaction });
+
+      await writeAudit({
+        req,
+        action: 'delete',
+        entity: 'Material',
+        entityId: material.id,
+        message: `Material ${material.name} (${material.sku}) excluído permanentemente por não possuir saldo nem histórico.`,
+        beforeData: before,
+        afterData: { deleted: true, removedZeroBalanceRows: check.removableZeroBalanceRows },
+        transaction,
+      });
+
+      return {
+        id: material.id,
+        sku: material.sku,
+        name: material.name,
+        removedZeroBalanceRows: check.removableZeroBalanceRows,
+      };
+    });
+
+    return ok(res, result, 'Material excluído permanentemente.');
+  } catch (error) {
+    return fail(
+      res,
+      error.statusCode || 500,
+      error.message || 'Não foi possível excluir o material.',
+      error.extra || {},
+    );
+  }
 });

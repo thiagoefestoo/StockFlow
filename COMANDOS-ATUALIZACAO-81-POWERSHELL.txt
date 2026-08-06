@@ -1,0 +1,127 @@
+﻿ATUALIZAÇÃO 81 — COMANDOS POWERSHELL
+=======================================
+
+ARQUIVOS NA PASTA DOWNLOADS
+---------------------------
+atualizacao-81-usabilidade-entrada-ferramentas-exclusao-material.zip
+APLICAR-ATUALIZACAO-81.ps1
+
+1. APLICAR E VALIDAR
+--------------------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-81-usabilidade-entrada-ferramentas-exclusao-material.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-81.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. ENVIAR AO GITHUB
+-------------------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "backend/app/config/modulePermissions.js",
+    "backend/app/controllers/batchController.js",
+    "backend/app/controllers/materialController.js",
+    "backend/app/routes/materialRoutes.js",
+    "backend/scripts/test-update-81-stock-usability.js",
+    "frontend/src/config/modulePermissions.js",
+    "frontend/src/index.js",
+    "frontend/src/pages/Receiving.jsx",
+    "frontend/src/pages/Stock.jsx",
+    "frontend/src/pages/Technicians.jsx",
+    "frontend/src/styles.css",
+    "frontend/src/utils/numberInputWheelGuard.js",
+    "ATUALIZACAO-81-USABILIDADE-ENTRADA-FERRAMENTAS-EXCLUSAO-MATERIAL.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-81.txt",
+    "COMANDOS-ATUALIZACAO-81-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-81.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+
+git commit -m "Melhora entrada ferramentas e exclusao segura de materiais"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização altera backend e frontend.
+
+1. concluir o push no GitHub;
+2. fazer redeploy do backend no Render;
+3. aguardar a API ficar saudável;
+4. fazer redeploy do frontend na Vercel;
+5. sair e entrar novamente;
+6. pressionar Ctrl+F5.
+
+Não existe migration.
+
+4. TESTE CONTROLADO
+-------------------
+
+Entrada:
+1. abrir Entrada de Estoque;
+2. pesquisar por material;
+3. filtrar por estoque e período;
+4. mudar de página;
+5. confirmar que os filtros permanecem;
+6. limpar os filtros.
+
+Campos numéricos:
+1. clicar no campo quantidade ou valor;
+2. girar a roda do mouse;
+3. confirmar que o número não muda.
+
+Ferramentas:
+1. abrir a ficha de um técnico;
+2. clicar em Adicionar ferramentas;
+3. preencher o primeiro item;
+4. confirmar que o botão de adicionar está abaixo do último item;
+5. acrescentar mais ferramentas;
+6. revisar a guia.
+
+Exclusão:
+1. abrir Materiais/Estoque;
+2. testar um material novo e nunca utilizado;
+3. clicar em Excluir;
+4. digitar o SKU;
+5. confirmar a exclusão;
+6. testar um material com histórico;
+7. confirmar que a exclusão é bloqueada e os vínculos são exibidos.
