@@ -1,0 +1,88 @@
+﻿ATUALIZAÇÃO 80 — COMANDOS POWERSHELL
+=======================================
+
+1. APLICAR
+----------
+
+$repo = "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+$pacote = "$HOME\Downloads\atualizacao-80-exibe-todos-itens-transferencia-estoques.zip"
+$aplicador = "$HOME\Downloads\APLICAR-ATUALIZACAO-80.ps1"
+
+if (!(Test-Path -LiteralPath $repo -PathType Container)) {
+    throw "Projeto não encontrado em: $repo"
+}
+
+if (!(Test-Path -LiteralPath $pacote -PathType Leaf)) {
+    throw "Pacote não encontrado em: $pacote"
+}
+
+if (!(Test-Path -LiteralPath $aplicador -PathType Leaf)) {
+    throw "Aplicador não encontrado em: $aplicador"
+}
+
+Unblock-File -LiteralPath $aplicador
+
+Set-ExecutionPolicy `
+    -Scope Process `
+    -ExecutionPolicy Bypass `
+    -Force
+
+& $aplicador `
+    -Repo $repo `
+    -Zip $pacote
+
+2. GITHUB
+---------
+
+Set-Location "C:\Users\TH\Documents\GitHub\estoque-superinfra"
+
+$arquivos = @(
+    "frontend/src/pages/Warehouses.jsx",
+    "backend/app/services/warehouseTransferService.js",
+    "backend/scripts/test-warehouse-transfer-all-stock-items.js",
+    "ATUALIZACAO-80-TODOS-ITENS-TRANSFERENCIA-ESTOQUES.md",
+    "RELATORIO-VALIDACAO-ATUALIZACAO-80.txt",
+    "COMANDOS-ATUALIZACAO-80-POWERSHELL.txt",
+    "APLICAR-ATUALIZACAO-80.ps1"
+)
+
+git add -- $arquivos
+git diff --cached --check
+
+if ($LASTEXITCODE -ne 0) {
+    throw "O Git encontrou problemas. Não faça o commit."
+}
+
+git status --short
+git commit -m "Exibe todos os itens com saldo na transferencia entre estoques"
+
+$branch = (git branch --show-current).Trim()
+
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    throw "Não foi possível identificar a branch atual."
+}
+
+git push origin $branch
+
+3. REDEPLOY
+-----------
+
+A atualização altera backend e frontend:
+
+1. redeploy do backend no Render;
+2. aguardar a API ficar saudável;
+3. redeploy do frontend na Vercel;
+4. sair e entrar novamente;
+5. pressionar Ctrl+F5.
+
+4. TESTE
+--------
+
+1. abrir Estoques regionais;
+2. abrir Transferir entre estoques;
+3. selecionar o estoque que possui PARAFUSADEIRA IMPACTO BOSCH;
+4. clicar em Adicionar item;
+5. localizar o material na lista em ordem alfabética;
+6. conferir o saldo exibido;
+7. revisar a transferência;
+8. concluir uma operação controlada.

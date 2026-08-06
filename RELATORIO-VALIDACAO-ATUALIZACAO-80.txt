@@ -1,0 +1,67 @@
+ATUALIZAÇÃO 80 — RELATÓRIO DE VALIDAÇÃO
+=========================================
+
+BASE ANALISADA
+--------------
+StockFlow-main(20260806-124735).zip
+
+CAUSA
+-----
+A página Warehouses.jsx enviava `activeOnly: true` para `/materials`.
+
+O backend devolvia apenas materiais ativos. Um cadastro inativo que ainda
+possuísse saldo físico, como a PARAFUSADEIRA IMPACTO BOSCH, era omitido da
+seleção de transferência.
+
+ARQUIVOS ALTERADOS
+------------------
+frontend/src/pages/Warehouses.jsx
+backend/app/services/warehouseTransferService.js
+backend/scripts/test-warehouse-transfer-all-stock-items.js
+
+CORREÇÕES
+---------
+- removido o filtro activeOnly da consulta da origem;
+- mantido availableOnly para não exibir saldo zero;
+- materiais ordenados alfabeticamente;
+- item inativo identificado visualmente;
+- realocação de saldo inativo permitida entre estoques;
+- validações de saldo e serial preservadas.
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+Backend:
+> stockflow-backend@1.0.0 check
+> node scripts/check-syntax.js
+
+Sintaxe validada em 121 arquivos JS.
+
+Teste específico:
+Teste aprovado: todos os itens com saldo positivo são carregados para transferência.
+Materiais inativos com saldo podem ser realocados entre estoques.
+Validações de saldo, serial, origem e material permanecem ativas.
+
+BUILD LOCAL
+-----------
+O aplicador executará obrigatoriamente:
+
+npm run build --prefix frontend
+
+A atualização somente será mantida após:
+- validação do backend;
+- teste específico;
+- build completa do frontend;
+- git diff --check.
+
+Em caso de falha, os arquivos e a build anteriores serão restaurados.
+
+BANCO
+-----
+- nenhuma migration;
+- nenhum saldo alterado;
+- nenhum cadastro reativado;
+- nenhum item antigo modificado automaticamente.
+
+RESULTADO
+---------
+PACOTE PREPARADO PARA APLICAÇÃO CONTROLADA.

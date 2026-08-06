@@ -115,10 +115,9 @@ async function buildWarehouseTransferPlan(input = {}, options = {}) {
       throw new Error('Material não encontrado.');
     }
 
-    if (material.active === false) {
-      throw new Error(`O material ${material.name} está inativo.`);
-    }
-
+    // Materiais inativos podem conservar saldo físico em um estoque.
+    // A transferência entre estoques apenas realoca esse saldo existente e,
+    // por isso, não deve deixar o item preso na unidade de origem.
     const snapshotUnitCost = isPrepared && raw.unitCost !== undefined
       ? raw.unitCost
       : material.unitCost;

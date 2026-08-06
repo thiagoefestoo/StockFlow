@@ -310,7 +310,6 @@ export default function Warehouses() {
           params: {
             warehouseId: fromWarehouseId,
             availableOnly: true,
-            activeOnly: true,
           },
         }),
         api.get('/stock/assets', {
@@ -323,7 +322,15 @@ export default function Warehouses() {
         }),
       ]);
 
-      setMaterials(materialResponse.data.data || []);
+      setMaterials(
+        [...(materialResponse.data.data || [])].sort((left, right) => (
+          String(left.name || left.sku || '').localeCompare(
+            String(right.name || right.sku || ''),
+            'pt-BR',
+            { sensitivity: 'base', numeric: true },
+          )
+        )),
+      );
       setAvailableAssets(
         sortRecentFirst(
           assetResponse.data.data || [],
@@ -908,9 +915,9 @@ export default function Warehouses() {
           <label>Buscar serial<input value={assetSearch} disabled={!transferForm.fromWarehouseId || transferInventoryLoading} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Serial, MAC, modelo..." /></label>
         </div>
         <label>Observação<textarea rows="2" value={transferForm.notes} onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })} placeholder="Motivo da transferência, responsável, rota..." /></label>
-        <div className="subtoolbar"><h4>Itens transferidos</h4><button type="button" className="ghost" disabled={!transferForm.fromWarehouseId || transferInventoryLoading || materials.length === 0} onClick={addTransferItem}>Adicionar item</button></div>
+        <div className="subtoolbar"><div><h4>Itens transferidos</h4><small>São exibidos todos os materiais com saldo físico positivo no estoque selecionado, inclusive cadastros inativos.</small></div><button type="button" className="ghost" disabled={!transferForm.fromWarehouseId || transferInventoryLoading || materials.length === 0} onClick={addTransferItem}>Adicionar item</button></div>
         {transferInventoryLoading && <div className="empty-state">Carregando materiais e seriais do estoque de origem...</div>}
-        {!transferInventoryLoading && transferForm.fromWarehouseId && materials.length === 0 && <div className="empty-state">O estoque de origem não possui materiais disponíveis para transferência.</div>}
+        {!transferInventoryLoading && transferForm.fromWarehouseId && materials.length === 0 && <div className="empty-state">O estoque de origem não possui materiais ou equipamentos com saldo físico positivo para transferência.</div>}
         {!transferInventoryLoading && transferForm.items.length === 0 && materials.length > 0 && <div className="empty-state">Adicione os materiais que serão enviados para o estoque de destino.</div>}
         {transferForm.items.map((item, index) => {
           const material = materials.find((m) => Number(m.id) === Number(item.materialId));
@@ -925,7 +932,7 @@ export default function Warehouses() {
           return <div className="item-card" key={index}>
             <div className="item-head"><strong>Item {index + 1}</strong><button type="button" className="ghost danger-outline" onClick={() => removeTransferItem(index)}>Remover</button></div>
             <div className="form-grid">
-              <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {formatQuantity(m.mainStock, m.unit)}</option>)}</select></label>
+              <label>Material<select value={item.materialId} onChange={(e) => updateTransferItem(index, { materialId: e.target.value, serialNumbers: [], quantity: 1 })}><option value="">Selecione o material</option>{availableMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} • {m.category} • saldo {formatQuantity(m.mainStock, m.unit)}{m.active === false ? ' • INATIVO NO CATÁLOGO' : ''}</option>)}</select></label>
               {!material?.requiresSerial && <label>Quantidade<input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateTransferItem(index, { quantity: e.target.value })} /></label>}
             </div>
             {material?.requiresSerial && <div className="serial-picker">
