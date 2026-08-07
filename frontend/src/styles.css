@@ -1790,6 +1790,20 @@ input[readonly], textarea[readonly] {
   min-width: min(100%, 280px);
   flex: 1;
 }
+.serial-select-all-ready {
+  background: #166534 !important;
+  border-color: #166534 !important;
+  color: #ffffff !important;
+  font-weight: 800;
+}
+.serial-select-all-ready:hover {
+  background: #14532d !important;
+  border-color: #14532d !important;
+}
+.serial-select-all-ready:focus-visible {
+  outline: 3px solid rgba(22, 101, 52, .28);
+  outline-offset: 2px;
+}
 .bulk-serial-search-card {
   margin: 12px 0;
   padding: 14px;
@@ -2884,6 +2898,19 @@ input[readonly], textarea[readonly] {
   background: rgba(245, 231, 211, 0.22);
 }
 
+
+.system-version-stamp {
+  justify-self: end;
+  margin-top: 2px;
+  padding: 6px 10px;
+  border: 1px solid rgba(100, 116, 139, .22);
+  border-radius: 999px;
+  background: rgba(248, 250, 252, .88);
+  color: #64748b;
+  font-size: .76rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
 
 .city-selector {
   display: grid;

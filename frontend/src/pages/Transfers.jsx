@@ -882,7 +882,9 @@ export default function Transfers() {
                         </div>
                       </div>
                       <div className="serial-actions-row">
-                        <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, serialAssets.map((asset) => asset.serialNumber))}>Selecionar tudo filtrado</button>
+                        {parseSerialTerms(item.assetSearchApplied || '').length > 0 && serialAssets.length > 0 && (
+                          <button type="button" className="serial-select-all-ready" onClick={() => replaceSerialsForItem(i, serialAssets.map((asset) => asset.serialNumber))}>✅ Selecionar tudo filtrado</button>
+                        )}
                         <button type="button" className="ghost" onClick={() => replaceSerialsForItem(i, [])}>Limpar seleção</button>
                       </div>
                     </div>

@@ -1,0 +1,35 @@
+ATUALIZAÇÃO 82 — RELATÓRIO DE VALIDAÇÃO
+Data: 07/08/2026
+
+ESCOPO ALTERADO
+- frontend/src/pages/Transfers.jsx
+- frontend/src/pages/TechnicianReturns.jsx
+- frontend/src/pages/TechnicianBoxControl.jsx
+- frontend/src/pages/OperationsCockpit.jsx
+- frontend/src/styles.css
+- ATUALIZACAO-82-SELECAO-FILTRADA-TECNICO-VERSAO.md (documentação nova)
+
+VALIDAÇÕES REALIZADAS
+[OK] JSX de Transfers.jsx validado por transpilação sintática.
+[OK] JSX de TechnicianReturns.jsx validado por transpilação sintática.
+[OK] JSX de TechnicianBoxControl.jsx validado por transpilação sintática.
+[OK] JSX de OperationsCockpit.jsx validado por transpilação sintática.
+[OK] O botão "Selecionar tudo filtrado" em Transferências exige filtro aplicado não vazio E resultado > 0.
+[OK] O botão "Selecionar tudo filtrado" em Retorno exige filtro aplicado não vazio E resultado > 0.
+[OK] Pesquisa sem resultado não exibe seleção em massa.
+[OK] O botão de seleção em massa usa verde escuro, texto branco e foco visível.
+[OK] Central da Caixa reaproveita exatamente as classes de técnico obrigatório já usadas na Caixa do Técnico.
+[OK] Cockpit exibe "StockFlow • Versão 82" no rodapé/canto inferior direito do conteúdo.
+[OK] Comparação com o ZIP original confirmou que nenhum arquivo de backend/banco foi alterado.
+
+BUILD COMPLETO
+O build completo não pôde ser executado neste ambiente porque o package-lock referencia um pacote (yocto-queue 0.1.0) indisponível no espelho npm do ambiente de validação. Essa falha ocorreu na instalação das dependências, antes de qualquer compilação do código. As alterações JSX foram validadas sintaticamente por transpilação independente.
+
+RISCO OPERACIONAL
+- Não altera banco de dados.
+- Não altera migrations.
+- Não altera backend.
+- Não altera contratos de API.
+- Não altera cálculo de saldo.
+- Não altera regras de movimentação.
+- Seleção individual continua funcionando normalmente.

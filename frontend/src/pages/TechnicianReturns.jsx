@@ -332,7 +332,7 @@ export default function TechnicianReturns() {
                         <button type="button" className="ghost" onClick={() => updateItem(index, { assetSearch: '', assetSearchApplied: '' })}>Limpar pesquisa</button>
                       </div>
                     </div>
-                    <div className="serial-actions-row"><button type="button" className="ghost" onClick={() => selectVisibleSerials(index, visibleAssets)}>Selecionar tudo filtrado</button><button type="button" className="ghost" onClick={() => replaceSerialsForItem(index, [])}>Limpar seleção</button></div>
+                    <div className="serial-actions-row">{parseSerialTerms(item.assetSearchApplied || '').length > 0 && visibleAssets.length > 0 && <button type="button" className="serial-select-all-ready" onClick={() => selectVisibleSerials(index, visibleAssets)}>✅ Selecionar tudo filtrado</button>}<button type="button" className="ghost" onClick={() => replaceSerialsForItem(index, [])}>Limpar seleção</button></div>
                   </div>
                   {(item.serialNumbers || []).length === 0 && <small>Sem serial selecionado, este item será registrado com quantidade 0 e não movimentará o estoque.</small>}
                   <div className="serial-grid">

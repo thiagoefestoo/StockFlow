@@ -348,7 +348,7 @@ export default function TechnicianBoxControl() {
         <button className="ghost" onClick={() => loadBox(selectedTech)}>🔄 Atualizar agora</button>
       </section>
 
-      <section className="panel box-selector-panel">
+      <section className={`panel box-selector-panel technician-operator-panel ${selectedTech ? 'technician-selected' : 'technician-required'}`}>
         <div className="form-grid">
           <label>👷 Técnico / colaborador
             <select value={selectedTech} onChange={(e) => { setSelectedTech(e.target.value); setMessage(''); }}>
