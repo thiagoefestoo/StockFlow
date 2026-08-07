@@ -93,6 +93,31 @@ const api = axios.create({
   timeout: 30000,
 });
 
+
+// Eventos leves usados apenas para feedback visual durante a abertura de páginas.
+// Eles não fazem novas requisições e não alteram o tráfego do backend/Neon.
+const API_REQUEST_START_EVENT = 'superinfra:api-request-start';
+const API_REQUEST_END_EVENT = 'superinfra:api-request-end';
+const SILENT_ACTIVITY_PATHS = new Set(['/auth/me', '/notifications', '/operations/pending-menu']);
+let apiRequestSequence = 0;
+
+function startRequestActivity(config) {
+  if (typeof window === 'undefined') return;
+  const requestPath = String(config?.url || '').split('?')[0];
+  if (SILENT_ACTIVITY_PATHS.has(requestPath)) return;
+  const id = `req-${Date.now()}-${++apiRequestSequence}`;
+  config.__superinfraRequestActivityId = id;
+  window.dispatchEvent(new CustomEvent(API_REQUEST_START_EVENT, { detail: { id } }));
+}
+
+function endRequestActivity(config) {
+  if (typeof window === 'undefined') return;
+  const id = config?.__superinfraRequestActivityId;
+  if (!id) return;
+  config.__superinfraRequestActivityId = null;
+  window.dispatchEvent(new CustomEvent(API_REQUEST_END_EVENT, { detail: { id } }));
+}
+
 // Cache curto e deduplicação de GETs idênticos. Isso evita que componentes globais
 // (menu, sino, pulso e permissões) consultem o banco várias vezes para o mesmo dado.
 const getCache = new Map();
@@ -136,6 +161,7 @@ api.clearGetCache = function clearGetCache(prefix = '') {
 };
 
 api.interceptors.request.use((config) => {
+  startRequestActivity(config);
   const token = getAuthToken();
   const method = String(config.method || 'get').toLowerCase();
   config.__hadAuthToken = !!token;
@@ -158,6 +184,7 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => {
+    endRequestActivity(response.config);
     response.data = normalizeQuantityPayload(response.data);
     const method = String(response.config?.method || 'get').toLowerCase();
     if (method !== 'get' && typeof window !== 'undefined') {
@@ -166,6 +193,7 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    endRequestActivity(error.config);
     if (error.response?.status === 401 && error.config?.__hadAuthToken) {
       clearAuthSession();
       window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT, {
@@ -180,4 +208,9 @@ api.interceptors.response.use(
 );
 
 export default api;
-export { baseURL as API_BASE_URL, directApiURL as DIRECT_API_BASE_URL };
+export {
+  baseURL as API_BASE_URL,
+  directApiURL as DIRECT_API_BASE_URL,
+  API_REQUEST_START_EVENT,
+  API_REQUEST_END_EVENT,
+};

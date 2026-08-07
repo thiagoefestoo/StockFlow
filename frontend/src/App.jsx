@@ -33,12 +33,14 @@ import TechnicianToolsPrint from './pages/TechnicianToolsPrint';
 import TechnicianReturns from './pages/TechnicianReturns';
 import TechnicianLoadPrint from './pages/TechnicianLoadPrint';
 import LossEvaluation from './pages/LossEvaluation';
+import PageLoadingOverlay from './components/PageLoadingOverlay';
 
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <PageLoadingOverlay />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<PrivateRoute><Layout /></PrivateRoute>}>

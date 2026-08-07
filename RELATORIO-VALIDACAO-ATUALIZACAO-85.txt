@@ -1,0 +1,52 @@
+RELATÓRIO DE VALIDAÇÃO — ATUALIZAÇÃO 85
+=======================================
+
+Base de produção recebida:
+StockFlow-main(20260807-175321).zip
+
+Versão identificada na base:
+StockFlow • Versão 84
+
+Objetivo:
+Adicionar feedback visual de carregamento sem gerar novas requisições nem alterar regras operacionais.
+
+VALIDAÇÕES EXECUTADAS
+---------------------
+[OK] Comparação da árvore original x árvore modificada.
+[OK] Nenhum arquivo de backend alterado.
+[OK] Nenhum model alterado.
+[OK] Nenhuma migration alterada.
+[OK] Nenhum arquivo original removido.
+[OK] App monta o PageLoadingOverlay dentro do BrowserRouter.
+[OK] API emite evento visual no início de requisições elegíveis.
+[OK] API encerra o evento tanto em sucesso quanto em erro.
+[OK] /auth/me ignorado pelo loading global.
+[OK] /notifications ignorado pelo loading global.
+[OK] /operations/pending-menu ignorado pelo loading global.
+[OK] Loader não chama api, axios ou fetch.
+[OK] Loader não cria setInterval/polling.
+[OK] Loader só aparece após 300 ms.
+[OK] Janela de associação do loading com navegação é limitada.
+[OK] Mensagem de operação demorada após 10 segundos.
+[OK] Splash inicial usa a logo oficial já existente em /imagem/superinfra.png.
+[OK] CSS possui tratamento de acessibilidade para movimento reduzido.
+[OK] Loading não aparece na impressão.
+[OK] Cockpit atualizado para Versão 85.
+[OK] frontend/src/services/api.js aprovado por `node --check`.
+[OK] `git diff --check` sem erro de whitespace nos arquivos modificados.
+
+BUILD LOCAL NESTE AMBIENTE
+--------------------------
+O build React completo não pôde ser executado neste ambiente porque o espelho interno de pacotes retornou HTTP 404 para a dependência `yocto-queue-0.1.0.tgz` durante `npm ci`.
+A falha ocorreu na obtenção da dependência, antes da compilação do projeto, e não foi causada por erro identificado no código da atualização.
+
+O aplicador PowerShell da Atualização 85 executa `npm run build` automaticamente quando o repositório local já possui `frontend/node_modules/react-scripts`. Se o build falhar, o aplicador restaura os arquivos anteriores.
+
+ESCOPO FINAL
+------------
+5 arquivos existentes de frontend alterados.
+1 novo componente de frontend adicionado.
+0 arquivos de backend alterados.
+0 migrations alteradas.
+0 models alterados.
+0 regras de negócio alteradas.
