@@ -3084,3 +3084,55 @@ input[readonly], textarea[readonly] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Atualização 88: cancelamento na preparação e identificação de pendências em técnicos */
+.transfer-request-actions {
+  align-items: stretch;
+  min-width: 170px;
+}
+.transfer-request-actions button {
+  width: 100%;
+  white-space: normal;
+}
+.technician-list-filters .filter-result-count {
+  display: block;
+  margin-top: .75rem;
+  color: var(--muted);
+  font-weight: 650;
+}
+.technicians-page tbody tr.technician-pending-row > td {
+  background: #fff4f4;
+  border-top-color: #ffdada;
+  border-bottom-color: #ffdada;
+}
+.technicians-page tbody tr.technician-pending-row:hover > td {
+  background: #ffecec;
+}
+.technicians-page tbody tr.technician-pending-row > td:first-child {
+  box-shadow: inset 4px 0 0 #dc2626;
+}
+.technicians-page td.technician-pending-cell {
+  background: #ffe5e5 !important;
+}
+.badge.danger-soft {
+  display: inline-flex;
+  margin-top: .25rem;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.transfer-page tbody tr.pending-sidebar-row > td {
+  background: #fff7f7;
+}
+.transfer-page tbody tr.pending-sidebar-row:hover > td {
+  background: #ffeded;
+}
+.transfer-page tbody tr.pending-sidebar-row > td:first-child {
+  box-shadow: inset 4px 0 0 #ef4444;
+}
+.transfer-page tbody tr.pending-sidebar-row .badge.pendente_assinatura {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}

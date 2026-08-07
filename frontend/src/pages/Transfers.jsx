@@ -70,6 +70,17 @@ function transferWarehouseLabel(transfer) {
   return isReturnTransfer(transfer) ? 'Estoque destino' : 'Estoque origem';
 }
 
+const MATERIAL_REQUEST_CANCELLATION_OPTIONS = [
+  { value: 'technician_withdrew', label: 'Técnico desistiu do pedido' },
+  { value: 'delivered_in_previous_request', label: 'Pedido entregue anteriormente em outro pedido' },
+  { value: 'duplicate_request', label: 'Solicitação duplicada' },
+  { value: 'incorrect_item', label: 'Item solicitado incorretamente' },
+  { value: 'incorrect_quantity', label: 'Quantidade solicitada incorretamente' },
+  { value: 'no_longer_needed', label: 'Material não é mais necessário' },
+  { value: 'created_by_mistake', label: 'Pedido criado por engano' },
+  { value: 'operational_adjustment', label: 'Cancelamento por ajuste operacional' },
+  { value: 'other', label: 'Outro motivo' },
+];
 
 function normalizeSerialText(value) { return String(value || '').trim().toLowerCase(); }
 function parseSerialTerms(value) {
@@ -133,6 +144,7 @@ export default function Transfers() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
   const [loadingList, setLoadingList] = useState(false);
+  const [cancelRequest, setCancelRequest] = useState({ open: false, item: null, reason: '', notes: '', submitting: false });
 
   function showNotice(text, type = 'danger') {
     setNotice({ text, type });
@@ -171,6 +183,37 @@ export default function Transfers() {
       showNotice(error.response?.data?.message || error.message || 'Não foi possível carregar as transferências.');
     } finally {
       setLoadingList(false);
+    }
+  }
+
+  function openCancellation(request) {
+    if (!request?.id || request.status !== 'aprovado' || request.Transfer || request.transferId) return;
+    setCancelRequest({ open: true, item: request, reason: '', notes: '', submitting: false });
+  }
+
+  async function confirmCancellation() {
+    if (!cancelRequest.item || cancelRequest.submitting) return;
+    if (!cancelRequest.reason) {
+      showNotice('Selecione o motivo do cancelamento.');
+      return;
+    }
+    if (cancelRequest.reason === 'other' && !String(cancelRequest.notes || '').trim()) {
+      showNotice('Descreva o motivo quando selecionar “Outro motivo”.');
+      return;
+    }
+
+    setCancelRequest((current) => ({ ...current, submitting: true }));
+    try {
+      const response = await api.post(`/material-requests/${cancelRequest.item.id}/cancel`, {
+        reason: cancelRequest.reason,
+        notes: String(cancelRequest.notes || '').trim(),
+      });
+      showNotice(response.data?.message || 'Solicitação cancelada e registrada no histórico/auditoria.', 'success');
+      setCancelRequest({ open: false, item: null, reason: '', notes: '', submitting: false });
+      await load(page);
+    } catch (error) {
+      showNotice(error.response?.data?.message || error.message || 'Não foi possível cancelar a solicitação.');
+      setCancelRequest((current) => ({ ...current, submitting: false }));
     }
   }
 
@@ -803,7 +846,7 @@ export default function Transfers() {
           <label>Técnico<select value={requestTechnicianFilter} onChange={(e) => setRequestTechnicianFilter(e.target.value)}><option value="">Todos os técnicos</option>{technicians.map((technician) => <option key={technician.id} value={technician.id}>{technician.name}</option>)}</select></label>
           <label className="filter-action"><span>&nbsp;</span><button type="button" className="ghost" onClick={() => { setRequestSearch(''); setRequestWarehouseFilter(''); setRequestTechnicianFilter(''); }}>Limpar filtros</button></label>
         </div>
-        <div className="table-wrap"><table><thead><tr><th>Solicitação</th><th>Data/hora</th><th>Técnico</th><th>Estoque</th><th>Materiais</th><th>Qtd. solicitada</th><th>Valor aprovado</th><th className="action-cell">Ação</th></tr></thead><tbody>{filteredApprovedRequests.map((request) => <tr key={request.id}><td><strong>{request.requestNumber}</strong><br /><small>{request.priority || 'prioridade média'}</small></td><td><strong>{dt(request.createdAt)}</strong>{request.approvedAt && <><br /><small>Aprovada: {dt(request.approvedAt)}</small></>}</td><td>{request.Technician?.name || '-'}</td><td>{request.Warehouse?.name || 'Estoque do técnico'}</td><td>{(request.MaterialRequestItems || []).map((item) => item.Material?.name).filter(Boolean).join(', ') || '-'}</td><td>{formatQuantity(request.totalQuantity)}</td><td>{brl(request.totalValue)}</td><td><button type="button" onClick={() => openApprovedRequest(request.id)}>📦 Preparar transferência</button></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Solicitação</th><th>Data/hora</th><th>Técnico</th><th>Estoque</th><th>Materiais</th><th>Qtd. solicitada</th><th>Valor aprovado</th><th className="action-cell">Ação</th></tr></thead><tbody>{filteredApprovedRequests.map((request) => <tr key={request.id}><td><strong>{request.requestNumber}</strong><br /><small>{request.priority || 'prioridade média'}</small></td><td><strong>{dt(request.createdAt)}</strong>{request.approvedAt && <><br /><small>Aprovada: {dt(request.approvedAt)}</small></>}</td><td>{request.Technician?.name || '-'}</td><td>{request.Warehouse?.name || 'Estoque do técnico'}</td><td>{(request.MaterialRequestItems || []).map((item) => item.Material?.name).filter(Boolean).join(', ') || '-'}</td><td>{formatQuantity(request.totalQuantity)}</td><td>{brl(request.totalValue)}</td><td><div className="action-toolbar transfer-request-actions"><button type="button" onClick={() => openApprovedRequest(request.id)}>📦 Preparar transferência</button><button type="button" className="ghost danger-outline" onClick={() => openCancellation(request)}>Cancelar solicitação</button></div></td></tr>)}</tbody></table></div>
         {!filteredApprovedRequests.length && <div className="empty-state">Nenhuma solicitação aprovada encontrada com os filtros informados.</div>}
       </section>
 
@@ -816,7 +859,27 @@ export default function Transfers() {
         </div>
       </section>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolRemovalTransfer(tr) || isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolRemovalTransfer(tr) ? (tr.Warehouse?.name || 'Sem retorno ao estoque') : isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}<Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id} className={tr.status === 'pendente_assinatura' ? 'pending-sidebar-row' : ''}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolRemovalTransfer(tr) || isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolRemovalTransfer(tr) ? (tr.Warehouse?.name || 'Sem retorno ao estoque') : isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}<Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
+
+      <Modal
+        open={cancelRequest.open}
+        title="Cancelar solicitação / pedido"
+        onClose={() => { if (!cancelRequest.submitting) setCancelRequest({ open: false, item: null, reason: '', notes: '', submitting: false }); }}
+        footer={<>
+          <button type="button" className="ghost" disabled={cancelRequest.submitting} onClick={() => setCancelRequest({ open: false, item: null, reason: '', notes: '', submitting: false })}>Voltar</button>
+          <button type="button" className="danger-outline" disabled={cancelRequest.submitting || !cancelRequest.reason} onClick={confirmCancellation}>{cancelRequest.submitting ? 'Cancelando...' : 'Confirmar cancelamento'}</button>
+        </>}
+      >
+        <div className="form-stack">
+          <div className="viz-callout"><strong>{cancelRequest.item?.requestNumber}</strong> • {cancelRequest.item?.Technician?.name || '-'} • {cancelRequest.item?.Warehouse?.name || 'Estoque do técnico'}</div>
+          <div>
+            <h4>Cancelar esta preparação de entrega?</h4>
+            <p>A solicitação sairá da fila de “Preparar transferência”. O cancelamento não movimenta estoque e ficará registrado no histórico e na auditoria.</p>
+          </div>
+          <label>Motivo do cancelamento<select value={cancelRequest.reason} onChange={(e) => setCancelRequest((current) => ({ ...current, reason: e.target.value }))} required><option value="">Selecione o motivo</option>{MATERIAL_REQUEST_CANCELLATION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label>Observação {cancelRequest.reason === 'other' ? '(obrigatória)' : '(opcional)'}<textarea rows="4" maxLength="1000" value={cancelRequest.notes} onChange={(e) => setCancelRequest((current) => ({ ...current, notes: e.target.value }))} placeholder={cancelRequest.reason === 'other' ? 'Descreva o motivo do cancelamento...' : 'Acrescente alguma informação, se necessário.'} /></label>
+        </div>
+      </Modal>
 
       <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving || directTransferBlocked} onClick={openReview}>{directTransferBlocked ? 'Resolva a preparação pendente' : zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
         <div className="transfer-wizard">

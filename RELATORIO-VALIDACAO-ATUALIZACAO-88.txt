@@ -1,0 +1,41 @@
+ATUALIZAÇÃO 88 — RELATÓRIO DE VALIDAÇÃO
+========================================
+Base: StockFlow • Versão 87 (produção enviada em 07/08/2026)
+Objetivo: cancelamento na fila de preparação, filtros de técnicos e destaque visual de pendências.
+
+ARQUIVOS EXISTENTES ALTERADOS
+- frontend/src/pages/Transfers.jsx
+- frontend/src/pages/Technicians.jsx
+- frontend/src/pages/OperationsCockpit.jsx
+- frontend/src/styles.css
+
+ARQUIVOS NOVOS DE DOCUMENTAÇÃO
+- ATUALIZACAO-88-CANCELAMENTO-FILA-FILTROS-PENDENCIAS.md
+- RELATORIO-VALIDACAO-ATUALIZACAO-88.txt
+
+VALIDAÇÕES REALIZADAS
+[OK] Base recebida contém StockFlow • Versão 87.
+[OK] Botão Cancelar solicitação incluído na fila de solicitações aprovadas em Transferências.
+[OK] Cancelamento reutiliza POST /material-requests/:id/cancel da Atualização 87.
+[OK] Motivos de cancelamento mantidos compatíveis com o backend da Atualização 87.
+[OK] Campo de observação obrigatório para “Outro motivo”.
+[OK] Lista de preparação é recarregada após cancelamento.
+[OK] Página Técnicos possui filtro por texto.
+[OK] Página Técnicos possui filtro por cidade.
+[OK] Página Técnicos possui filtro por estoque padrão.
+[OK] Página Técnicos possui filtro por empresa.
+[OK] Página Técnicos possui filtro por status.
+[OK] Página Técnicos possui filtro específico para pendência de termo.
+[OK] Filtros de Técnicos são locais e não adicionam requisições ao backend.
+[OK] Critério visual de pendência em Técnicos: ativo + ferramenta em custódia + zero termos.
+[OK] Guias pendentes de assinatura em Transferências recebem destaque vermelho-claro.
+[OK] Cockpit atualizado para Versão 88.
+[OK] Nenhum arquivo de backend foi modificado em relação ao ZIP de produção.
+[OK] Nenhum model/migration foi modificado.
+[OK] Nenhuma regra de saldo ou movimentação foi alterada.
+[OK] 37/37 verificações estáticas de escopo e integridade aprovadas.
+[OK] Pacote incremental aplicado em cópia Git limpa da Versão 87.
+[OK] git diff --cached --check aprovado sem erros/blank line at EOF.
+
+BUILD
+O ambiente de geração não possui as dependências React instaladas e o espelho npm disponível retorna 404 para pacotes necessários. O aplicador PowerShell executa `npm run build` no repositório local antes de concluir a atualização. Em caso de falha, restaura automaticamente os quatro arquivos originais.

@@ -100,6 +100,7 @@ export default function Technicians() {
   const [documentForm, setDocumentForm] = useState(emptyToolDocument);
   const [documentSaving, setDocumentSaving] = useState(false);
   const [documentError, setDocumentError] = useState('');
+  const [listFilters, setListFilters] = useState({ search: '', city: '', warehouseId: '', companyId: '', status: '', pendingTerm: '' });
 
   async function load() {
     const [t, c, w] = await Promise.all([
@@ -517,6 +518,34 @@ export default function Technicians() {
     }
   }
 
+  function hasPendingToolTerm(technician) {
+    return technician?.status === 'ativo'
+      && Number(technician?.toolCount || 0) > 0
+      && Number(technician?.toolDocumentCount || 0) === 0;
+  }
+
+  const filteredTechnicians = useMemo(() => {
+    const search = String(listFilters.search || '').trim().toLowerCase();
+    return technicians.filter((technician) => {
+      const cities = Array.from(new Set([...(Array.isArray(technician.serviceCities) ? technician.serviceCities : []), technician.defaultWarehouse?.city].filter(Boolean)));
+      if (listFilters.city && !cities.some((city) => String(city).toLowerCase() === String(listFilters.city).toLowerCase())) return false;
+      if (listFilters.warehouseId && String(technician.defaultWarehouseId || '') !== String(listFilters.warehouseId)) return false;
+      if (listFilters.companyId && String(technician.companyId || '') !== String(listFilters.companyId)) return false;
+      if (listFilters.status && String(technician.status || '') !== String(listFilters.status)) return false;
+      const pendingTerm = hasPendingToolTerm(technician);
+      if (listFilters.pendingTerm === 'pending' && !pendingTerm) return false;
+      if (listFilters.pendingTerm === 'regular' && pendingTerm) return false;
+      if (!search) return true;
+      const text = [
+        technician.name, technician.email, technician.document, technician.phone,
+        technician.ContractorCompany?.name, technician.defaultWarehouse?.name,
+        ...(cities || []),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return text.includes(search);
+    });
+  }, [technicians, listFilters]);
+
+  const technicianCityOptions = useMemo(() => Array.from(new Set(technicians.flatMap((technician) => [...(Array.isArray(technician.serviceCities) ? technician.serviceCities : []), technician.defaultWarehouse?.city]).map((city) => String(city || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')), [technicians]);
   const totalValue = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.totalCustodyValue ?? technician.assetValue ?? 0), 0), [technicians]);
   const totalTools = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolCount || 0), 0), [technicians]);
   const totalToolDocuments = useMemo(() => technicians.reduce((sum, technician) => sum + Number(technician.toolDocumentCount || 0), 0), [technicians]);
@@ -613,6 +642,22 @@ export default function Technicians() {
         <KpiCard label="Patrimônio em campo" value={brl(totalValue)} />
       </div>
 
+      <section className="panel technician-list-filters">
+        <div className="subtoolbar">
+          <div><h3>Filtrar técnicos</h3><small>Pesquise por nome, e-mail, documento, empresa, cidade ou estoque e localize rapidamente as pendências.</small></div>
+          <button type="button" className="ghost" onClick={() => setListFilters({ search: '', city: '', warehouseId: '', companyId: '', status: '', pendingTerm: '' })}>Limpar filtros</button>
+        </div>
+        <div className="form-grid">
+          <label>Pesquisar<input value={listFilters.search} onChange={(e) => setListFilters((current) => ({ ...current, search: e.target.value }))} placeholder="Nome, e-mail, documento, empresa ou estoque" /></label>
+          <label>Cidade<select value={listFilters.city} onChange={(e) => setListFilters((current) => ({ ...current, city: e.target.value }))}><option value="">Todas as cidades</option>{technicianCityOptions.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
+          <label>Estoque padrão<select value={listFilters.warehouseId} onChange={(e) => setListFilters((current) => ({ ...current, warehouseId: e.target.value }))}><option value="">Todos os estoques</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}{warehouse.city ? ` - ${warehouse.city}` : ''}</option>)}</select></label>
+          <label>Empresa<select value={listFilters.companyId} onChange={(e) => setListFilters((current) => ({ ...current, companyId: e.target.value }))}><option value="">Todas as empresas</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>
+          <label>Status<select value={listFilters.status} onChange={(e) => setListFilters((current) => ({ ...current, status: e.target.value }))}><option value="">Todos</option><option value="ativo">Ativo</option><option value="inativo">Inativo</option><option value="bloqueado">Bloqueado</option></select></label>
+          <label>Pendência de termo<select value={listFilters.pendingTerm} onChange={(e) => setListFilters((current) => ({ ...current, pendingTerm: e.target.value }))}><option value="">Todos</option><option value="pending">Somente pendentes</option><option value="regular">Sem pendência</option></select></label>
+        </div>
+        <small className="filter-result-count">Exibindo {filteredTechnicians.length} de {technicians.length} técnico(s).</small>
+      </section>
+
       <section className="panel">
         <div className="table-wrap">
           <table>
@@ -620,15 +665,17 @@ export default function Technicians() {
               <tr><th>Técnico</th><th>E-mail</th><th>Empresa</th><th>Cidades</th><th>Estoque padrão</th><th>Ferramentas</th><th>Termos</th><th>Acesso</th><th>Status</th><th className="action-cell">Opções</th></tr>
             </thead>
             <tbody>
-              {technicians.map((t) => (
-                <tr key={t.id}>
+              {filteredTechnicians.map((t) => {
+                const pendingTerm = hasPendingToolTerm(t);
+                return (
+                <tr key={t.id} className={pendingTerm ? 'technician-pending-row' : ''}>
                   <td><button className="link-button" onClick={() => openDetails(t)}>{t.name}</button></td>
                   <td>{t.email || '-'}</td>
                   <td>{t.ContractorCompany?.name || '-'}</td>
                   <td>{citiesToText(t.serviceCities) || '-'}</td>
                   <td>{t.defaultWarehouse?.name || '-'}</td>
                   <td><strong>{formatQuantity(t.toolCount || 0)}</strong><br /><small>{brl(t.toolValue || 0)}</small></td>
-                  <td><strong>{formatQuantity(t.toolDocumentCount || 0)}</strong><br /><small>assinado(s)</small></td>
+                  <td className={pendingTerm ? 'technician-pending-cell' : ''}><strong>{formatQuantity(t.toolDocumentCount || 0)}</strong><br />{pendingTerm ? <span className="badge danger-soft">Pendente</span> : <small>assinado(s)</small>}</td>
                   <td>{t.portalUser ? <span className="badge ativo">Liberado</span> : <span className="badge pendente">Sem login</span>}</td>
                   <td>{t.status}</td>
                   <td>
@@ -639,10 +686,12 @@ export default function Technicians() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
+        {!filteredTechnicians.length && <div className="empty-state">Nenhum técnico encontrado com os filtros informados.</div>}
       </section>
 
       <Modal open={modal} title={form.id ? 'Editar técnico' : 'Novo técnico'} onClose={() => setModal(false)} footer={<><button className="ghost" onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={save}>{saving ? 'Salvando...' : 'Salvar'}</button></>}>
