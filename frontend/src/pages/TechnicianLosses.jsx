@@ -64,7 +64,7 @@ export default function TechnicianLosses() {
 
   async function load() {
     const [techRes, lossRes] = await Promise.all([
-      api.get('/technicians'),
+      api.get('/technicians?compact=true'),
       api.get('/stock/technician-losses'),
     ]);
     setTechnicians(techRes.data.data || []);

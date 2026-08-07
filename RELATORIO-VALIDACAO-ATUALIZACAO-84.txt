@@ -1,0 +1,78 @@
+STOCKFLOW / SUPERINFRA
+RELATÓRIO DE VALIDAÇÃO — ATUALIZAÇÃO 84
+REDUÇÃO SEGURA DE TRÁFEGO NEON
+
+BASE
+- Arquivo recebido como produção: StockFlow-main(20260807-153658).zip
+- Versão identificada no Cockpit antes da alteração: 83
+- Nova versão exibida no Cockpit: 84
+
+ESCOPO ALTERADO
+- 22 arquivos existentes de backend/frontend.
+- 1 novo teste estático da atualização.
+- Documentação/relatório/aplicador/comandos adicionados ao kit.
+
+VALIDAÇÕES AUTOMATIZADAS DA ATUALIZAÇÃO
+[OK] Técnicos possui modo compacto aditivo.
+[OK] Modo compacto evita bloco de métricas N+1.
+[OK] Carga do técnico possui view operacional.
+[OK] View operacional encerra antes do histórico pesado.
+[OK] Histórico de guias da carga exclui attachmentData.
+[OK] Materiais possui modo compacto.
+[OK] Modo compacto de materiais preserva contexto de estoque quando solicitado.
+[OK] Central/retorno possui view operacional.
+[OK] View operacional da caixa retorna antes de movimentos/OS.
+[OK] Detalhe de perda não lê attachmentData.
+[OK] Vida do serial não carrega binário da guia.
+[OK] Solicitações não incluem binário da guia.
+[OK] Aprovação de solicitação não recarrega binário da guia.
+[OK] API emite evento único após escrita bem-sucedida.
+[OK] Menu usa cache passivo de 5 minutos.
+[OK] Sino usa cache passivo de 5 minutos.
+[OK] Sino força dado atual quando o usuário abre.
+[OK] LivePulse usa cache passivo de 5 minutos.
+[OK] Componentes globais reagem imediatamente a mutações.
+[OK] Central da Caixa passou de 1 para 5 minutos.
+[OK] Central evita refresh por foco antes de 5 minutos.
+[OK] Minha Caixa passou de 1 para 5 minutos.
+[OK] Minha Caixa usa endpoint operacional.
+[OK] Minha Caixa usa catálogo compacto.
+[OK] Entrada de Estoque usa catálogo compacto.
+[OK] Cockpit registra Versão 84.
+[OK] Telas de seleção usam lista compacta de técnicos.
+[OK] Tela administrativa de Técnicos mantém resposta completa.
+
+RESULTADO DO TESTE ESPECÍFICO: 28/28 verificações aprovadas.
+
+VALIDAÇÃO DE SINTAXE
+- npm run check --prefix backend: OK.
+- 123 arquivos JS do backend validados.
+- Parsing/transpilação de toda a árvore frontend/src via TypeScript: OK.
+- 63 arquivos JS/JSX do frontend analisados.
+
+BUILD COMPLETO
+- O ZIP de produção não contém node_modules.
+- Para não instalar dependências externas nem modificar o ambiente-base durante a preparação,
+  o build React completo não foi executado neste sandbox.
+- O aplicador PowerShell executa npm ci (somente se necessário) e npm run build antes de manter a atualização no repositório do usuário.
+- Em caso de falha, o aplicador restaura automaticamente os arquivos anteriores.
+
+CHECAGEM DE ESCOPO
+[OK] Nenhum arquivo de models foi alterado.
+[OK] Nenhuma migration foi criada ou alterada.
+[OK] Nenhum arquivo foi removido da base de produção.
+[OK] Nenhuma rotina de ajuste de saldo foi modificada.
+[OK] Nenhuma regra de movimentação foi modificada.
+[OK] Nenhuma alteração de schema foi adicionada.
+
+EFEITO ESPERADO
+- 80% menos disparos passivos nas telas de caixa (1 min -> 5 min).
+- 60% menos ciclos passivos dos componentes globais (2 min -> 5 min).
+- Seletores de técnico deixam de executar até várias consultas adicionais por técnico.
+- Minha Caixa deixa de consultar movimentos, guias, OS e ferramentas em cada refresh.
+- Entrada/Minha Caixa deixam de calcular estoque global apenas para montar catálogo.
+- Binários Base64 deixam de sair do Neon em consultas onde o usuário não abriu o arquivo.
+
+OBSERVAÇÃO
+A redução em GB só pode ser confirmada com as métricas reais do Neon após o deploy.
+Recomendado comparar a média diária por 24-48 horas.

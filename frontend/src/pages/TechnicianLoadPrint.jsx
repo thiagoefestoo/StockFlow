@@ -20,7 +20,7 @@ export default function TechnicianLoadPrint() {
 
   useEffect(() => {
     setLoadError('');
-    api.get(`/technicians/${id}/stock`)
+    api.get(`/technicians/${id}/stock?view=operational`)
       .then((response) => setStock(response.data.data))
       .catch((error) => setLoadError(error.response?.data?.message || error.message || 'Não foi possível carregar a carga do técnico.'));
   }, [id]);

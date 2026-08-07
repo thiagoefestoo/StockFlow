@@ -37,7 +37,7 @@ export default function LossEvaluation() {
     setLoading(true);
     const [lossRes, techRes] = await Promise.all([
       api.get('/stock/technician-losses'),
-      api.get('/technicians').catch(() => ({ data: { data: [] } })),
+      api.get('/technicians?compact=true').catch(() => ({ data: { data: [] } })),
     ]);
     setLosses(sortRecentFirst(lossRes.data.data || [], ['deliveredAt', 'createdAt']));
     setTechnicians(techRes.data.data || []);

@@ -423,8 +423,8 @@ export default function LivePulse() {
       // Estes mesmos endpoints também alimentam o sino de notificações. O cache do
       // cliente deduplica as chamadas e evita consultas adicionais ao banco.
       const [notificationResult, pendingResult] = await Promise.allSettled([
-        api.getCached('/notifications', { params: { limit: 20 } }, 60000),
-        api.getCached('/operations/pending-menu', {}, 60000),
+        api.getCached('/notifications', { params: { limit: 20 } }, 300000),
+        api.getCached('/operations/pending-menu', {}, 300000),
       ]);
 
       if (notificationResult.status === 'fulfilled') {
@@ -445,12 +445,14 @@ export default function LivePulse() {
     };
 
     refreshWhenVisible();
-    const id = window.setInterval(refreshWhenVisible, 120000);
+    const id = window.setInterval(refreshWhenVisible, 300000);
     window.addEventListener('focus', refreshWhenVisible);
+    window.addEventListener('superinfra:data-changed', refreshWhenVisible);
 
     return () => {
       window.clearInterval(id);
       window.removeEventListener('focus', refreshWhenVisible);
+      window.removeEventListener('superinfra:data-changed', refreshWhenVisible);
     };
   }, [user?.id]);
 

@@ -52,7 +52,7 @@ function includeFull() {
     { model: User, as: 'requestedBy', attributes: ['id', 'name', 'email', 'role'] },
     { model: User, as: 'approvedBy', attributes: ['id', 'name', 'email', 'role'] },
     { model: User, as: 'deliveredBy', attributes: ['id', 'name', 'email', 'role'] },
-    Transfer,
+    { model: Transfer, attributes: { exclude: ['attachmentData', 'stampText'] } },
     Warehouse,
     { model: MaterialRequestItem, include: [Material, SerializedAsset] },
   ];

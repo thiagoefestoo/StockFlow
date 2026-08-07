@@ -52,8 +52,8 @@ export default function NotificationBell() {
     setError('');
     try {
       const [notificationResult, pendingResult] = await Promise.allSettled([
-        api.getCached('/notifications', { params: { limit: 20 } }, 60000),
-        api.getCached('/operations/pending-menu', {}, 60000),
+        api.getCached('/notifications', { params: { limit: 20 } }, 300000),
+        api.getCached('/operations/pending-menu', {}, 300000),
       ]);
 
       if (notificationResult.status === 'fulfilled') {
@@ -77,11 +77,13 @@ export default function NotificationBell() {
       if (document.visibilityState === 'visible') load();
     };
     refreshWhenVisible();
-    const id = setInterval(refreshWhenVisible, 120000);
+    const id = setInterval(refreshWhenVisible, 300000);
     window.addEventListener('focus', refreshWhenVisible);
+    window.addEventListener('superinfra:data-changed', refreshWhenVisible);
     return () => {
       clearInterval(id);
       window.removeEventListener('focus', refreshWhenVisible);
+      window.removeEventListener('superinfra:data-changed', refreshWhenVisible);
     };
   }, []);
 
@@ -110,7 +112,13 @@ export default function NotificationBell() {
   const totalBadge = Number(data.unread || 0) + Number(pendingMenu.total || 0);
 
   async function openPanel() {
-    if (!open) await load();
+    if (!open) {
+      // A atualização passiva é econômica, mas uma ação explícita do usuário deve abrir
+      // a central com dados atuais. A nova resposta volta ao cache compartilhado.
+      api.clearGetCache('/notifications');
+      api.clearGetCache('/operations/pending-menu');
+      await load();
+    }
     setOpen((current) => !current);
   }
 

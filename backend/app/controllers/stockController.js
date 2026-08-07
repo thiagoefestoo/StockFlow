@@ -321,32 +321,28 @@ exports.technicianBox = asyncHandler(async (req, res) => {
   const technician = await Technician.findByPk(req.params.id, { include: [ContractorCompany, { model: Warehouse, as: 'defaultWarehouse' }] });
   if (!technician) return fail(res, 404, 'Técnico não encontrado.');
   try { assertTechnicianAccess(req.user, technician); } catch (error) { return fail(res, error.statusCode || 403, error.message); }
+
+  const operationalView = String(req.query.view || '').trim().toLowerCase() === 'operational';
+  const operationalMaterialInclude = {
+    model: Material,
+    attributes: ['id', 'sku', 'name', 'category', 'unit', 'requiresSerial', 'unitCost', 'maxQuantityPerServiceOrder', 'allowCustomerInstall', 'requiresReturnOnRemoval'],
+  };
+  const operationalWarehouseInclude = { model: Warehouse, attributes: ['id', 'name', 'code', 'city', 'state', 'region'] };
+  const assetIncludes = operationalView ? [operationalMaterialInclude, operationalWarehouseInclude] : [Material, Warehouse];
+
   const rawAssets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
-    include: [Material, Warehouse],
+    include: assetIncludes,
     order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
   const rawBalances = await StockBalance.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
-    include: [Material, Warehouse],
+    include: assetIncludes,
     order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
   // Ferramentas ficam somente na ficha de custódia, separadas da caixa técnica.
   const assets = rawAssets.filter((asset) => String(asset.Material?.category || '').toLowerCase() !== 'ferramenta');
   const balances = rawBalances.filter((balance) => String(balance.Material?.category || '').toLowerCase() !== 'ferramenta');
-  const rawMovements = await StockMovement.findAll({
-    where: { [Op.or]: [{ fromTechnicianId: technician.id }, { toTechnicianId: technician.id }] },
-    include: [Material, SerializedAsset, { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }],
-    order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
-    limit: 250,
-  });
-  const movements = rawMovements.filter((movement) => String(movement.Material?.category || '').toLowerCase() !== 'ferramenta' && movement.toOwnerType !== 'ficha_tecnico' && movement.fromOwnerType !== 'ficha_tecnico');
-  const orders = await ServiceOrder.findAll({
-    where: { technicianId: technician.id },
-    include: [{ model: ServiceOrderMaterial, include: [Material, SerializedAsset] }],
-    order: [['createdAt', 'DESC'], ['id', 'DESC']],
-    limit: 80,
-  });
 
   const assetsValue = assets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || asset.Material?.unitCost || 0), 0);
   const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
@@ -364,6 +360,42 @@ exports.technicianBox = asyncHandler(async (req, res) => {
     grouped[key].quantity += Number(balance.quantity || 0);
     grouped[key].value += Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0);
   }
+
+  if (operationalView) {
+    return ok(res, {
+      technician,
+      assets: assets.map((asset) => ({ ...asset.toJSON(), custodyDays: daysBetween(asset.custodyStartedAt) })),
+      balances,
+      movements: [],
+      orders: [],
+      groupedMaterials: Object.values(grouped).map((row) => ({ ...row, value: money(row.value) })),
+      summary: {
+        assetsCount: assets.length,
+        consumableLines: balances.length,
+        totalQuantity: Object.values(grouped).reduce((sum, row) => sum + Number(row.quantity || 0), 0),
+        assetsValue: money(assetsValue),
+        consumableValue: money(consumableValue),
+        totalValue: money(assetsValue + consumableValue),
+        oldCustody: assets.filter((asset) => daysBetween(asset.custodyStartedAt) >= 60).length,
+        movementsCount: 0,
+        ordersCount: 0,
+      },
+    });
+  }
+
+  const rawMovements = await StockMovement.findAll({
+    where: { [Op.or]: [{ fromTechnicianId: technician.id }, { toTechnicianId: technician.id }] },
+    include: [Material, SerializedAsset, { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }],
+    order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
+    limit: 250,
+  });
+  const movements = rawMovements.filter((movement) => String(movement.Material?.category || '').toLowerCase() !== 'ferramenta' && movement.toOwnerType !== 'ficha_tecnico' && movement.fromOwnerType !== 'ficha_tecnico');
+  const orders = await ServiceOrder.findAll({
+    where: { technicianId: technician.id },
+    include: [{ model: ServiceOrderMaterial, include: [Material, SerializedAsset] }],
+    order: [['createdAt', 'DESC'], ['id', 'DESC']],
+    limit: 80,
+  });
 
   return ok(res, {
     technician,
@@ -796,6 +828,7 @@ exports.losses = asyncHandler(async (req, res) => {
 
 exports.getTechnicianLoss = asyncHandler(async (req, res) => {
   const loss = await Transfer.findByPk(req.params.id, {
+    attributes: { exclude: ['attachmentData'] },
     include: [
       Technician,
       Warehouse,
@@ -1137,7 +1170,7 @@ exports.serialLife = asyncHandler(async (req, res) => {
 
   const [movements, transferItems, osItems] = await Promise.all([
     StockMovement.findAll({ where: { serialNumber: serial }, include: [Material, SerializedAsset, { model: Technician, as: 'fromTechnician' }, { model: Technician, as: 'toTechnician' }, { model: Warehouse, as: 'fromWarehouse' }, { model: Warehouse, as: 'toWarehouse' }, { model: User, as: 'createdBy', attributes: ['id', 'name', 'email', 'role'] }], order: [['movementAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']] }),
-    TransferItem.findAll({ where: { serialNumber: serial }, include: [{ model: Transfer, include: [Technician, Warehouse] }, Material], order: [['createdAt', 'DESC'], ['id', 'DESC']] }),
+    TransferItem.findAll({ where: { serialNumber: serial }, include: [{ model: Transfer, attributes: { exclude: ['attachmentData', 'stampText'] }, include: [Technician, Warehouse] }, Material], order: [['createdAt', 'DESC'], ['id', 'DESC']] }),
     ServiceOrderMaterial.findAll({ where: { serialNumber: serial }, include: [{ model: ServiceOrder, include: [Technician, Warehouse] }, Material], order: [['createdAt', 'DESC'], ['id', 'DESC']] }),
   ]);
   return ok(res, {

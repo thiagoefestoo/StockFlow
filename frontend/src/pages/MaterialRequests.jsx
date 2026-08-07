@@ -96,7 +96,7 @@ export default function MaterialRequests() {
       setSummary(sumRes.data.data || {});
       if (whRes) setWarehouses(whRes.data.data || []);
       if ((refreshReferences || !technicians.length) && !isTechnician) {
-        const techResponse = await api.get('/technicians').catch(() => ({ data: { data: [] } }));
+        const techResponse = await api.get('/technicians?compact=true').catch(() => ({ data: { data: [] } }));
         setTechnicians(techResponse.data.data || []);
       }
       setPage(targetPage);

@@ -73,6 +73,26 @@ exports.list = asyncHandler(async (req, res) => {
     ];
   }
 
+  const compact = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
+  const needsStockContext = Boolean(req.query.warehouseId || req.query.city || req.query.stockStatus)
+    || String(req.query.availableOnly || '').toLowerCase() === 'true';
+
+  // Catálogos usados apenas para preencher formulários não precisam varrer saldos e
+  // patrimônios de todos os estoques. Se a tela solicitar contexto de estoque, o fluxo
+  // completo abaixo continua sendo usado sem alteração de comportamento.
+  if (compact && !needsStockContext) {
+    let records = await Material.findAll({ where: materialWhere, order: [['createdAt', 'DESC'], ['id', 'DESC']] });
+    if (String(req.query.transferableOnly || '').toLowerCase() === 'true') {
+      records = records.filter((material) => (
+        String(material.category || '').toLowerCase() !== 'ferramenta'
+        && material.active !== false
+        && material.allowTechnicianTransfer !== false
+        && String(material.movementPolicy || 'livre').toLowerCase() !== 'bloqueado'
+      ));
+    }
+    return ok(res, records);
+  }
+
   const requestedWarehouseId = Number(req.query.warehouseId || 0);
   const warehouseScope = stockWhereForUser(req.user, requestedWarehouseId || null);
   const warehouseFilters = [warehouseListWhere(req.user), { isReverseLogistics: false }];

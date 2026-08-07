@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { sortRecentFirst } from '../utils/recentFirst';
@@ -45,8 +45,9 @@ export default function TechnicianInbox() {
   const [submittingOs, setSubmittingOs] = useState(false);
   const [serialSearches, setSerialSearches] = useState({});
   const [serialSearchesApplied, setSerialSearchesApplied] = useState({});
+  const lastStockRefreshAtRef = useRef(0);
 
-  async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []); }
+  async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians?compact=true')).data.data || []); }
   async function loadStock(id = selectedTech) {
     if (!id) {
       setStock(null);
@@ -54,13 +55,14 @@ export default function TechnicianInbox() {
       return;
     }
     const [stockRes, requestsRes] = await Promise.all([
-      api.get(`/technicians/${id}/stock`),
+      api.get(`/technicians/${id}/stock?view=operational`),
       api.get(`/material-requests?technicianId=${id}`),
     ]);
     setStock(stockRes.data.data);
     setRequests(sortRecentFirst(requestsRes.data.data || [], ['createdAt']));
+    lastStockRefreshAtRef.current = Date.now();
   }
-  async function loadCatalog() { setMaterialsCatalog((await api.get('/materials')).data.data || []); }
+  async function loadCatalog() { setMaterialsCatalog((await api.get('/materials?compact=true')).data.data || []); }
 
   useEffect(() => { loadTechs(); loadCatalog(); if (selectedTech) loadStock(selectedTech); }, []);
 
@@ -71,8 +73,11 @@ export default function TechnicianInbox() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
-    const interval = setInterval(refreshWhenVisible, 60000);
-    const onFocus = () => refresh();
+    const refreshIfStale = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastStockRefreshAtRef.current >= 300000) refresh();
+    };
+    const interval = setInterval(refreshWhenVisible, 300000);
+    const onFocus = () => refreshIfStale();
     const onStorage = (event) => {
       if (event.key === 'superinfra:technician-box-refresh') refresh();
     };

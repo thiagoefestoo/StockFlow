@@ -150,7 +150,7 @@ export default function Transfers() {
       ];
       if (refreshReferences || !technicians.length || !warehouses.length) {
         calls.push(
-          api.get('/technicians'),
+          api.get('/technicians?compact=true'),
           api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
         );
       }

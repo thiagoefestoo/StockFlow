@@ -159,6 +159,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => {
     response.data = normalizeQuantityPayload(response.data);
+    const method = String(response.config?.method || 'get').toLowerCase();
+    if (method !== 'get' && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('superinfra:data-changed'));
+    }
     return response;
   },
   (error) => {

@@ -89,7 +89,7 @@ export default function OperationsCockpit() {
         <div className="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Material</th><th>Origem</th><th>Destino</th><th>Referência</th><th>Opções</th></tr></thead><tbody>{(data?.recentMovements || []).map((m) => <tr key={m.id}><td>{dt(m.movementAt)}</td><td><span className="badge">{m.type}</span></td><td>{m.Material?.name || '-'}</td><td>{m.fromTechnician?.name || m.fromOwnerType || '-'}</td><td>{m.toTechnician?.name || m.toOwnerType || '-'}</td><td>{m.reference || '-'}</td><td><button className="info" onClick={() => setDetails(m)}>Detalhes</button></td></tr>)}</tbody></table></div>
       </section>
 
-      <div className="system-version-stamp" aria-label="Versão do sistema">StockFlow • Versão 83</div>
+      <div className="system-version-stamp" aria-label="Versão do sistema">StockFlow • Versão 84</div>
 
       <DetailsModal open={!!details} title="Detalhes da movimentação" onClose={() => setDetails(null)}>
         {details && <DetailGrid fields={[["Data", details.movementAt], ["Tipo", details.type], ["Material", details.Material?.name], ["Origem", details.fromTechnician?.name || details.fromOwnerType], ["Destino", details.toTechnician?.name || details.toOwnerType], ["Referência", details.reference], ["Serial", details.serialNumber], ["Quantidade", formatQuantity(details.quantity)], ["Observação", details.notes]]} />}

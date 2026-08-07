@@ -34,7 +34,7 @@ export default function Layout() {
 
   async function loadPendingMenu() {
     try {
-      const res = await api.getCached('/operations/pending-menu', {}, 60000);
+      const res = await api.getCached('/operations/pending-menu', {}, 300000);
       setPendingMenu(res.data.data || { total: 0, routes: {} });
     } catch (_) {}
   }
@@ -44,11 +44,13 @@ export default function Layout() {
       if (document.visibilityState === 'visible') loadPendingMenu();
     };
     refreshWhenVisible();
-    const id = setInterval(refreshWhenVisible, 120000);
+    const id = setInterval(refreshWhenVisible, 300000);
     window.addEventListener('focus', refreshWhenVisible);
+    window.addEventListener('superinfra:data-changed', refreshWhenVisible);
     return () => {
       clearInterval(id);
       window.removeEventListener('focus', refreshWhenVisible);
+      window.removeEventListener('superinfra:data-changed', refreshWhenVisible);
     };
   }, [user?.id, user?.role]);
 

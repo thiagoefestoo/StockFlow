@@ -188,6 +188,13 @@ async function syncPortalUser({ req, technician, password, mustChangePassword = 
 exports.list = asyncHandler(async (req, res) => {
   const allTechnicians = await Technician.findAll({ include: technicianInclude, order: [['createdAt', 'DESC'], ['id', 'DESC']] });
   const technicians = filterTechniciansForUser(req.user, allTechnicians);
+  const compact = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
+
+  // Listas de seleção precisam apenas dos dados cadastrais do técnico. O modo compacto
+  // evita as consultas N+1 de saldos, patrimônios, ferramentas, documentos e usuário portal.
+  // O comportamento antigo permanece como padrão para a tela completa de Técnicos.
+  if (compact) return ok(res, technicians.map((technician) => technician.toJSON()));
+
   const data = [];
   for (const technician of technicians) {
     const assetCount = await SerializedAsset.count({ where: { technicianId: technician.id, ownerType: 'tecnico' } });
@@ -333,21 +340,74 @@ exports.stock = asyncHandler(async (req, res) => {
     return fail(res, 403, 'Você só pode acessar a própria caixa técnica.');
   }
 
+  const operationalView = String(req.query.view || '').trim().toLowerCase() === 'operational';
+  const operationalMaterialInclude = {
+    model: Material,
+    attributes: ['id', 'sku', 'name', 'category', 'unit', 'requiresSerial', 'unitCost', 'maxQuantityPerServiceOrder', 'allowCustomerInstall', 'requiresReturnOnRemoval'],
+  };
+  const materialInclude = operationalView ? [operationalMaterialInclude] : [Material];
+
   const rawAssets = await SerializedAsset.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
-    include: [Material],
+    include: materialInclude,
     order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
 
   const rawBalances = await StockBalance.findAll({
     where: { technicianId: technician.id, ownerType: 'tecnico' },
-    include: [Material],
+    include: materialInclude,
     order: [['updatedAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
   });
 
   // Ferramentas pertencem exclusivamente à ficha do técnico e não à caixa de consumíveis.
   const assets = rawAssets.filter((asset) => String(asset.Material?.category || '').toLowerCase() !== 'ferramenta');
   const balances = rawBalances.filter((balance) => String(balance.Material?.category || '').toLowerCase() !== 'ferramenta');
+
+  const assetsValue = assets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || 0), 0);
+  const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
+  const grouped = {};
+  for (const asset of assets) {
+    const key = asset.Material?.name || 'Equipamento serializado';
+    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
+    grouped[key].quantity += 1;
+    grouped[key].value += Number(asset.acquisitionCost || 0);
+    grouped[key].serials.push(asset.serialNumber);
+  }
+  for (const balance of balances) {
+    const key = balance.Material?.name || 'Material consumível';
+    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
+    grouped[key].quantity += Number(balance.quantity || 0);
+    grouped[key].value += Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0);
+  }
+
+  // Minha Caixa, portal e impressão não usam histórico de movimentações, guias, OS nem
+  // ferramentas nesta resposta. O modo operacional preserva os campos consumidos por essas
+  // telas e evita quatro consultas grandes ao Neon em cada atualização automática.
+  if (operationalView) {
+    return ok(res, {
+      technician,
+      assets: assets.map((asset) => ({ ...asset.toJSON(), custodyDays: daysBetween(asset.custodyStartedAt) })),
+      balances,
+      movements: [],
+      transfers: [],
+      orders: [],
+      tools: [],
+      summary: {
+        assetsCount: assets.length,
+        consumableLines: balances.length,
+        transfersCount: 0,
+        ordersCount: 0,
+        openOrders: 0,
+        oldCustody: assets.filter((asset) => daysBetween(asset.custodyStartedAt) >= 60).length,
+        assetsValue: money(assetsValue),
+        consumableValue: money(consumableValue),
+        toolsCount: 0,
+        toolsValue: 0,
+        totalValue: money(assetsValue + consumableValue),
+      },
+      groupedMaterials: Object.values(grouped).map((row) => ({ ...row, value: money(row.value) })),
+    });
+  }
 
   const rawMovements = await StockMovement.findAll({
     where: { [Op.or]: [{ fromTechnicianId: technician.id }, { toTechnicianId: technician.id }] },
@@ -365,6 +425,7 @@ exports.stock = asyncHandler(async (req, res) => {
 
   const transfers = await Transfer.findAll({
     where: { technicianId: technician.id, transferType: { [Op.ne]: 'ferramenta' } },
+    attributes: { exclude: ['attachmentData'] },
     include: [{ model: TransferItem, include: [Material, SerializedAsset] }],
     order: [['deliveredAt', 'DESC'], ['createdAt', 'DESC'], ['id', 'DESC']],
     limit: 30,
@@ -385,23 +446,6 @@ exports.stock = asyncHandler(async (req, res) => {
     : [];
   const activeTools = tools.filter((tool) => tool.status === 'com_tecnico');
   const toolValue = activeTools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0);
-
-  const assetsValue = assets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || 0), 0);
-  const consumableValue = balances.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.Material?.unitCost || 0), 0);
-  const grouped = {};
-  for (const asset of assets) {
-    const key = asset.Material?.name || 'Equipamento serializado';
-    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
-    grouped[key].quantity += 1;
-    grouped[key].value += Number(asset.acquisitionCost || 0);
-    grouped[key].serials.push(asset.serialNumber);
-  }
-  for (const balance of balances) {
-    const key = balance.Material?.name || 'Material consumível';
-    grouped[key] = grouped[key] || { material: key, quantity: 0, value: 0, serials: [] };
-    grouped[key].quantity += Number(balance.quantity || 0);
-    grouped[key].value += Number(balance.quantity || 0) * Number(balance.Material?.unitCost || 0);
-  }
 
   return ok(res, {
     technician,

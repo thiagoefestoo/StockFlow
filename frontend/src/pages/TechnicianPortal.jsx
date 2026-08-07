@@ -26,10 +26,10 @@ export default function TechnicianPortal() {
   const [saving, setSaving] = useState(false);
   const [serialSearches, setSerialSearches] = useState({});
 
-  async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians')).data.data); }
+  async function loadTechs() { if (isSupervisor) setTechnicians((await api.get('/technicians?compact=true')).data.data); }
   async function loadStock(id = selectedTech) {
     if (!id) return;
-    setStock((await api.get(`/technicians/${id}/stock`)).data.data);
+    setStock((await api.get(`/technicians/${id}/stock?view=operational`)).data.data);
     setRequests(sortRecentFirst((await api.get(`/material-requests?technicianId=${id}`)).data.data || [], ['createdAt']));
   }
   useEffect(() => { loadTechs(); if (selectedTech) loadStock(selectedTech); }, []);

@@ -59,7 +59,7 @@ export default function TechnicianReturns() {
 
   async function loadInitial() {
     const [techRes, whRes] = await Promise.all([
-      api.get('/technicians'),
+      api.get('/technicians?compact=true'),
       api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
     const techList = techRes.data.data || [];
@@ -71,7 +71,7 @@ export default function TechnicianReturns() {
 
   async function loadBox(id = selectedTech) {
     if (!id) { setBox(null); return; }
-    const res = await api.get(`/stock/technician-box/${id}?_=${Date.now()}`);
+    const res = await api.get(`/stock/technician-box/${id}?view=operational`);
     setBox(res.data.data);
   }
 

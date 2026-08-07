@@ -154,7 +154,7 @@ export default function Receiving() {
       });
       const requests = [api.get('/batches', { params })];
       if (refreshReferences || !materials.length || !warehouses.length) {
-        requests.push(api.get('/materials'), api.get('/warehouses').catch(() => ({ data: { data: [] } })));
+        requests.push(api.get('/materials?compact=true'), api.get('/warehouses').catch(() => ({ data: { data: [] } })));
       }
       const [b, m, w] = await Promise.all(requests);
       setBatches(sortRecentFirst(b.data.data || [], ['receivedAt', 'createdAt']));

@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../services/api';
 import { sortRecentFirst } from '../utils/recentFirst';
 import KpiCard from '../components/KpiCard';
@@ -36,6 +36,7 @@ export default function TechnicianBoxControl() {
   const [box, setBox] = useState(null);
   const [boxLoading, setBoxLoading] = useState(false);
   const [lastBoxRefresh, setLastBoxRefresh] = useState(null);
+  const lastBoxRefreshAtRef = useRef(0);
   const [tab, setTab] = useState('cliente');
   const [clientForm, setClientForm] = useState(emptyClientForm);
   const [returnForm, setReturnForm] = useState(emptyReturnForm);
@@ -49,7 +50,7 @@ export default function TechnicianBoxControl() {
 
   async function loadTechs() {
     const [techRes, whRes] = await Promise.all([
-      api.get('/technicians'),
+      api.get('/technicians?compact=true'),
       api.get('/warehouses?operationalOnly=true').catch(() => ({ data: { data: [] } })),
     ]);
     const list = techRes.data.data || [];
@@ -65,6 +66,7 @@ export default function TechnicianBoxControl() {
     try {
       const res = await api.get(`/stock/technician-box/${id}?_=${Date.now()}`);
       setBox(res.data.data);
+      lastBoxRefreshAtRef.current = Date.now();
       setLastBoxRefresh(new Date());
     } finally {
       setBoxLoading(false);
@@ -93,8 +95,11 @@ export default function TechnicianBoxControl() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
-    const interval = setInterval(refreshWhenVisible, 60000);
-    const onFocus = () => refresh();
+    const refreshIfStale = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastBoxRefreshAtRef.current >= 300000) refresh();
+    };
+    const interval = setInterval(refreshWhenVisible, 300000);
+    const onFocus = () => refreshIfStale();
     const onStorage = (event) => {
       if (event.key === 'superinfra:technician-box-refresh') refresh();
     };

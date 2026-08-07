@@ -65,7 +65,7 @@ export default function ServiceOrders() {
   async function loadFilterReferences() {
     const [warehouseResponse, technicianResponse] = await Promise.all([
       api.get('/warehouses', { params: { operationalOnly: true, status: 'ativo' } }).catch(() => ({ data: { data: [] } })),
-      api.get('/technicians').catch(() => ({ data: { data: [] } })),
+      api.get('/technicians?compact=true').catch(() => ({ data: { data: [] } })),
     ]);
     const values = Array.from(new Set((warehouseResponse.data.data || []).map((warehouse) => String(warehouse.city || '').trim()).filter(Boolean)));
     setCities(values.sort((a, b) => a.localeCompare(b, 'pt-BR')));

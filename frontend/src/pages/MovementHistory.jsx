@@ -44,7 +44,7 @@ export default function MovementHistory() {
       if (technicianId) params.technicianId = technicianId;
       if (search.trim()) params.search = search.trim();
       const requests = [api.get('/stock/movements', { params })];
-      if (refreshTechnicians || !technicians.length) requests.push(api.get('/technicians'));
+      if (refreshTechnicians || !technicians.length) requests.push(api.get('/technicians?compact=true'));
       const [mov, tech] = await Promise.all(requests);
       setRows(sortRecentFirst(mov.data.data || [], ['movementAt', 'createdAt']));
       setPagination(mov.data.pagination || { page: targetPage, pageSize: 15, total: mov.data.data?.length || 0, totalPages: 1 });
