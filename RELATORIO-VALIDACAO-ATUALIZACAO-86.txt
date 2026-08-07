@@ -1,0 +1,43 @@
+STOCKFLOW - RELATORIO DE VALIDACAO - ATUALIZACAO 86
+Data: 07/08/2026
+Base: StockFlow Versao 85 de producao enviada pelo usuario
+
+ESCOPO VALIDADO
+- Trava de transferencia direta quando existe preparacao de solicitacao aprovada pendente.
+- Entrega vinculada a solicitacao continua liberada.
+- Fluxo tecnico -> cliente / OS nao alterado.
+- Baixa multipla de ferramentas em uma unica transacao e uma unica guia.
+- Devolucao de ferramenta controlada por estoque recompõe saldo no estoque de origem.
+- Substituicao individual existente preservada.
+- Data/hora adicionada na fila de preparacao.
+- Cockpit atualizado para Versao 86.
+
+TESTES EXECUTADOS
+- backend/scripts/test-update-86-production-guards.js: 17/17 verificacoes aprovadas.
+- backend/scripts/check-syntax.js: sintaxe validada em 124 arquivos JS.
+- node --check nos controllers/rotas alterados: aprovado.
+- Comparacao com o ZIP de producao: nenhuma migration ou model alterado.
+
+BUILD FRONTEND NESTE AMBIENTE
+Nao foi possivel instalar as dependencias para executar o build integral porque o espelho npm interno retornou HTTP 404 para yocto-queue-0.1.0 antes da compilacao. O aplicador PowerShell executa `npm run build` no ambiente local do usuario e faz rollback automatico se o build falhar.
+
+ARQUIVOS DE PRODUCAO ALTERADOS
+backend/app/controllers/technicianToolController.js
+backend/app/controllers/transferController.js
+backend/app/routes/technicianToolRoutes.js
+frontend/src/pages/OperationsCockpit.jsx
+frontend/src/pages/Technicians.jsx
+frontend/src/pages/TransferPrint.jsx
+frontend/src/pages/Transfers.jsx
+frontend/src/styles.css
+
+ARQUIVO DE TESTE ADICIONADO
+backend/scripts/test-update-86-production-guards.js
+
+SEM ALTERACAO
+- migrations
+- models
+- schema do banco
+- ServiceOrders / fluxo tecnico para cliente
+- regras existentes de transferencia vinculada a solicitacao
+- fluxo existente de baixa individual/substituicao de ferramenta

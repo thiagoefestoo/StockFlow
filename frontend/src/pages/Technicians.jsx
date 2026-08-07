@@ -35,6 +35,7 @@ function emptyToolTransferForm() {
   return { warehouseId: '', notes: '', items: [newToolTransferItem()] };
 }
 const emptyRemoval = { status: 'devolvida', removalReason: '', replacementName: '', replacementSerial: '', replacementBrand: '', replacementValue: '' };
+const emptyBulkRemoval = { status: 'devolvida', removalReason: '', quantities: {} };
 const emptyToolDocument = { file: null, signedAt: '', notes: '' };
 const TOOL_STATUS_LABELS = { com_tecnico: 'Com o técnico', substituida: 'Substituída', perdida: 'Perdida', desgaste: 'Baixada por desgaste', devolvida: 'Devolvida' };
 
@@ -87,6 +88,11 @@ export default function Technicians() {
   const [removeForm, setRemoveForm] = useState(emptyRemoval);
   const [removeSaving, setRemoveSaving] = useState(false);
   const [removeError, setRemoveError] = useState('');
+  const [bulkRemoveModal, setBulkRemoveModal] = useState(false);
+  const [bulkRemoveForm, setBulkRemoveForm] = useState(emptyBulkRemoval);
+  const [bulkRemoveSaving, setBulkRemoveSaving] = useState(false);
+  const [bulkRemoveError, setBulkRemoveError] = useState('');
+  const [bulkRemovalGuide, setBulkRemovalGuide] = useState(null);
   const [toolDocuments, setToolDocuments] = useState([]);
   const [documentPreview, setDocumentPreview] = useState(null);
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
@@ -209,6 +215,7 @@ export default function Technicians() {
 
   async function openDetails(technician) {
     setToolError('');
+    setBulkRemovalGuide(null);
     setDocumentError('');
     setTools([]);
     setToolDocuments([]);
@@ -360,6 +367,62 @@ export default function Technicians() {
     setRemoveModal({ open: true, tool });
   }
 
+  function openBulkRemoveTools() {
+    if (!details.technician) return;
+    setBulkRemoveError('');
+    setBulkRemoveForm(emptyBulkRemoval);
+    setBulkRemoveModal(true);
+  }
+
+  function setBulkRemovalQuantity(rowKey, rawValue, maximum) {
+    const parsed = Number(rawValue || 0);
+    const quantity = Number.isFinite(parsed) ? Math.max(0, Math.min(Math.trunc(parsed), Number(maximum || 0))) : 0;
+    setBulkRemoveForm((current) => ({
+      ...current,
+      quantities: { ...current.quantities, [rowKey]: quantity },
+    }));
+  }
+
+  async function saveBulkRemoveTools() {
+    if (!details.technician) return;
+    if (!bulkRemovalToolIds.length) {
+      setBulkRemoveError('Selecione ao menos uma ferramenta para baixar.');
+      return;
+    }
+    const isNotReceived = bulkRemoveForm.status === 'nao_recebido';
+    const removalReason = isNotReceived
+      ? (bulkRemoveForm.removalReason.trim() || 'Material não recebido')
+      : bulkRemoveForm.removalReason.trim();
+    if (!removalReason) {
+      setBulkRemoveError('Descreva o motivo da baixa.');
+      return;
+    }
+    const confirmed = window.confirm(`Confirmar a baixa de ${bulkRemovalToolIds.length} ferramenta(s) em uma única guia?\n\nMotivo: ${removalReason}`);
+    if (!confirmed) return;
+
+    setBulkRemoveSaving(true);
+    setBulkRemoveError('');
+    try {
+      const response = await api.post(`/technicians/${details.technician.id}/tools/remove-batch`, {
+        toolIds: bulkRemovalToolIds,
+        status: isNotReceived ? 'devolvida' : bulkRemoveForm.status,
+        removalReason,
+        reasonCode: isNotReceived ? 'material_nao_recebido' : undefined,
+      });
+      const result = response.data?.data || {};
+      setBulkRemovalGuide(result.transfer ? { id: result.transfer.id, transferNumber: result.transfer.transferNumber } : null);
+      setBulkRemoveModal(false);
+      setBulkRemoveForm(emptyBulkRemoval);
+      await Promise.all([loadTools(details.technician.id), load()]);
+      const stock = (await api.get(`/technicians/${details.technician.id}/stock`)).data.data;
+      setDetails((current) => ({ ...current, stock }));
+    } catch (err) {
+      setBulkRemoveError(err.response?.data?.message || 'Não foi possível registrar a baixa múltipla das ferramentas.');
+    } finally {
+      setBulkRemoveSaving(false);
+    }
+  }
+
   async function saveRemoveTool() {
     if (!details.technician || !removeModal.tool) return;
     const isNotReceived = removeForm.status === 'nao_recebido';
@@ -480,6 +543,17 @@ export default function Technicians() {
     }
     return Array.from(rows.values());
   }, [tools]);
+  const activeGroupedToolRows = useMemo(() => groupedToolRows.filter((row) => row.sample?.status === 'com_tecnico'), [groupedToolRows]);
+  const bulkRemovalSelections = activeGroupedToolRows
+    .map((row) => {
+      const activeTools = row.tools.filter((tool) => tool.status === 'com_tecnico');
+      const requested = Math.max(0, Math.min(Number(bulkRemoveForm.quantities[row.key] || 0), activeTools.length));
+      if (!requested) return null;
+      return { row, quantity: requested, tools: activeTools.slice(0, requested) };
+    })
+    .filter(Boolean);
+  const bulkRemovalToolIds = bulkRemovalSelections.flatMap((selection) => selection.tools.map((tool) => Number(tool.id)));
+  const bulkRemovalTotalValue = bulkRemovalSelections.reduce((sum, selection) => sum + selection.tools.reduce((subtotal, tool) => subtotal + Number(tool.referenceValue || 0), 0), 0);
   const selectedToolTransferRows = (toolForm.items || [])
     .map((item, index) => {
       const tool = availableTools.find((row) => Number(row.materialId) === Number(item.materialId));
@@ -627,11 +701,13 @@ export default function Technicians() {
                 <div className="action-toolbar">
                   {details.technician && <Link className="ghost" to={`/ferramentas-tecnico/${details.technician.id}`} target="_blank" rel="noreferrer" onClick={prepareAuthSessionHandoff}>Gerar termo (imprimir)</Link>}
                   {canEditTools && <button className="ghost" onClick={openDocumentUpload}>Anexar termo assinado</button>}
+                  {canEditTools && activeGroupedToolRows.length > 0 && <button className="ghost danger-outline" onClick={openBulkRemoveTools}>Baixar várias ferramentas</button>}
                   {canEditTools && <button onClick={openAddTool}>Adicionar ferramentas</button>}
                 </div>
               </div>
               <p><small>Ferramentas registradas aqui ficam na ficha patrimonial do técnico, com valor, data de entrega, tempo de custódia e histórico de baixa. Elas não alteram o saldo de materiais da caixa técnica.</small></p>
               {toolError && <div className="alert danger">{toolError}</div>}
+              {bulkRemovalGuide && <div className="alert success"><strong>✅ Guia única gerada: {bulkRemovalGuide.transferNumber}</strong><br /><Link to={`/transferencias/${bulkRemovalGuide.id}`} target="_blank" rel="noreferrer" onClick={prepareAuthSessionHandoff}>Abrir / imprimir guia de baixa</Link></div>}
               {toolsLoading && <div className="empty-state">Carregando ferramentas em custódia...</div>}
               {!toolsLoading && tools.length === 0 && <div className="empty-state">Nenhuma ferramenta registrada na ficha deste técnico.</div>}
               {groupedToolRows.map((row) => {
@@ -861,6 +937,52 @@ export default function Technicians() {
           <label>Data da assinatura<input type="date" value={documentForm.signedAt || ''} onChange={(e) => setDocumentForm({ ...documentForm, signedAt: e.target.value })} /></label>
           <label>Observações<textarea rows={3} value={documentForm.notes || ''} onChange={(e) => setDocumentForm({ ...documentForm, notes: e.target.value })} placeholder="Ex.: termo conferido e assinado na entrega das ferramentas." /></label>
           <div className="viz-callout">O sistema registrará no documento a quantidade e o valor das ferramentas ativas na ficha no momento do anexo.</div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={bulkRemoveModal}
+        title={`Baixar várias ferramentas: ${details.technician?.name || ''}`}
+        onClose={() => !bulkRemoveSaving && setBulkRemoveModal(false)}
+        footer={<>
+          <button className="ghost" disabled={bulkRemoveSaving} onClick={() => setBulkRemoveModal(false)}>Cancelar</button>
+          <button disabled={bulkRemoveSaving || !bulkRemovalToolIds.length} onClick={saveBulkRemoveTools}>{bulkRemoveSaving ? 'Gerando guia...' : `Confirmar baixa (${bulkRemovalToolIds.length}) e gerar 1 guia`}</button>
+        </>}
+      >
+        <div className="form-stack">
+          {bulkRemoveError && <div className="alert danger">{bulkRemoveError}</div>}
+          <div className="viz-callout"><strong>Seleção múltipla.</strong> Marque quantidades de vários tipos de ferramenta. Todas as unidades selecionadas serão baixadas juntas e registradas em <strong>uma única guia</strong>. Para substituição por outra ferramenta, continue usando a baixa individual.</div>
+          <div className="form-grid">
+            <label>Motivo da baixa<select value={bulkRemoveForm.status} onChange={(e) => { const status = e.target.value; setBulkRemoveForm((current) => ({ ...current, status, removalReason: status === 'nao_recebido' && !current.removalReason.trim() ? 'Material não recebido' : current.removalReason })); }}>
+              <option value="devolvida">Devolução</option>
+              <option value="nao_recebido">Material não recebido</option>
+              <option value="perdida">Perda/extravio</option>
+              <option value="desgaste">Desgaste/quebra</option>
+            </select></label>
+            <label>Descrição do motivo<textarea rows={2} value={bulkRemoveForm.removalReason} onChange={(e) => setBulkRemoveForm((current) => ({ ...current, removalReason: e.target.value }))} placeholder="Descreva o motivo que será registrado para todas as ferramentas selecionadas." /></label>
+          </div>
+          <section className="panel-soft">
+            <div className="subtoolbar"><div><h4>Ferramentas em custódia</h4><small>Marque quantas unidades deseja baixar de cada tipo.</small></div><span className="badge soft">{bulkRemovalToolIds.length} selecionada(s)</span></div>
+            <div className="bulk-tool-removal-list">
+              {activeGroupedToolRows.map((row) => {
+                const tool = row.sample;
+                const maximum = row.tools.filter((item) => item.status === 'com_tecnico').length;
+                const quantity = Number(bulkRemoveForm.quantities[row.key] || 0);
+                const checked = quantity > 0;
+                return (
+                  <div className={`bulk-tool-removal-row ${checked ? 'selected' : ''}`} key={row.key}>
+                    <label className="check-line">
+                      <input type="checkbox" checked={checked} onChange={(e) => setBulkRemovalQuantity(row.key, e.target.checked ? 1 : 0, maximum)} />
+                      <span><strong>{tool.Material?.name || tool.name}</strong><small>{tool.materialId ? `Controle por quantidade • ${maximum} disponível(is) na ficha` : `Patrimônio/série: ${tool.serialNumber}`}</small></span>
+                    </label>
+                    <label className="bulk-tool-removal-quantity">Quantidade<input type="number" min="1" max={maximum} step="1" disabled={!checked} value={checked ? quantity : ''} onChange={(e) => setBulkRemovalQuantity(row.key, e.target.value, maximum)} placeholder="0" /></label>
+                    <strong>{brl(checked ? row.tools.slice(0, quantity).reduce((sum, item) => sum + Number(item.referenceValue || 0), 0) : 0)}</strong>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+          <div className="submit-bar"><span>Ferramentas selecionadas: <strong>{bulkRemovalToolIds.length}</strong> • valor de referência: <strong>{brl(bulkRemovalTotalValue)}</strong> • será gerada <strong>1 guia</strong></span></div>
         </div>
       </Modal>
 

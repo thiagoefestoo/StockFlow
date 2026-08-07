@@ -54,12 +54,18 @@ function isToolTransfer(transfer) {
   return transfer?.transferType === 'ferramenta' || String(transfer?.transferNumber || '').toUpperCase().startsWith('FERRAMENTA-');
 }
 
+function isToolRemovalTransfer(transfer) {
+  return transfer?.transferType === 'baixa_ferramenta' || String(transfer?.transferNumber || '').toUpperCase().startsWith('BAIXA-FERRAMENTA-');
+}
+
 function transferTypeLabel(transfer) {
+  if (isToolRemovalTransfer(transfer)) return 'Baixa de ferramentas';
   if (isToolTransfer(transfer)) return 'Ferramenta técnico → técnico';
   return isReturnTransfer(transfer) ? 'Devolução de item' : 'Entrega estoque → técnico';
 }
 
 function transferWarehouseLabel(transfer) {
+  if (isToolRemovalTransfer(transfer)) return transfer.Warehouse ? 'Estoque de retorno' : 'Baixa patrimonial';
   if (isToolTransfer(transfer)) return 'Técnico de origem';
   return isReturnTransfer(transfer) ? 'Estoque destino' : 'Estoque origem';
 }
@@ -299,6 +305,15 @@ export default function Transfers() {
 
   const selectedTechnician = technicians.find((t) => String(t.id) === String(form.technicianId));
   const selectedWarehouse = warehouses.find((w) => String(w.id) === String(form.warehouseId));
+  const pendingDeliveryRequests = useMemo(() => {
+    if (!form.technicianId || requestLinked) return [];
+    return approvedRequests
+      .filter((request) => Number(request.technicianId) === Number(form.technicianId))
+      .slice()
+      .sort((a, b) => new Date(a.approvedAt || a.createdAt || 0) - new Date(b.approvedAt || b.createdAt || 0));
+  }, [approvedRequests, form.technicianId, requestLinked]);
+  const pendingDeliveryRequest = pendingDeliveryRequests[0] || null;
+  const directTransferBlocked = Boolean(pendingDeliveryRequest);
 
   function openNewTransfer() {
     const firstActive = warehouses.find((warehouse) => warehouse.status === 'ativo') || warehouses[0];
@@ -329,6 +344,10 @@ export default function Transfers() {
   }
 
   function addItem() {
+    if (directTransferBlocked) {
+      showNotice(`O técnico possui ${pendingDeliveryRequests.length} solicitação(ões) aprovada(s) aguardando preparação. Conclua a pendência ${pendingDeliveryRequest?.requestNumber || ''} antes de criar uma transferência direta.`, 'warning');
+      return;
+    }
     if (!form.warehouseId) {
       showNotice('Selecione primeiro o estoque de origem.');
       return;
@@ -429,6 +448,7 @@ export default function Transfers() {
   function validateBeforeSave() {
     if (!form.warehouseId) return 'Selecione o estoque de origem.';
     if (!form.technicianId) return 'Selecione o técnico de destino.';
+    if (!requestLinked && pendingDeliveryRequest) return `O técnico possui a solicitação ${pendingDeliveryRequest.requestNumber} aprovada aguardando preparação/entrega. Conclua essa pendência antes de criar uma nova transferência direta para a caixa.`;
     if (!form.items.length && !requestLinked) return 'Adicione pelo menos um item à transferência.';
     if (requestLinked && !form.items.length) return 'Mantenha pelo menos um item na solicitação para continuar a entrega.';
 
@@ -681,9 +701,10 @@ export default function Transfers() {
     return transfers.filter((transfer) => {
       const isReturn = isReturnTransfer(transfer);
       const isTool = isToolTransfer(transfer);
-      if (transferTypeFilter === 'entrega' && (isReturn || isTool)) return false;
+      const isToolRemoval = isToolRemovalTransfer(transfer);
+      if (transferTypeFilter === 'entrega' && (isReturn || isTool || isToolRemoval)) return false;
       if (transferTypeFilter === 'retorno' && !isReturn) return false;
-      if (transferTypeFilter === 'ferramenta' && !isTool) return false;
+      if (transferTypeFilter === 'ferramenta' && !isTool && !isToolRemoval) return false;
       if (transferStatusFilter && transfer.status !== transferStatusFilter) return false;
       if (!search) return true;
       const text = [
@@ -782,7 +803,7 @@ export default function Transfers() {
           <label>Técnico<select value={requestTechnicianFilter} onChange={(e) => setRequestTechnicianFilter(e.target.value)}><option value="">Todos os técnicos</option>{technicians.map((technician) => <option key={technician.id} value={technician.id}>{technician.name}</option>)}</select></label>
           <label className="filter-action"><span>&nbsp;</span><button type="button" className="ghost" onClick={() => { setRequestSearch(''); setRequestWarehouseFilter(''); setRequestTechnicianFilter(''); }}>Limpar filtros</button></label>
         </div>
-        <div className="table-wrap"><table><thead><tr><th>Solicitação</th><th>Técnico</th><th>Estoque</th><th>Materiais</th><th>Qtd. solicitada</th><th>Valor aprovado</th><th className="action-cell">Ação</th></tr></thead><tbody>{filteredApprovedRequests.map((request) => <tr key={request.id}><td><strong>{request.requestNumber}</strong><br /><small>{request.priority || 'prioridade média'}</small></td><td>{request.Technician?.name || '-'}</td><td>{request.Warehouse?.name || 'Estoque do técnico'}</td><td>{(request.MaterialRequestItems || []).map((item) => item.Material?.name).filter(Boolean).join(', ') || '-'}</td><td>{formatQuantity(request.totalQuantity)}</td><td>{brl(request.totalValue)}</td><td><button type="button" onClick={() => openApprovedRequest(request.id)}>📦 Preparar transferência</button></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Solicitação</th><th>Data/hora</th><th>Técnico</th><th>Estoque</th><th>Materiais</th><th>Qtd. solicitada</th><th>Valor aprovado</th><th className="action-cell">Ação</th></tr></thead><tbody>{filteredApprovedRequests.map((request) => <tr key={request.id}><td><strong>{request.requestNumber}</strong><br /><small>{request.priority || 'prioridade média'}</small></td><td><strong>{dt(request.createdAt)}</strong>{request.approvedAt && <><br /><small>Aprovada: {dt(request.approvedAt)}</small></>}</td><td>{request.Technician?.name || '-'}</td><td>{request.Warehouse?.name || 'Estoque do técnico'}</td><td>{(request.MaterialRequestItems || []).map((item) => item.Material?.name).filter(Boolean).join(', ') || '-'}</td><td>{formatQuantity(request.totalQuantity)}</td><td>{brl(request.totalValue)}</td><td><button type="button" onClick={() => openApprovedRequest(request.id)}>📦 Preparar transferência</button></td></tr>)}</tbody></table></div>
         {!filteredApprovedRequests.length && <div className="empty-state">Nenhuma solicitação aprovada encontrada com os filtros informados.</div>}
       </section>
 
@@ -795,9 +816,9 @@ export default function Transfers() {
         </div>
       </section>
 
-      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}<Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
+      <section className="panel"><div className="table-wrap"><table><thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Estoque</th><th>Data</th><th>Qtd</th><th>Valor</th><th>Status</th><th>Assinatura</th><th className="action-cell">Opções</th></tr></thead><tbody>{filteredTransfers.map((tr) => <tr key={tr.id}><td>{tr.transferNumber}</td><td><span className={`badge ${isToolRemovalTransfer(tr) || isToolTransfer(tr) ? 'patrimonio' : isReturnTransfer(tr) ? 'retorno_tecnico' : 'transferencia_tecnico'}`}>{transferTypeLabel(tr)}</span></td><td>{tr.Technician?.name}</td><td><small>{transferWarehouseLabel(tr)}</small><br />{isToolRemovalTransfer(tr) ? (tr.Warehouse?.name || 'Sem retorno ao estoque') : isToolTransfer(tr) ? (tr.fromTechnician?.name || '-') : (tr.Warehouse?.name || '-')}</td><td>{dt(tr.deliveredAt)}</td><td>{formatQuantity(tr.totalQuantity)}</td><td>{brl(tr.totalValue)}</td><td><span className={`badge ${tr.status}`}>{tr.status}</span></td><td><div className="attachment-cell">{tr.attachmentName && <span className="badge success" title={tr.attachmentName}>{tr.attachmentName}</span>}<input type="file" multiple accept="image/*,.pdf" onChange={(e) => { sign(tr.id, e.target.files); e.target.value = ''; }} /><small>Selecione vários arquivos de uma vez. A guia deixa de ficar pendente após o primeiro anexo.</small></div></td><td><div className="action-toolbar"><button className="info" onClick={() => openTransferDetails(tr)}>🔎 Detalhes</button><Link className="ghost" to={`/transferencias/${tr.id}`}>🖨️ Guia</Link>{isAdmin && <button className="ghost" onClick={() => setEdit({ open: true, item: tr, form: { notes: tr.notes || '', status: tr.status || 'pendente_assinatura', deliveredAt: tr.deliveredAt ? String(tr.deliveredAt).slice(0, 16) : '', signatureResponsible: tr.signatureResponsible || '' } })}>✏️ Editar</button>}</div></td></tr>)}</tbody></table></div>{!filteredTransfers.length && <div className="empty-state">Nenhuma transferência encontrada com os filtros informados.</div>}<Pagination {...pagination} page={page} loading={loadingList} onPageChange={load} /></section>
 
-      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving} onClick={openReview}>{zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
+      <Modal open={modal} title={form.materialRequestId ? '📦 Transferir itens da solicitação aprovada' : '📦 Nova transferência para técnico'} onClose={() => !saving && setModal(false)} footer={<><button className="ghost" disabled={saving} onClick={() => setModal(false)}>Cancelar</button><button disabled={saving || directTransferBlocked} onClick={openReview}>{directTransferBlocked ? 'Resolva a preparação pendente' : zeroStockRelease ? 'Revisar liberação sem material' : 'Revisar transferência'}</button></>}>
         <div className="transfer-wizard">
           <section className="transfer-summary-card">
             <div><small>Estoque de origem</small><strong>{selectedWarehouse?.name || 'Selecione um estoque'}</strong><span>{selectedWarehouse ? `${selectedWarehouse.city || '-'} • ${selectedWarehouse.code || 'sem código'}` : 'Materiais serão filtrados pelo estoque'}</span></div>
@@ -811,9 +832,18 @@ export default function Transfers() {
             <label className={!form.technicianId ? 'required-selection-field' : ''}>👷 Técnico<select disabled={requestLinked} value={form.technicianId} onChange={(e) => setForm({ ...form, technicianId: e.target.value })}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
             <label className="span-2">📝 Motivo/observação<input disabled={requestLinked} list="transfer-reason-options" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="transfer-reason-options">{TRANSFER_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           </div>
-          {requestLinked ? <div className="viz-callout"><strong>Solicitação aprovada vinculada.</strong> Ajuste a quantidade realmente entregue, selecione os seriais e use <strong>Excluir da entrega</strong> quando um item não for mais necessário. O item excluído continuará preservado no histórico do pedido com quantidade entregue igual a zero.</div> : form.warehouseId && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
+          {directTransferBlocked && (
+            <div className="alert danger transfer-pending-delivery-lock">
+              <div>
+                <strong>⛔ Transferência direta bloqueada para este técnico.</strong>
+                <p>Existe {pendingDeliveryRequests.length === 1 ? 'uma solicitação aprovada' : `${pendingDeliveryRequests.length} solicitações aprovadas`} aguardando preparação/entrega. Resolva primeiro <strong>{pendingDeliveryRequest?.requestNumber}</strong>, criada em {dt(pendingDeliveryRequest?.createdAt)}.</p>
+              </div>
+              <button type="button" onClick={() => { setModal(false); openApprovedRequest(pendingDeliveryRequest.id); }}>📦 Preparar pendência</button>
+            </div>
+          )}
+          {requestLinked ? <div className="viz-callout"><strong>Solicitação aprovada vinculada.</strong> Ajuste a quantidade realmente entregue, selecione os seriais e use <strong>Excluir da entrega</strong> quando um item não for mais necessário. O item excluído continuará preservado no histórico do pedido com quantidade entregue igual a zero.</div> : form.warehouseId && !directTransferBlocked && <div className="viz-callout">Apenas materiais com saldo no estoque selecionado aparecem abaixo. A transferência fica registrada no histórico, BI e auditoria. Quando o valor ultrapassa o limite individual do técnico, o sistema envia a carga para aprovação antes de movimentar o estoque.</div>}
           {loadingStock && <div className="empty-state">Carregando materiais do estoque selecionado...</div>}
-          <div className="subtoolbar"><h4>Itens da guia</h4>{!requestLinked && <button className="ghost" onClick={addItem}>➕ Adicionar item</button>}</div>
+          <div className="subtoolbar"><h4>Itens da guia</h4>{!requestLinked && <button className="ghost" disabled={directTransferBlocked} onClick={addItem}>➕ Adicionar item</button>}</div>
           {!requestLinked && !loadingStock && form.warehouseId && materialOptions.length === 0 && <div className="empty-state">Este estoque não possui saldo disponível para transferência.</div>}
           {form.items.length === 0 && <div className="empty-state">{requestLinked ? 'A solicitação aprovada não possui itens disponíveis para transferência.' : 'Clique em “Adicionar item” para montar a carga do técnico.'}</div>}
           {form.items.map((item, i) => {

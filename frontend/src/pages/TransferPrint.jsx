@@ -25,23 +25,28 @@ export default function TransferPrint() {
     || number.startsWith('RETORNO-')
     || String(transfer.notes || '').toUpperCase().includes('RETORNO DA CAIXA DO TÉCNICO PARA ESTOQUE');
   const isToolTransfer = transfer.transferType === 'ferramenta' || number.startsWith('FERRAMENTA-');
+  const isToolRemoval = transfer.transferType === 'baixa_ferramenta' || number.startsWith('BAIXA-FERRAMENTA-');
   const items = transfer.TransferItems || [];
   const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const calculatedTotalValue = items.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
   const totalValue = calculatedTotalValue > 0 ? calculatedTotalValue : Number(transfer.totalValue || 0);
   const brl = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  const guideTitle = isToolTransfer
-    ? 'GUIA DE TRANSFERÊNCIA DE FERRAMENTAS'
-    : isReturn
-      ? 'GUIA DE DEVOLUÇÃO DE MATERIAL'
-      : 'GUIA DE ENTREGA DE MATERIAL';
-  const pageTitle = isToolTransfer ? 'Guia de ferramentas' : isReturn ? 'Guia de devolução' : 'Guia de entrega';
-  const guideDescription = isToolTransfer
-    ? 'Documento para conferência e mudança de responsabilidade das ferramentas entre técnicos.'
-    : isReturn
-      ? 'Documento para conferência do retorno do técnico para o estoque.'
-      : 'Documento para conferência e assinatura do técnico responsável.';
+  const guideTitle = isToolRemoval
+    ? 'GUIA DE BAIXA DE FERRAMENTAS'
+    : isToolTransfer
+      ? 'GUIA DE TRANSFERÊNCIA DE FERRAMENTAS'
+      : isReturn
+        ? 'GUIA DE DEVOLUÇÃO DE MATERIAL'
+        : 'GUIA DE ENTREGA DE MATERIAL';
+  const pageTitle = isToolRemoval ? 'Guia de baixa de ferramentas' : isToolTransfer ? 'Guia de ferramentas' : isReturn ? 'Guia de devolução' : 'Guia de entrega';
+  const guideDescription = isToolRemoval
+    ? 'Documento único para conferência da baixa de uma ou mais ferramentas da ficha do técnico.'
+    : isToolTransfer
+      ? 'Documento para conferência e mudança de responsabilidade das ferramentas entre técnicos.'
+      : isReturn
+        ? 'Documento para conferência do retorno do técnico para o estoque.'
+        : 'Documento para conferência e assinatura do técnico responsável.';
 
   return (
     <div className="page-grid print-page">
@@ -57,15 +62,16 @@ export default function TransferPrint() {
           {isToolTransfer && <p><b>Técnico de origem:</b> {transfer.fromTechnician?.name || '-'}</p>}
           <p><b>{isToolTransfer ? 'Técnico de destino' : 'Técnico'}:</b> {transfer.Technician?.name || '-'}</p>
           <p><b>CPF do destino:</b> {transfer.Technician?.document || '-'}</p>
-          {!isToolTransfer && <p><b>{isReturn ? 'Estoque destino:' : 'Estoque origem:'}</b> {transfer.Warehouse?.name || '-'}</p>}
+          {isToolRemoval && transfer.Warehouse && <p><b>Estoque de referência/retorno:</b> {transfer.Warehouse?.name || '-'}</p>}
+          {!isToolTransfer && !isToolRemoval && <p><b>{isReturn ? 'Estoque destino:' : 'Estoque origem:'}</b> {transfer.Warehouse?.name || '-'}</p>}
           <p><b>Data:</b> {new Date(transfer.deliveredAt).toLocaleString('pt-BR')}</p>
           <p><b>Status:</b> {transfer.status}</p>
           <p><b>Valor total:</b> {brl(totalValue)}</p>
         </div>
-        <table><thead><tr><th>{isToolTransfer ? 'Ferramenta' : 'Material'}</th><th>Patrimônio/Serial</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.TechnicianTool?.name || item.itemDescription || item.Material?.name || 'Item'}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.totalCost)}</td></tr>)}<tr className="guide-total-row"><td colSpan="2"><strong>Total da guia</strong></td><td><strong>{formatQuantity(totalQuantity)}</strong></td><td><strong>{brl(totalValue)}</strong></td></tr></tbody></table>
+        <table><thead><tr><th>{isToolTransfer || isToolRemoval ? 'Ferramenta' : 'Material'}</th><th>Patrimônio/Serial</th><th>Qtd</th><th>Valor</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.TechnicianTool?.name || item.itemDescription || item.Material?.name || 'Item'}</td><td>{item.serialNumber || '-'}</td><td>{formatQuantity(item.quantity)}</td><td>{brl(item.totalCost)}</td></tr>)}<tr className="guide-total-row"><td colSpan="2"><strong>Total da guia</strong></td><td><strong>{formatQuantity(totalQuantity)}</strong></td><td><strong>{brl(totalValue)}</strong></td></tr></tbody></table>
         <div className="stamp-box"><strong>CARIMBO DE CONFERÊNCIA SUPER INFRA</strong><p>{transfer.stampText || (isToolTransfer ? 'Ferramentas conferidas e transferidas para a responsabilidade do técnico de destino.' : isReturn ? 'Recebido do técnico, conferido e retornado ao estoque informado.' : 'Recebido, conferido e assumida responsabilidade de guarda até baixa por OS ou devolução ao estoque.')}</p><div className="stamp-grid"><span>Data: ____/____/______</span><span>Hora: ____:____</span><span>Matrícula: __________</span></div></div>
-        <div className="signature-area"><div><span></span><p>{isToolTransfer ? 'Técnico de origem' : 'Assinatura do Técnico'}</p></div><div><span></span><p>{isToolTransfer ? 'Técnico de destino' : 'Responsável pelo Estoque'}</p></div></div>
-        <p className="paper-note no-print">{isToolTransfer ? 'Declaro que as ferramentas acima foram conferidas e que a responsabilidade passou do técnico de origem para o técnico de destino.' : isReturn ? 'Declaro que os materiais listados acima foram devolvidos pelo técnico e conferidos para retorno ao estoque.' : 'Declaro que recebi os materiais listados acima, com os números de série discriminados, ficando responsável pela guarda, utilização em OS ou devolução formal ao estoque.'}</p>
+        <div className="signature-area"><div><span></span><p>{isToolTransfer ? 'Técnico de origem' : 'Assinatura do Técnico'}</p></div><div><span></span><p>{isToolTransfer ? 'Técnico de destino' : isToolRemoval ? 'Responsável pela conferência' : 'Responsável pelo Estoque'}</p></div></div>
+        <p className="paper-note no-print">{isToolRemoval ? 'Declaro que as ferramentas acima foram conferidas e baixadas da ficha do técnico conforme o motivo registrado nesta guia única.' : isToolTransfer ? 'Declaro que as ferramentas acima foram conferidas e que a responsabilidade passou do técnico de origem para o técnico de destino.' : isReturn ? 'Declaro que os materiais listados acima foram devolvidos pelo técnico e conferidos para retorno ao estoque.' : 'Declaro que recebi os materiais listados acima, com os números de série discriminados, ficando responsável pela guarda, utilização em OS ou devolução formal ao estoque.'}</p>
       </section>
       {getTransferAttachments(transfer).length > 0 && <section className="panel no-print"><h3>Anexos assinados</h3>{getTransferAttachments(transfer).map((attachment, index) => <AttachmentPreview key={`${attachment.name}-${index}`} name={attachment.name} data={attachment.data} loadData={async () => { const response = await api.get(`/transfers/${transfer.id}/attachments/${index}`); return response.data?.data?.data || ''; }} label={`Anexo ${index + 1}`} />)}</section>}
     </div>

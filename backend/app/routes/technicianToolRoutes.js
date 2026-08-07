@@ -13,6 +13,7 @@ router.delete('/documents/:documentId', requireModule('technicianToolsEdit'), co
 router.post('/', requireModule('technicianToolsEdit'), controller.create);
 router.post('/consolidate-transfers', requireRoles('admin'), requireModule('technicianToolsEdit'), controller.consolidateTransfers);
 router.put('/:id', requireModule('technicianToolsEdit'), controller.update);
+router.post('/remove-batch', requireModule('technicianToolsEdit'), controller.removeBatch);
 router.post('/:id/remove', requireModule('technicianToolsEdit'), controller.remove);
 
 module.exports = router;

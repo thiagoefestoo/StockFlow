@@ -80,6 +80,13 @@ function nextStockToolTransferNumber() {
   return `FERRAMENTA-${stamp}-${suffix}`;
 }
 
+function nextToolRemovalNumber() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `BAIXA-FERRAMENTA-${stamp}-${suffix}`;
+}
+
 function internalToolSerial(material, index) {
   const sku = String(material?.sku || material?.id || 'ITEM').replace(/[^A-Z0-9_-]/gi, '').toUpperCase().slice(0, 32) || 'ITEM';
   const stamp = Date.now().toString(36).toUpperCase();
@@ -823,6 +830,202 @@ exports.update = asyncHandler(async (req, res) => {
     afterData: updated.toJSON(),
   });
   return ok(res, updated, 'Ferramenta atualizada.');
+});
+
+exports.removeBatch = asyncHandler(async (req, res) => {
+  const technician = await loadTechnicianOrFail(req, res, req.params.technicianId);
+  if (!technician) return;
+
+  const toolIds = [...new Set((Array.isArray(req.body.toolIds) ? req.body.toolIds : [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0))];
+  if (!toolIds.length) return fail(res, 400, 'Selecione ao menos uma ferramenta para baixar.');
+
+  const status = req.body.status;
+  if (!REMOVAL_STATUSES.includes(status) || status === 'substituida') {
+    return fail(res, 400, 'Na baixa múltipla, selecione devolução, perda/extravio ou desgaste/quebra. Substituições continuam sendo feitas individualmente.');
+  }
+  const removalReason = String(req.body.removalReason || '').trim();
+  if (!removalReason) return fail(res, 400, 'Descreva o motivo da baixa.');
+
+  const result = await sequelize.transaction(async (transaction) => {
+    const tools = await TechnicianTool.findAll({
+      where: {
+        id: { [Op.in]: toolIds },
+        technicianId: technician.id,
+        status: 'com_tecnico',
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (tools.length !== toolIds.length) {
+      throw Object.assign(new Error('Uma ou mais ferramentas selecionadas já foram baixadas ou não pertencem mais a este técnico. Atualize a ficha e tente novamente.'), { statusCode: 409 });
+    }
+
+    const materialIds = [...new Set(tools.map((tool) => Number(tool.materialId || 0)).filter(Boolean))];
+    const warehouseIds = [...new Set(tools.map((tool) => Number(tool.sourceWarehouseId || 0)).filter(Boolean))];
+    const [materials, warehouses] = await Promise.all([
+      materialIds.length ? Material.findAll({ where: { id: { [Op.in]: materialIds } }, transaction }) : [],
+      warehouseIds.length ? Warehouse.findAll({ where: { id: { [Op.in]: warehouseIds } }, transaction }) : [],
+    ]);
+    const materialMap = new Map(materials.map((material) => [Number(material.id), material]));
+    const warehouseMap = new Map(warehouses.map((warehouse) => [Number(warehouse.id), warehouse]));
+
+    const totalQuantity = tools.length;
+    const totalValue = money(tools.reduce((sum, tool) => sum + Number(tool.referenceValue || 0), 0));
+    const transferNumber = nextToolRemovalNumber();
+    const sourceWarehouseIds = [...new Set(tools
+      .filter((tool) => tool.materialId && tool.sourceWarehouseId)
+      .map((tool) => Number(tool.sourceWarehouseId)))];
+    const guideWarehouseId = sourceWarehouseIds.length === 1
+      ? sourceWarehouseIds[0]
+      : (Number(technician.defaultWarehouseId || 0) || null);
+
+    const transfer = await Transfer.create({
+      transferNumber,
+      transferType: 'baixa_ferramenta',
+      technicianId: technician.id,
+      fromTechnicianId: technician.id,
+      warehouseId: guideWarehouseId,
+      deliveredAt: new Date(),
+      totalQuantity,
+      totalValue,
+      notes: `Baixa de ${totalQuantity} ferramenta(s) da ficha de ${technician.name}. Motivo: ${removalReason}`,
+      stampText: status === 'devolvida'
+        ? 'Declaro que as ferramentas relacionadas foram conferidas na baixa. As unidades controladas por estoque retornaram ao respectivo estoque de origem cadastrado.'
+        : 'Declaro que as ferramentas relacionadas foram conferidas e baixadas da responsabilidade do técnico pelo motivo registrado nesta guia.',
+      createdById: req.user?.id || null,
+    }, { transaction });
+
+    const groupedItems = new Map();
+    for (const tool of tools) {
+      const before = tool.toJSON();
+      await tool.update({
+        status,
+        removalReason,
+        removedAt: new Date(),
+        removedById: req.user?.id || null,
+      }, { transaction });
+
+      const groupKey = tool.materialId
+        ? `material:${tool.materialId}:${tool.sourceWarehouseId || 0}`
+        : `legacy:${tool.id}`;
+      if (!groupedItems.has(groupKey)) {
+        const material = materialMap.get(Number(tool.materialId || 0));
+        groupedItems.set(groupKey, {
+          materialId: tool.materialId || null,
+          technicianToolId: tool.materialId ? null : tool.id,
+          itemDescription: material?.name || tool.name || 'Ferramenta',
+          quantity: 0,
+          unitCost: Number(tool.referenceValue || 0),
+          totalCost: 0,
+          serialNumber: tool.materialId ? null : tool.serialNumber,
+          sourceWarehouseId: tool.sourceWarehouseId || null,
+        });
+      }
+      const item = groupedItems.get(groupKey);
+      item.quantity += 1;
+      item.totalCost += Number(tool.referenceValue || 0);
+
+      await writeAudit({
+        req,
+        action: 'remove_batch_item',
+        entity: 'TechnicianTool',
+        entityId: tool.id,
+        message: `Ferramenta "${tool.name}" incluída na baixa múltipla ${transferNumber} como "${status}". Motivo: ${removalReason}`,
+        beforeData: before,
+        afterData: tool.toJSON(),
+        transaction,
+      });
+    }
+
+    for (const item of groupedItems.values()) {
+      await TransferItem.create({
+        transferId: transfer.id,
+        materialId: item.materialId,
+        technicianToolId: item.technicianToolId,
+        itemType: 'ferramenta',
+        itemDescription: item.itemDescription,
+        quantity: item.quantity,
+        unitCost: money(item.quantity ? item.totalCost / item.quantity : item.unitCost),
+        totalCost: money(item.totalCost),
+        serialNumber: item.serialNumber,
+      }, { transaction });
+    }
+
+    if (status === 'devolvida') {
+      const returnGroups = new Map();
+      for (const tool of tools) {
+        if (!tool.materialId || !tool.sourceWarehouseId) continue;
+        const key = `${tool.materialId}:${tool.sourceWarehouseId}`;
+        if (!returnGroups.has(key)) {
+          returnGroups.set(key, {
+            materialId: Number(tool.materialId),
+            warehouseId: Number(tool.sourceWarehouseId),
+            quantity: 0,
+            toolName: materialMap.get(Number(tool.materialId))?.name || tool.name,
+          });
+        }
+        returnGroups.get(key).quantity += 1;
+      }
+
+      for (const group of returnGroups.values()) {
+        const warehouse = warehouseMap.get(group.warehouseId);
+        if (!warehouse) {
+          throw Object.assign(new Error(`O estoque de origem de ${group.toolName} não foi encontrado. Nenhuma ferramenta foi baixada.`), { statusCode: 409 });
+        }
+        await adjustBalance({
+          materialId: group.materialId,
+          ownerType: 'estoque',
+          technicianId: null,
+          warehouseId: group.warehouseId,
+          delta: group.quantity,
+          transaction,
+        });
+        await StockMovement.create({
+          type: 'retorno_tecnico',
+          materialId: group.materialId,
+          quantity: group.quantity,
+          fromOwnerType: 'ficha_tecnico',
+          toOwnerType: 'estoque',
+          fromTechnicianId: technician.id,
+          toWarehouseId: group.warehouseId,
+          reference: transferNumber,
+          notes: `Devolução em lote de ferramenta(s) para ${warehouse.name}. ${removalReason}`,
+          createdById: req.user?.id || null,
+        }, { transaction });
+      }
+    }
+
+    await writeAudit({
+      req,
+      action: 'remove_tools_batch',
+      entity: 'Transfer',
+      entityId: transfer.id,
+      message: `${totalQuantity} ferramenta(s) baixada(s) da ficha de ${technician.name} em uma única guia ${transferNumber}.`,
+      afterData: {
+        transferId: transfer.id,
+        transferNumber,
+        technicianId: technician.id,
+        status,
+        removalReason,
+        toolIds,
+        totalQuantity,
+        totalValue,
+      },
+      transaction,
+    });
+
+    const updatedTools = await TechnicianTool.findAll({
+      where: { id: { [Op.in]: toolIds } },
+      include: toolInclude,
+      transaction,
+    });
+    return { transfer, tools: updatedTools };
+  });
+
+  return created(res, result, `${result.tools.length} ferramenta(s) baixada(s) em uma única guia.`);
 });
 
 exports.remove = asyncHandler(async (req, res) => {

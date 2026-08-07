@@ -307,6 +307,36 @@ exports.create = asyncHandler(async (req, res) => {
     }
   }
 
+  if (!materialRequestId) {
+    const pendingDeliveryRequest = await MaterialRequest.findOne({
+      where: {
+        technicianId: Number(technicianId),
+        requestType: 'reposicao_carga',
+        status: 'aprovado',
+      },
+      attributes: ['id', 'requestNumber', 'technicianId', 'warehouseId', 'approvedAt', 'createdAt'],
+      order: [['approvedAt', 'ASC'], ['createdAt', 'ASC'], ['id', 'ASC']],
+    });
+    if (pendingDeliveryRequest) {
+      return fail(
+        res,
+        409,
+        `O técnico ${technician.name} possui a solicitação ${pendingDeliveryRequest.requestNumber} aprovada aguardando preparação/entrega. Conclua essa pendência antes de criar uma nova transferência direta para a caixa do técnico.`,
+        {
+          code: 'PENDING_MATERIAL_REQUEST_DELIVERY',
+          pendingRequest: {
+            id: pendingDeliveryRequest.id,
+            requestNumber: pendingDeliveryRequest.requestNumber,
+            technicianId: pendingDeliveryRequest.technicianId,
+            warehouseId: pendingDeliveryRequest.warehouseId,
+            approvedAt: pendingDeliveryRequest.approvedAt,
+            createdAt: pendingDeliveryRequest.createdAt,
+          },
+        },
+      );
+    }
+  }
+
   const estimatedTotalValue = await estimateTransferValue(items, sourceWarehouseId);
   const technicianApprovalLimit = money(technician.transferApprovalLimit === undefined ? 500 : technician.transferApprovalLimit);
   if (!linkedRequest && estimatedTotalValue > technicianApprovalLimit) {

@@ -3039,3 +3039,48 @@ input[readonly], textarea[readonly] {
 @media print {
   .superinfra-page-loader { display: none !important; }
 }
+
+/* Atualização 86: trava de preparação pendente e baixa múltipla de ferramentas */
+.transfer-pending-delivery-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.transfer-pending-delivery-lock p {
+  margin: .35rem 0 0;
+}
+.bulk-tool-removal-list {
+  display: grid;
+  gap: .65rem;
+}
+.bulk-tool-removal-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(120px, 160px) minmax(110px, auto);
+  gap: .75rem;
+  align-items: center;
+  border: 1px solid var(--border, #dfe5e2);
+  border-radius: 12px;
+  padding: .75rem;
+  background: var(--surface, #fff);
+}
+.bulk-tool-removal-row.selected {
+  border-color: #3d7f5d;
+  box-shadow: 0 0 0 2px rgba(61, 127, 93, .12);
+}
+.bulk-tool-removal-row .check-line {
+  margin: 0;
+}
+.bulk-tool-removal-row .check-line span {
+  display: grid;
+  gap: .15rem;
+}
+.bulk-tool-removal-quantity {
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .bulk-tool-removal-row {
+    grid-template-columns: 1fr;
+  }
+}
