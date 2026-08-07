@@ -62,6 +62,45 @@ function isStockRecharge(requestType) {
   return String(requestType || '').toLowerCase() === 'recarga_estoque';
 }
 
+const MATERIAL_REQUEST_CANCELLATION_REASONS = Object.freeze({
+  technician_withdrew: 'Técnico desistiu do pedido',
+  delivered_in_previous_request: 'Pedido entregue anteriormente em outro pedido',
+  duplicate_request: 'Solicitação duplicada',
+  incorrect_item: 'Item solicitado incorretamente',
+  incorrect_quantity: 'Quantidade solicitada incorretamente',
+  no_longer_needed: 'Material não é mais necessário',
+  created_by_mistake: 'Pedido criado por engano',
+  operational_adjustment: 'Cancelamento por ajuste operacional',
+  other: 'Outro motivo',
+});
+
+function assertMaterialRequestCancellationAccess(req, request) {
+  if (req.user.role === 'tecnico') {
+    if (request.requestType !== 'reposicao_carga' || Number(request.technicianId) !== Number(req.user.technicianId)) {
+      const error = new Error('Você só pode cancelar suas próprias solicitações de material.');
+      error.statusCode = 403;
+      throw error;
+    }
+    return;
+  }
+
+  if (!['admin', 'supervisor', 'estoquista'].includes(req.user.role)) {
+    const error = new Error('Você não tem permissão para cancelar esta solicitação.');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (req.user.role === 'estoquista' && !stockistCanAccessRequest(req.user, request)) {
+    const error = new Error('Você não pode cancelar solicitações fora da sua operação autorizada.');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (req.user.role === 'supervisor') {
+    assertWarehouseAccess(req.user, request.warehouseId, 'Você não pode cancelar solicitações de outra cidade/estoque.');
+  }
+}
+
 function stockistRequestWhere(user) {
   if (user?.role !== 'estoquista') return null;
   const ids = userWarehouseIds(user);
@@ -225,14 +264,15 @@ exports.summary = asyncHandler(async (req, res) => {
     const requestFilter = stockistRequestWhere(req.user);
     if (requestFilter) filter[Op.and] = [requestFilter];
   }
-  const [pending, approved, delivered, rejected, total] = await Promise.all([
+  const [pending, approved, delivered, rejected, cancelled, total] = await Promise.all([
     MaterialRequest.count({ where: { ...filter, status: 'pendente_aprovacao' } }),
     MaterialRequest.count({ where: { ...filter, status: 'aprovado' } }),
     MaterialRequest.count({ where: { ...filter, status: 'entregue' } }),
     MaterialRequest.count({ where: { ...filter, status: 'reprovado' } }),
+    MaterialRequest.count({ where: { ...filter, status: 'cancelado' } }),
     MaterialRequest.count({ where: filter }),
   ]);
-  return ok(res, { pending, approved, delivered, rejected, total });
+  return ok(res, { pending, approved, delivered, rejected, cancelled, total });
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -475,6 +515,138 @@ exports.reject = asyncHandler(async (req, res) => {
   });
 
   return ok(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), 'Solicitação reprovada.');
+});
+
+
+exports.cancel = asyncHandler(async (req, res) => {
+  const request = await MaterialRequest.findByPk(req.params.id, { include: includeFull() });
+  if (!request) return fail(res, 404, 'Solicitação não encontrada.');
+  if (!['pendente_aprovacao', 'aprovado'].includes(request.status)) {
+    return fail(res, 400, request.status === 'cancelado'
+      ? 'Esta solicitação já foi cancelada.'
+      : 'Somente solicitações pendentes ou aprovadas e ainda não entregues podem ser canceladas.');
+  }
+  if (request.transferId) {
+    return fail(res, 409, 'Esta solicitação já possui uma guia vinculada e não pode ser cancelada por este fluxo.');
+  }
+
+  try {
+    assertMaterialRequestCancellationAccess(req, request);
+  } catch (error) {
+    return fail(res, error.statusCode || 403, error.message);
+  }
+
+  const reasonCode = String(req.body?.reason || '').trim();
+  const reasonLabel = MATERIAL_REQUEST_CANCELLATION_REASONS[reasonCode];
+  const notes = String(req.body?.notes || '').trim().slice(0, 1000);
+  if (!reasonLabel) return fail(res, 400, 'Selecione um motivo válido para o cancelamento.');
+  if (reasonCode === 'other' && !notes) return fail(res, 400, 'Descreva o motivo quando selecionar “Outro motivo”.');
+
+  const cancelledAt = new Date();
+  const before = request.toJSON();
+  const cancellation = {
+    reasonCode,
+    reasonLabel,
+    notes: notes || null,
+    cancelledAt: cancelledAt.toISOString(),
+    cancelledById: req.user.id,
+    cancelledByName: req.user.name,
+    cancelledByRole: req.user.role,
+  };
+
+  await sequelize.transaction(async (transaction) => {
+    const lockedRequest = await MaterialRequest.findByPk(request.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!lockedRequest || !['pendente_aprovacao', 'aprovado'].includes(lockedRequest.status) || lockedRequest.transferId) {
+      const error = new Error('A solicitação mudou de situação enquanto o cancelamento era confirmado. Atualize a página antes de tentar novamente.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    lockedRequest.status = 'cancelado';
+    lockedRequest.cancelledAt = cancelledAt;
+    lockedRequest.metadata = {
+      ...(lockedRequest.metadata || {}),
+      cancellation,
+    };
+    await lockedRequest.save({ transaction });
+
+    await ApprovalRequest.update({
+      status: 'cancelado',
+      decidedAt: cancelledAt,
+      decidedById: req.user.id,
+      decisionNotes: `Cancelada: ${reasonLabel}${notes ? ` — ${notes}` : ''}`,
+    }, {
+      where: {
+        entityType: 'material_request',
+        entityId: String(request.id),
+        status: { [Op.in]: ['pendente', 'aprovado'] },
+      },
+      transaction,
+    });
+
+    if (req.user.role === 'tecnico') {
+      await Notification.create({
+        role: 'estoquista',
+        type: 'estoque',
+        severity: 'warning',
+        title: `Solicitação cancelada ${request.requestNumber}`,
+        message: `${req.user.name} cancelou a solicitação. Motivo: ${reasonLabel}.`,
+        route: '/solicitacoes-material',
+        metadata: {
+          requestId: request.id,
+          requestNumber: request.requestNumber,
+          warehouseId: request.warehouseId,
+          technicianId: request.technicianId,
+          cancellationReason: reasonCode,
+        },
+      }, { transaction });
+    } else if (request.requestType === 'reposicao_carga' && request.technicianId) {
+      await Notification.create({
+        role: 'tecnico',
+        type: 'estoque',
+        severity: 'warning',
+        title: `Solicitação cancelada ${request.requestNumber}`,
+        message: `A solicitação foi cancelada por ${req.user.name}. Motivo: ${reasonLabel}.`,
+        route: '/solicitacoes-material',
+        metadata: {
+          requestId: request.id,
+          requestNumber: request.requestNumber,
+          warehouseId: request.warehouseId,
+          technicianId: request.technicianId,
+          cancellationReason: reasonCode,
+        },
+      }, { transaction });
+    } else if (request.requestedById && Number(request.requestedById) !== Number(req.user.id)) {
+      await Notification.create({
+        userId: request.requestedById,
+        role: 'todos',
+        type: 'estoque',
+        severity: 'warning',
+        title: `Solicitação cancelada ${request.requestNumber}`,
+        message: `Sua solicitação foi cancelada por ${req.user.name}. Motivo: ${reasonLabel}.`,
+        route: '/solicitacoes-material',
+        metadata: {
+          requestId: request.id,
+          requestNumber: request.requestNumber,
+          warehouseId: request.warehouseId,
+          cancellationReason: reasonCode,
+        },
+      }, { transaction });
+    }
+
+    await writeAudit({
+      req,
+      action: 'material_request_cancelled',
+      entity: 'MaterialRequest',
+      entityId: request.id,
+      message: `Solicitação ${request.requestNumber} cancelada por ${req.user.name}. Motivo: ${reasonLabel}.`,
+      beforeData: before,
+      afterData: lockedRequest.toJSON(),
+      transaction,
+    });
+  });
+
+  return ok(res, await MaterialRequest.findByPk(request.id, { include: includeFull() }), 'Solicitação cancelada e registrada no histórico/auditoria.');
 });
 
 async function deliverStockRecharge({ req, request, transaction, deliveryOverrides }) {

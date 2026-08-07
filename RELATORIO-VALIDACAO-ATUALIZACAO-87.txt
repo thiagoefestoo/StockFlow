@@ -1,0 +1,28 @@
+RELATÓRIO DE VALIDAÇÃO — ATUALIZAÇÃO 87
+
+Base: StockFlow versão 86 enviada como produção em 07/08/2026.
+Escopo: cancelamento auditável de solicitações de material.
+
+RESULTADOS
+- 22/22 verificações específicas da Atualização 87 aprovadas.
+- Sintaxe validada em 125 arquivos JavaScript do backend.
+- 64 arquivos JS/JSX do frontend analisados pelo parser TypeScript, com 0 erros sintáticos.
+- Nenhuma migration alterada.
+- Nenhum model alterado.
+- Nenhuma tabela ou coluna adicionada.
+- Cancelamento não executa adjustBalance.
+- Cancelamento não cria StockMovement.
+- Solicitações com guia vinculada não podem ser canceladas.
+- Apenas status pendente_aprovacao e aprovado podem ser cancelados.
+- Workflow ApprovalRequest é encerrado como cancelado.
+- Evento material_request_cancelled é gravado em AuditLog.
+- Motivo, observação, data/hora e responsável ficam registrados no metadata da solicitação.
+- Histórico visual do pedido exibe o cancelamento.
+- Trava SELECT ... FOR UPDATE foi adicionada no cancelamento e na entrega vinculada para evitar corrida entre as duas operações.
+- Fluxo de estoque, baixa por OS, retorno técnico, transferência direta e demais operações não foram alterados por esta atualização, exceto a revalidação transacional da entrega vinculada à solicitação.
+
+BUILD FRONTEND
+O ZIP de produção não contém node_modules. Por isso o pacote inclui um aplicador que executa npm run build no repositório local quando react-scripts já estiver instalado. Se o build falhar, o aplicador restaura automaticamente os arquivos anteriores.
+
+VERSÃO
+StockFlow • Versão 87

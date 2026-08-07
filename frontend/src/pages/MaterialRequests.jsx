@@ -48,6 +48,44 @@ function justificationOptions(requestType) {
   return MATERIAL_REQUEST_JUSTIFICATION_OPTIONS[requestType] || MATERIAL_REQUEST_JUSTIFICATION_OPTIONS.reposicao_carga;
 }
 
+const MATERIAL_REQUEST_CANCELLATION_OPTIONS = [
+  { value: 'technician_withdrew', label: 'Técnico desistiu do pedido' },
+  { value: 'delivered_in_previous_request', label: 'Pedido entregue anteriormente em outro pedido' },
+  { value: 'duplicate_request', label: 'Solicitação duplicada' },
+  { value: 'incorrect_item', label: 'Item solicitado incorretamente' },
+  { value: 'incorrect_quantity', label: 'Quantidade solicitada incorretamente' },
+  { value: 'no_longer_needed', label: 'Material não é mais necessário' },
+  { value: 'created_by_mistake', label: 'Pedido criado por engano' },
+  { value: 'operational_adjustment', label: 'Cancelamento por ajuste operacional' },
+  { value: 'other', label: 'Outro motivo' },
+];
+
+function cancellationData(request) {
+  return request?.metadata?.cancellation || {};
+}
+
+function requestHistory(request) {
+  if (!request) return [];
+  const cancellation = cancellationData(request);
+  const events = [
+    { key: 'created', label: 'Solicitação criada', at: request.createdAt, detail: request.requestedBy?.name ? `Por ${request.requestedBy.name}` : '' },
+  ];
+
+  if (request.status === 'reprovado' && request.approvedAt) {
+    events.push({ key: 'rejected', label: 'Solicitação reprovada', at: request.approvedAt, detail: request.approvalNotes || '' });
+  } else if (request.approvedAt) {
+    events.push({ key: 'approved', label: 'Solicitação aprovada', at: request.approvedAt, detail: request.approvedBy?.name ? `Por ${request.approvedBy.name}` : request.approvalNotes || '' });
+  }
+  if (request.cancelledAt) {
+    events.push({ key: 'cancelled', label: 'Solicitação cancelada', at: request.cancelledAt, detail: [cancellation.reasonLabel, cancellation.cancelledByName ? `por ${cancellation.cancelledByName}` : '', cancellation.notes].filter(Boolean).join(' • ') });
+  }
+  if (request.deliveredAt) {
+    events.push({ key: 'delivered', label: request.requestType === 'recarga_estoque' ? 'Recarga recebida' : 'Material entregue', at: request.deliveredAt, detail: request.deliveredBy?.name ? `Por ${request.deliveredBy.name}` : '' });
+  }
+
+  return events.filter((event) => event.at).sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+
 export default function MaterialRequests() {
   const { isSupervisor, isAdmin, isTechnician, user, canAccessModule } = useAuth();
   const navigate = useNavigate();
@@ -59,6 +97,7 @@ export default function MaterialRequests() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(baseForm);
   const [decision, setDecision] = useState({ open: false, type: '', item: null, notes: '', items: [] });
+  const [cancelRequest, setCancelRequest] = useState({ open: false, item: null, reason: '', notes: '', submitting: false });
   const [details, setDetails] = useState(null);
   const [message, setMessage] = useState({ text: '', type: 'danger' });
   const [statusFilter, setStatusFilter] = useState('');
@@ -335,6 +374,44 @@ export default function MaterialRequests() {
     navigate(`/transferencias?requestId=${request.id}`);
   }
 
+  function canCancelRequest(request) {
+    if (!request || !['pendente_aprovacao', 'aprovado'].includes(request.status) || request.Transfer || request.transferId) return false;
+    if (isTechnician) return request.requestType === 'reposicao_carga';
+    return ['admin', 'supervisor', 'estoquista'].includes(user?.role);
+  }
+
+  function openCancellation(request) {
+    if (!canCancelRequest(request)) return;
+    setDetails(null);
+    setCancelRequest({ open: true, item: request, reason: '', notes: '', submitting: false });
+  }
+
+  async function confirmCancellation() {
+    if (!cancelRequest.item || cancelRequest.submitting) return;
+    if (!cancelRequest.reason) {
+      setMessage({ text: 'Selecione o motivo do cancelamento.', type: 'danger' });
+      return;
+    }
+    if (cancelRequest.reason === 'other' && !String(cancelRequest.notes || '').trim()) {
+      setMessage({ text: 'Descreva o motivo quando selecionar “Outro motivo”.', type: 'danger' });
+      return;
+    }
+
+    setCancelRequest((current) => ({ ...current, submitting: true }));
+    try {
+      const response = await api.post(`/material-requests/${cancelRequest.item.id}/cancel`, {
+        reason: cancelRequest.reason,
+        notes: String(cancelRequest.notes || '').trim(),
+      });
+      setMessage({ text: response.data?.message || 'Solicitação cancelada e registrada no histórico/auditoria.', type: 'success' });
+      setCancelRequest({ open: false, item: null, reason: '', notes: '', submitting: false });
+      await load(page);
+    } catch (error) {
+      setMessage({ text: error.response?.data?.message || error.message || 'Não foi possível cancelar a solicitação.', type: 'danger' });
+      setCancelRequest((current) => ({ ...current, submitting: false }));
+    }
+  }
+
   function canApproveRequest(request) {
     if (!request || !canAccessModule('approvals')) return false;
     if (isAdmin) return true;
@@ -363,6 +440,7 @@ export default function MaterialRequests() {
         <KpiCard label="Aprovadas" value={summary.approved || 0} />
         <KpiCard label="Entregues" value={summary.delivered || 0} tone="success" />
         <KpiCard label="Reprovadas" value={summary.rejected || 0} />
+        <KpiCard label="Canceladas" value={summary.cancelled || 0} />
         <KpiCard label="Solicitações" value={summary.total || 0} />
         <KpiCard label="Valor exibido" value={brl(totalValue)} />
       </div>
@@ -379,7 +457,7 @@ export default function MaterialRequests() {
       </section>
 
       <section className="panel">
-        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Cidade</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><strong>{requestCityLabel(r)}</strong></td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(r)}>Entregar carga</button>)}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Número</th><th>Tipo</th><th>Destino</th><th>Cidade</th><th>Status</th><th>Prioridade</th><th>Itens</th><th>Valor</th><th>Solicitado</th><th className="action-cell">Ações</th></tr></thead><tbody>{requests.map((r) => <tr key={r.id}><td><strong>{r.requestNumber}</strong><small className="block">{r.requestType}</small></td><td>{requestTypeLabel(r.requestType)}</td><td>{r.requestType === 'recarga_estoque' ? r.Warehouse?.name || '-' : r.Technician?.name || '-'}</td><td><strong>{requestCityLabel(r)}</strong></td><td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td><td>{r.priority}</td><td>{formatQuantity(r.totalQuantity)}</td><td>{brl(r.totalValue)}</td><td>{dt(r.createdAt)}</td><td><div className="row-actions"><button className="info" onClick={() => setDetails(r)}>Detalhes</button>{canApprove && r.status === 'pendente_aprovacao' && <><button className="ghost" disabled={!canApproveRequest(r)} title={!canApproveRequest(r) ? 'Valor acima do seu limite de aprovação.' : ''} onClick={() => openDecision('approve', r)}>Aprovar</button><button className="ghost danger-outline" disabled={!canApproveRequest(r)} onClick={() => openDecision('reject', r)}>Reprovar</button></>}{r.status === 'aprovado' && (r.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => openDecision('deliver', r)}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(r)}>Entregar carga</button>)}{canCancelRequest(r) && <button className="ghost danger-outline" onClick={() => openCancellation(r)}>Cancelar pedido</button>}{r.Transfer && <a className="ghost" href={`/transferencias/${r.Transfer.id}`}>Guia</a>}</div></td></tr>)}</tbody></table></div>
         <Pagination {...pagination} page={page} loading={loading} onPageChange={load} />
       </section>
 
@@ -404,8 +482,8 @@ export default function MaterialRequests() {
         </form>
       </Modal>
 
-      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(details)}>Entregar carga</button>)}</>}>
-        {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Cidade da solicitação", requestCityLabel(details)], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
+      <DetailsModal open={!!details} title={`Detalhes da solicitação ${details?.requestNumber || ''}`} onClose={() => setDetails(null)} footer={<><button className="ghost" onClick={() => setDetails(null)}>Fechar</button>{canApprove && details?.status === 'pendente_aprovacao' && <button disabled={!canApproveRequest(details)} onClick={() => { openDecision('approve', details); setDetails(null); }}>Aprovar</button>}{details?.status === 'aprovado' && (details?.requestType === 'recarga_estoque' ? canReceiveRecharge && <button onClick={() => { openDecision('deliver', details); setDetails(null); }}>Receber recarga</button> : canDeliverTechnicianLoad && <button onClick={() => openTransferForRequest(details)}>Entregar carga</button>)}{canCancelRequest(details) && <button className="ghost danger-outline" onClick={() => openCancellation(details)}>Cancelar pedido</button>}</>}>
+        {details && <><DetailGrid fields={[["Número", details.requestNumber], ["Tipo", requestTypeLabel(details.requestType)], ["Destino", details.requestType === 'recarga_estoque' ? details.Warehouse?.name : details.Technician?.name], ["Cidade da solicitação", requestCityLabel(details)], ["Status", statusLabel(details.status)], ["Prioridade", details.priority], ["Qtd. total", formatQuantity(details.totalQuantity)], ["Valor", brl(details.totalValue)], ["Necessário até", details.neededBy], ["Solicitado em", details.createdAt], ["Aprovado em", details.approvedAt], ["Entregue em", details.deliveredAt], ["Cancelado em", details.cancelledAt ? dt(details.cancelledAt) : '-'], ["Motivo do cancelamento", cancellationData(details).reasonLabel || '-'], ["Cancelado por", cancellationData(details).cancelledByName || '-'], ["Observação do cancelamento", cancellationData(details).notes || '-'], ["Justificativa", details.requesterNotes], ["Observação aprovação", details.approvalNotes], ["Observação logística", details.logisticsNotes]]} /><div className="item-card"><div className="subtoolbar"><h4>Histórico da solicitação</h4><span>{requestHistory(details).length} evento(s)</span></div><div className="form-grid">{requestHistory(details).map((event) => <div className="mini-card" key={event.key}><small>{event.label}</small><strong>{dt(event.at)}</strong>{event.detail && <span>{event.detail}</span>}</div>)}</div></div><DetailList title="Itens solicitados" items={details.MaterialRequestItems || []} render={(item) => <><b>{item.Material?.name || 'Material'}</b><span>Qtd. {formatQuantity(item.quantity)} • {brl(item.totalCost)}</span>{(item.serialNumbers || []).length > 0 && <small>Seriais: {(item.serialNumbers || []).join(', ')}</small>}</>} />{details.Transfer && <div className="viz-callout">Guia vinculada: {details.Transfer.transferNumber}</div>}</>}
       </DetailsModal>
 
       <Modal
@@ -457,6 +535,26 @@ export default function MaterialRequests() {
           </div>
 
           <div className="viz-callout">Ao confirmar, o pedido será enviado para o fluxo de aprovação e entrega configurado no sistema.</div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={cancelRequest.open}
+        title="Cancelar solicitação / pedido"
+        onClose={() => { if (!cancelRequest.submitting) setCancelRequest({ open: false, item: null, reason: '', notes: '', submitting: false }); }}
+        footer={<>
+          <button type="button" className="ghost" disabled={cancelRequest.submitting} onClick={() => setCancelRequest({ open: false, item: null, reason: '', notes: '', submitting: false })}>Voltar</button>
+          <button type="button" className="danger-outline" disabled={cancelRequest.submitting || !cancelRequest.reason} onClick={confirmCancellation}>{cancelRequest.submitting ? 'Cancelando...' : 'Confirmar cancelamento'}</button>
+        </>}
+      >
+        <div className="form-stack">
+          <div className="viz-callout"><strong>{cancelRequest.item?.requestNumber}</strong> • {cancelRequest.item?.requestType === 'recarga_estoque' ? cancelRequest.item?.Warehouse?.name : cancelRequest.item?.Technician?.name} • {requestCityLabel(cancelRequest.item)}</div>
+          <div>
+            <h4>Deseja cancelar esta solicitação?</h4>
+            <p>O cancelamento não movimenta estoque nem desfaz transferências. Ele encerra apenas um pedido ainda pendente/aprovado e ficará registrado permanentemente no histórico e na auditoria.</p>
+          </div>
+          <label>Motivo do cancelamento<select value={cancelRequest.reason} onChange={(e) => setCancelRequest((current) => ({ ...current, reason: e.target.value }))} required><option value="">Selecione o motivo</option>{MATERIAL_REQUEST_CANCELLATION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label>Observação {cancelRequest.reason === 'other' ? '(obrigatória)' : '(opcional)'}<textarea rows="4" maxLength="1000" value={cancelRequest.notes} onChange={(e) => setCancelRequest((current) => ({ ...current, notes: e.target.value }))} placeholder={cancelRequest.reason === 'other' ? 'Descreva o motivo do cancelamento...' : 'Acrescente alguma informação, se necessário.'} /></label>
         </div>
       </Modal>
 

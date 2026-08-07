@@ -349,6 +349,15 @@ exports.create = asyncHandler(async (req, res) => {
   }
 
   const transfer = await sequelize.transaction(async (transaction) => {
+    if (linkedRequest) {
+      const lockedLinkedRequest = await MaterialRequest.findByPk(linkedRequest.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!lockedLinkedRequest || lockedLinkedRequest.status !== 'aprovado' || lockedLinkedRequest.transferId) {
+        const error = new Error('A solicitação mudou de situação antes da entrega. Atualize a preparação antes de gerar a guia.');
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
     const record = await Transfer.create({ transferNumber: nextNumber(), transferType: 'material', technicianId, deliveredAt: deliveredAt || new Date(), notes, createdById: req.user.id, warehouseId: sourceWarehouseId }, { transaction });
     let totalQuantity = 0;
     let totalValue = 0;

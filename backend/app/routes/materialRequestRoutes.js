@@ -8,5 +8,6 @@ router.get('/:id', controller.get);
 router.post('/', controller.create);
 router.post('/:id/approve', controller.approve);
 router.post('/:id/reject', controller.reject);
+router.post('/:id/cancel', controller.cancel);
 router.post('/:id/deliver', controller.deliver);
 module.exports = router;
