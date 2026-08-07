@@ -1,0 +1,48 @@
+STOCKFLOW / SUPERINFRA
+RELATÓRIO DE VALIDAÇÃO — ATUALIZAÇÃO 83
+
+VALIDAÇÕES REALIZADAS
+
+[OK] Perdas e descontos: pesquisa.
+[OK] Perdas e descontos: filtro por técnico.
+[OK] Perdas e descontos: filtro por tipo.
+[OK] Perdas e descontos: filtro por status.
+[OK] Perdas e descontos: técnico obrigatório destacado.
+
+[OK] Ordens de serviço: filtros frontend.
+[OK] Ordens de serviço: filtros executados no backend antes da paginação.
+[OK] Ordens de serviço: filtro de técnico não amplia acesso de usuário técnico.
+
+[OK] Solicitações: pesquisa/status/técnico/tipo/prioridade.
+[OK] Solicitações: pesquisa e prioridade executadas no backend antes da paginação.
+[OK] Solicitações: removida seleção automática do primeiro técnico.
+[OK] Solicitações: nova operação inicia com técnico vazio/“Selecione”.
+[OK] Solicitações: técnico obrigatório destacado em vermelho.
+
+[OK] Retorno técnico: removida seleção automática do primeiro técnico.
+[OK] Retorno técnico: estado inicial do técnico vazio/“Selecione”.
+[OK] Retorno técnico: campo obrigatório destacado em vermelho.
+
+[OK] Transferências: seleções obrigatórias de técnico destacadas.
+[OK] Portal supervisor: seleção obrigatória segue padrão vermelho.
+[OK] CSS de destaque acessível presente.
+[OK] Cockpit mostra Versão 83.
+[OK] Nenhum technicians[0]/techList[0] permanece nas páginas operacionais verificadas.
+
+RESULTADO AUTOMATIZADO: 21/21 verificações aprovadas.
+
+VALIDAÇÃO DE SINTAXE
+- Backend materialRequestController.js: node --check OK.
+- Backend serviceOrderController.js: node --check OK.
+- JSX dos componentes alterados: parsing/transpilação de sintaxe via TypeScript OK.
+
+BUILD COMPLETO
+O npm ci não pôde ser concluído neste ambiente porque o espelho interno de pacotes retornou HTTP 404 para yocto-queue@0.1.0. A falha ocorreu durante a instalação de dependências, antes do build e sem apontar erro no código alterado.
+
+ESCOPO DE RISCO
+- Sem migration.
+- Sem alteração de schema/banco.
+- Sem alteração de saldo.
+- Sem alteração de movimentações.
+- Sem alteração das regras de cálculo de valores.
+- Backend alterado somente para suportar filtros de listagem antes da paginação.

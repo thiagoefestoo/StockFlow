@@ -2950,3 +2950,20 @@ input[readonly], textarea[readonly] {
   border-style: dashed;
   font-weight: 700;
 }
+/* Atualização 83: destaque acessível para seleção obrigatória de técnico. */
+.required-selection-field {
+  padding: 10px;
+  border: 2px solid #b42318;
+  border-radius: 12px;
+  background: #fff5f4;
+}
+
+.required-selection-field > select {
+  border-color: #b42318 !important;
+  box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.10);
+}
+
+.required-selection-field > small {
+  color: #912018;
+  font-weight: 700;
+}

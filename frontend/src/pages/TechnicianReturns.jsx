@@ -66,7 +66,6 @@ export default function TechnicianReturns() {
     const whList = whRes.data.data || [];
     setTechnicians(techList);
     setWarehouses(whList);
-    if (!selectedTech && techList[0]) setSelectedTech(String(techList[0].id));
     if (!form.warehouseId && whList[0]) setForm((current) => ({ ...current, warehouseId: String(whList[0].id) }));
   }
 
@@ -261,11 +260,12 @@ export default function TechnicianReturns() {
 
       <section className="panel">
         <div className="form-grid">
-          <label>👷 Técnico
+          <label className={!selectedTech ? 'required-selection-field' : ''}>👷 Técnico
             <select value={selectedTech} onChange={(e) => { setSelectedTech(e.target.value); setForm(emptyForm); setMessage(''); }}>
               <option value="">Selecione</option>
               {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}
             </select>
+            <small>{selectedTech ? 'Técnico selecionado para o retorno.' : 'Selecione um técnico para carregar a caixa e liberar o retorno.'}</small>
           </label>
           <label>🏬 Estoque de destino
             <select value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}>

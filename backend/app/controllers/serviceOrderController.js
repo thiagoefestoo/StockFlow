@@ -62,6 +62,9 @@ exports.list = asyncHandler(async (req, res) => {
   else if (!isPrivileged(req.user)) Object.assign(where, stockWhereForUser(req.user, req.query.warehouseId));
   if (req.query.search) where[Op.or] = [{ osNumber: { [Op.iLike]: `%${req.query.search}%` } }, { customerName: { [Op.iLike]: `%${req.query.search}%` } }, { customerCpf: { [Op.iLike]: `%${req.query.search}%` } }];
   if (req.query.city) where.city = { [Op.iLike]: String(req.query.city).trim() };
+  if (req.query.technicianId && req.user.role !== 'tecnico') where.technicianId = req.query.technicianId;
+  if (req.query.serviceType) where.serviceType = req.query.serviceType;
+  if (req.query.status) where.status = req.query.status;
   const pagination = paginationFromQuery(req.query);
   const query = {
     where,

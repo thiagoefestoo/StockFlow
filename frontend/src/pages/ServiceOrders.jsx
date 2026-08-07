@@ -15,12 +15,16 @@ function dt(value) { return value ? new Date(value).toLocaleString('pt-BR') : '-
 function emptyReplacement() { return { open: false, loading: false, saving: false, order: null, data: null, oldAssetId: '', newAssetId: '', search: '', reason: 'Correção de equipamento baixado na OS', notes: '' }; }
 
 export default function ServiceOrders() {
-  const { isAdmin, canAccessModule } = useAuth();
+  const { isAdmin, canAccessModule, user } = useAuth();
   const canReplaceEquipment = canAccessModule('serviceOrderEquipmentReplace');
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState('');
   const [cities, setCities] = useState([]);
   const [cityFilter, setCityFilter] = useState('');
+  const [technicians, setTechnicians] = useState([]);
+  const [technicianFilter, setTechnicianFilter] = useState('');
+  const [serviceTypeFilter, setServiceTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
@@ -29,10 +33,25 @@ export default function ServiceOrders() {
   const [replacement, setReplacement] = useState(emptyReplacement());
   const [message, setMessage] = useState('');
 
-  async function load(targetPage = page, selectedCity = cityFilter) {
+  async function load(targetPage = page, overrides = {}) {
     setLoading(true);
     try {
-      const response = await api.get('/service-orders', { params: { search, city: selectedCity || undefined, page: targetPage, pageSize: 15 } });
+      const filters = {
+        search: overrides.search ?? search,
+        city: overrides.city ?? cityFilter,
+        technicianId: overrides.technicianId ?? technicianFilter,
+        serviceType: overrides.serviceType ?? serviceTypeFilter,
+        status: overrides.status ?? statusFilter,
+      };
+      const response = await api.get('/service-orders', { params: {
+        search: filters.search || undefined,
+        city: filters.city || undefined,
+        technicianId: filters.technicianId || undefined,
+        serviceType: filters.serviceType || undefined,
+        status: filters.status || undefined,
+        page: targetPage,
+        pageSize: 15,
+      } });
       setOrders(sortRecentFirst(response.data.data || [], ['createdAt']));
       setPagination(response.data.pagination || { page: targetPage, pageSize: 15, total: response.data.data?.length || 0, totalPages: 1 });
       setPage(targetPage);
@@ -43,17 +62,26 @@ export default function ServiceOrders() {
     }
   }
 
-  async function loadCities() {
-    try {
-      const response = await api.get('/warehouses', { params: { operationalOnly: true, status: 'ativo' } });
-      const values = Array.from(new Set((response.data.data || []).map((warehouse) => String(warehouse.city || '').trim()).filter(Boolean)));
-      setCities(values.sort((a, b) => a.localeCompare(b, 'pt-BR')));
-    } catch {
-      setCities([]);
-    }
+  async function loadFilterReferences() {
+    const [warehouseResponse, technicianResponse] = await Promise.all([
+      api.get('/warehouses', { params: { operationalOnly: true, status: 'ativo' } }).catch(() => ({ data: { data: [] } })),
+      api.get('/technicians').catch(() => ({ data: { data: [] } })),
+    ]);
+    const values = Array.from(new Set((warehouseResponse.data.data || []).map((warehouse) => String(warehouse.city || '').trim()).filter(Boolean)));
+    setCities(values.sort((a, b) => a.localeCompare(b, 'pt-BR')));
+    setTechnicians(technicianResponse.data.data || []);
   }
 
-  useEffect(() => { loadCities(); load(1, ''); }, []);
+  function clearFilters() {
+    setSearch('');
+    setCityFilter('');
+    setTechnicianFilter('');
+    setServiceTypeFilter('');
+    setStatusFilter('');
+    load(1, { search: '', city: '', technicianId: '', serviceType: '', status: '' });
+  }
+
+  useEffect(() => { loadFilterReferences(); load(1); }, []);
 
   async function saveEdit() {
     try {
@@ -151,8 +179,18 @@ export default function ServiceOrders() {
       <FloatingAlert message={message} type={message.includes('sucesso') || message.includes('substituído') ? 'success' : 'danger'} onClose={() => setMessage('')} />
       <div className="toolbar">
         <div><h2>Ordens de serviço</h2><p>Consulta de baixas feitas pelos técnicos com número do contrato e cliente.</p></div>
-        <div className="inline service-order-filters"><select aria-label="Filtrar ordens por cidade" value={cityFilter} onChange={(e) => { const value = e.target.value; setCityFilter(value); load(1, value); }}><option value="">Todas as cidades</option>{cities.map((city) => <option key={city} value={city}>{city}</option>)}</select><input placeholder="Buscar OS/cliente/contrato" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') load(1); }} /><button onClick={() => load(1)} disabled={loading}>{loading ? 'Buscando...' : 'Buscar'}</button></div>
       </div>
+
+      <section className="panel filters">
+        <div className="form-grid">
+          <label>🔎 Pesquisar<input placeholder="OS, cliente ou contrato" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') load(1); }} /></label>
+          <label>Cidade<select aria-label="Filtrar ordens por cidade" value={cityFilter} onChange={(e) => setCityFilter(e.target.value)}><option value="">Todas as cidades</option>{cities.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
+          {user?.role !== 'tecnico' && <label>Técnico<select value={technicianFilter} onChange={(e) => setTechnicianFilter(e.target.value)}><option value="">Todos os técnicos</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>}
+          <label>Tipo de serviço<select value={serviceTypeFilter} onChange={(e) => setServiceTypeFilter(e.target.value)}><option value="">Todos os tipos</option>{SERVICE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label>Status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="">Todos</option><option value="aberta">Aberta</option><option value="pendente">Pendente</option><option value="concluida">Concluída</option><option value="cancelada">Cancelada</option></select></label>
+          <label className="filter-action"><span>&nbsp;</span><div className="row-actions"><button type="button" onClick={() => load(1)} disabled={loading}>{loading ? 'Filtrando...' : 'Aplicar filtros'}</button><button type="button" className="ghost" onClick={clearFilters} disabled={loading}>Limpar</button></div></label>
+        </div>
+      </section>
 
       <section className="panel">
         <div className="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Nº Contrato</th><th>Cidade</th><th>Técnico</th><th>Tipo</th><th>Status</th><th>Data da baixa</th><th>Materiais</th><th className="action-cell">Opções</th></tr></thead><tbody>{orders.map((o) => <tr key={o.id}><td>{o.osNumber}</td><td>{o.customerName}</td><td>{o.customerCpf}</td><td>{o.city || o.Warehouse?.city || '-'}</td><td>{o.Technician?.name}</td><td>{serviceTypeLabel(o.serviceType)}</td><td>{o.status}</td><td>{dt(o.completedAt)}</td><td>{o.ServiceOrderMaterials?.map((m) => m.serialNumber || `${m.Material?.name} (${formatQuantity(m.quantity)})`).join(', ')}</td><td><div className="action-toolbar"><button className="info" onClick={() => setDetails(o)}>Detalhes</button>{canReplaceEquipment && orderHasInstalledEquipment(o) && <button className="warning" onClick={() => openReplacement(o)}>Trocar equipamento</button>}{isAdmin && <button className="ghost" onClick={() => openEdit(o)}>Editar</button>}</div></td></tr>)}</tbody></table></div>

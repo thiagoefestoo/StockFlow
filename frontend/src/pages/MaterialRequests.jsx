@@ -62,6 +62,10 @@ export default function MaterialRequests() {
   const [details, setDetails] = useState(null);
   const [message, setMessage] = useState({ text: '', type: 'danger' });
   const [statusFilter, setStatusFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
+  const [technicianFilter, setTechnicianFilter] = useState('');
+  const [requestTypeFilter, setRequestTypeFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
   const [confirmRequestOpen, setConfirmRequestOpen] = useState(false);
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [page, setPage] = useState(1);
@@ -70,11 +74,18 @@ export default function MaterialRequests() {
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [requestWarehouse, setRequestWarehouse] = useState(null);
 
-  async function load(targetPage = page, refreshReferences = false) {
+  async function load(targetPage = page, refreshReferences = false, overrides = {}) {
     setLoading(true);
     try {
       setMessage({ text: '', type: 'danger' });
-      const listRequest = api.get('/material-requests', { params: { status: statusFilter || undefined, page: targetPage, pageSize: 15 } });
+      const filters = {
+        search: overrides.search ?? searchFilter,
+        status: overrides.status ?? statusFilter,
+        technicianId: overrides.technicianId ?? technicianFilter,
+        requestType: overrides.requestType ?? requestTypeFilter,
+        priority: overrides.priority ?? priorityFilter,
+      };
+      const listRequest = api.get('/material-requests', { params: { search: String(filters.search || '').trim() || undefined, status: filters.status || undefined, technicianId: filters.technicianId || undefined, requestType: filters.requestType || undefined, priority: filters.priority || undefined, page: targetPage, pageSize: 15 } });
       const requestsToRun = [listRequest, api.get('/material-requests/summary')];
       if (refreshReferences || !warehouses.length) {
         requestsToRun.push(api.get('/warehouses?operationalOnly=true'));
@@ -84,7 +95,10 @@ export default function MaterialRequests() {
       setPagination(reqRes.data.pagination || { page: targetPage, pageSize: 15, total: reqRes.data.data?.length || 0, totalPages: 1 });
       setSummary(sumRes.data.data || {});
       if (whRes) setWarehouses(whRes.data.data || []);
-      if ((refreshReferences || !technicians.length) && isSupervisor) setTechnicians((await api.get('/technicians')).data.data || []);
+      if ((refreshReferences || !technicians.length) && !isTechnician) {
+        const techResponse = await api.get('/technicians').catch(() => ({ data: { data: [] } }));
+        setTechnicians(techResponse.data.data || []);
+      }
       setPage(targetPage);
     } catch (error) {
       setMessage({ text: error.response?.data?.message || error.message || 'Erro ao carregar solicitações.', type: 'danger' });
@@ -93,7 +107,7 @@ export default function MaterialRequests() {
     }
   }
 
-  useEffect(() => { load(1, true); }, [statusFilter]);
+  useEffect(() => { load(1, true); }, []);
 
   const totalValue = useMemo(() => requests.reduce((sum, r) => sum + Number(r.totalValue || 0), 0), [requests]);
   const requestReview = useMemo(() => {
@@ -165,16 +179,18 @@ export default function MaterialRequests() {
   }
 
   async function openCreate() {
-    const technicianId = !isTechnician ? technicians[0]?.id || '' : '';
     setForm({
       ...baseForm,
       requestType: 'reposicao_carga',
-      technicianId,
+      technicianId: '',
       warehouseId: '',
       items: [{ materialId: '', quantity: 1, serialNumbersText: '' }],
     });
+    setMaterials([]);
+    setRequestWarehouse(null);
+    setMessage({ text: '', type: 'danger' });
     setModal(true);
-    await loadAvailableMaterials(technicianId);
+    if (isTechnician) await loadAvailableMaterials('');
   }
 
   function addItem() {
@@ -263,6 +279,15 @@ export default function MaterialRequests() {
     }
   }
 
+  function clearRequestFilters() {
+    setSearchFilter('');
+    setStatusFilter('');
+    setTechnicianFilter('');
+    setRequestTypeFilter('');
+    setPriorityFilter('');
+    load(1, false, { search: '', status: '', technicianId: '', requestType: '', priority: '' });
+  }
+
   function openDecision(type, item) {
     const decisionItems = (item.MaterialRequestItems || []).map((requestItem) => ({
       requestItemId: requestItem.id,
@@ -342,10 +367,14 @@ export default function MaterialRequests() {
         <KpiCard label="Valor exibido" value={brl(totalValue)} />
       </div>
 
-      <section className="panel">
-        <div className="inline filters">
-          <label>Status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="">Todos</option><option value="pendente_aprovacao">Pendente aprovação</option><option value="aprovado">Aprovado</option><option value="entregue">Entregue</option><option value="reprovado">Reprovado</option></select></label>
-          <button className="ghost" onClick={() => load(page)} disabled={loading}>{loading ? 'Atualizando...' : 'Atualizar'}</button>
+      <section className="panel filters">
+        <div className="form-grid">
+          <label>🔎 Pesquisar<input value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') load(1); }} placeholder="Número ou justificativa" /></label>
+          <label>Status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="">Todos</option><option value="pendente_aprovacao">Pendente aprovação</option><option value="aprovado">Aprovado</option><option value="entregue">Entregue</option><option value="reprovado">Reprovado</option><option value="cancelado">Cancelado</option></select></label>
+          {!isTechnician && <label>Técnico<select value={technicianFilter} onChange={(e) => setTechnicianFilter(e.target.value)}><option value="">Todos os técnicos</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>}
+          <label>Tipo<select value={requestTypeFilter} onChange={(e) => setRequestTypeFilter(e.target.value)}><option value="">Todos os tipos</option><option value="reposicao_carga">Carga para técnico</option><option value="recarga_estoque">Recarga de estoque</option></select></label>
+          <label>Prioridade<select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}><option value="">Todas</option><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
+          <label className="filter-action"><span>&nbsp;</span><div className="row-actions"><button type="button" onClick={() => load(1)} disabled={loading}>{loading ? 'Filtrando...' : 'Aplicar filtros'}</button><button type="button" className="ghost" onClick={clearRequestFilters} disabled={loading}>Limpar</button></div></label>
         </div>
       </section>
 
@@ -359,7 +388,7 @@ export default function MaterialRequests() {
           <div className="form-grid">
             {!isTechnician && <div className="mini-card"><small>Tipo de solicitação</small><strong>Carga para técnico</strong><span>A recarga de estoque regional não é criada nesta tela.</span></div>}
             {isTechnician && <div className="mini-card"><small>Solicitante</small><strong>{user?.name}</strong><span>Reposição da minha caixa</span></div>}
-            {!isTechnician && <label>Técnico<select value={form.technicianId} onChange={async (e) => { const technicianId = e.target.value; setForm({ ...form, technicianId, items: [{ materialId: '', quantity: 1, serialNumbersText: '' }] }); await loadAvailableMaterials(technicianId); }}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} • {t.defaultWarehouse?.city || t.serviceCities?.[0] || 'sem cidade'}</option>)}</select></label>}
+            {!isTechnician && <label className={!form.technicianId ? 'required-selection-field' : ''}>Técnico<select value={form.technicianId} onChange={async (e) => { const technicianId = e.target.value; setForm({ ...form, technicianId, items: [{ materialId: '', quantity: 1, serialNumbersText: '' }] }); setMessage({ text: '', type: 'danger' }); if (technicianId) await loadAvailableMaterials(technicianId); else { setMaterials([]); setRequestWarehouse(null); } }}><option value="">Selecione</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.name} • {t.defaultWarehouse?.city || t.serviceCities?.[0] || 'sem cidade'}</option>)}</select><small>{form.technicianId ? 'Técnico selecionado.' : 'Selecione um técnico para carregar o estoque disponível.'}</small></label>}
             <label>Prioridade<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></label>
             <label>Necessário até<input type="date" value={form.neededBy} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} /></label>
           </div>

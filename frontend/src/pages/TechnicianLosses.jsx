@@ -48,6 +48,10 @@ export default function TechnicianLosses() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingLossId, setUploadingLossId] = useState(null);
+  const [lossSearch, setLossSearch] = useState('');
+  const [lossTechnicianFilter, setLossTechnicianFilter] = useState('');
+  const [lossTypeFilter, setLossTypeFilter] = useState('');
+  const [lossStatusFilter, setLossStatusFilter] = useState('');
 
   async function openLossDetails(loss) {
     try {
@@ -286,6 +290,33 @@ export default function TechnicianLosses() {
     await loadTechResources(value);
   }
 
+  const filteredLosses = useMemo(() => {
+    const query = lossSearch.trim().toLowerCase();
+    return losses.filter((loss) => {
+      if (lossTechnicianFilter && Number(loss.technicianId) !== Number(lossTechnicianFilter)) return false;
+      if (lossTypeFilter && lossNature(loss).toLowerCase() !== lossTypeFilter) return false;
+      if (lossStatusFilter && String(loss.status || '') !== lossStatusFilter) return false;
+      if (query) {
+        const searchable = [
+          loss.transferNumber,
+          loss.Technician?.name,
+          loss.notes,
+          loss.status,
+          ...(loss.TransferItems || []).flatMap((item) => [lossItemName(item), item.serialNumber, item.SerializedAsset?.serialNumber]),
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!searchable.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [losses, lossSearch, lossTechnicianFilter, lossTypeFilter, lossStatusFilter]);
+
+  function clearLossFilters() {
+    setLossSearch('');
+    setLossTechnicianFilter('');
+    setLossTypeFilter('');
+    setLossStatusFilter('');
+  }
+
   const selectedTools = useMemo(() => {
     const ids = new Set((form.toolIds || []).map(Number));
     return (toolsData?.tools || []).filter((tool) => ids.has(Number(tool.id)));
@@ -355,12 +386,43 @@ export default function TechnicianLosses() {
         <KpiCard label="Guias pendentes" value={losses.filter((l) => l.status === 'pendente_assinatura').length} hint="Guias de perda que ainda aguardam documento ou assinatura." />
       </section>
 
+      <section className="panel filters">
+        <div className="form-grid">
+          <label>🔎 Pesquisar
+            <input value={lossSearch} onChange={(e) => setLossSearch(e.target.value)} placeholder="Guia, técnico, material, serial ou observação" />
+          </label>
+          <label>Técnico
+            <select value={lossTechnicianFilter} onChange={(e) => setLossTechnicianFilter(e.target.value)}>
+              <option value="">Todos os técnicos</option>
+              {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+            </select>
+          </label>
+          <label>Tipo
+            <select value={lossTypeFilter} onChange={(e) => setLossTypeFilter(e.target.value)}>
+              <option value="">Todos</option>
+              <option value="material">Material</option>
+              <option value="ferramenta">Ferramenta</option>
+            </select>
+          </label>
+          <label>Status
+            <select value={lossStatusFilter} onChange={(e) => setLossStatusFilter(e.target.value)}>
+              <option value="">Todos</option>
+              <option value="pendente_assinatura">Pendente de assinatura</option>
+              <option value="assinado">Assinado</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+          </label>
+          <label className="filter-action"><span>&nbsp;</span><button type="button" className="ghost" onClick={clearLossFilters}>Limpar filtros</button></label>
+        </div>
+        <small>{filteredLosses.length} resultado(s) exibido(s) de {losses.length} registro(s).</small>
+      </section>
+
       <section className="panel">
         <div className="table-wrap">
           <table>
             <thead><tr><th>Guia</th><th>Tipo</th><th>Técnico</th><th>Data</th><th>Itens</th><th>Valor</th><th>Status</th><th>Documento</th><th className="action-cell">Opções</th></tr></thead>
             <tbody>
-              {losses.map((loss) => <tr key={loss.id}>
+              {filteredLosses.map((loss) => <tr key={loss.id}>
                 <td><strong>{loss.transferNumber}</strong></td>
                 <td><span className={`badge ${lossNature(loss) === 'Ferramenta' ? 'warning' : 'info'}`}>{lossNature(loss)}</span></td>
                 <td>{loss.Technician?.name || '-'}</td>
@@ -371,7 +433,7 @@ export default function TechnicianLosses() {
                 <td><div className="attachment-cell">{loss.attachmentName ? <span className="badge success" title={transferAttachmentSummary(loss)}>{transferAttachmentSummary(loss)}</span> : <span className="badge warning">Pendente</span>}<input type="file" multiple accept="image/*,.pdf" disabled={uploadingLossId === loss.id} onChange={(e) => { signLoss(loss.id, e.target.files); e.target.value = ''; }} /><small>{uploadingLossId === loss.id ? 'Enviando documentos...' : 'É possível selecionar vários arquivos e adicionar novos depois.'}</small></div></td>
                 <td><div className="action-toolbar"><button className="info" onClick={() => openLossDetails(loss)}>Detalhes</button><Link className="ghost" to={`/perdas-tecnico/${loss.id}`}>Guia</Link></div></td>
               </tr>)}
-              {!losses.length && <tr><td colSpan="9"><div className="empty-state">Nenhuma perda registrada.</div></td></tr>}
+              {!filteredLosses.length && <tr><td colSpan="9"><div className="empty-state">Nenhuma perda encontrada com os filtros informados.</div></td></tr>}
             </tbody>
           </table>
         </div>
@@ -386,7 +448,7 @@ export default function TechnicianLosses() {
 
         <div className="form-grid">
           <label>Tipo de baixa<select value={form.lossType} onChange={(e) => changeLossType(e.target.value)}><option value="material">Material da caixa do técnico</option><option value="ferramenta">Ferramenta da ficha do técnico</option></select></label>
-          <label>Técnico responsável<select value={form.technicianId} onChange={(e) => onSelectTechnician(e.target.value)}><option value="">Selecione</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
+          <label className={!form.technicianId ? 'required-selection-field' : ''}>Técnico responsável<select value={form.technicianId} onChange={(e) => onSelectTechnician(e.target.value)}><option value="">Selecione</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} — {tech.ContractorCompany?.name || 'sem empresa'}</option>)}</select></label>
           <label>Motivo da perda/desconto<input list="loss-reason-options" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Selecione um motivo padrão ou digite outro" /><datalist id="loss-reason-options">{LOSS_REASON_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist></label>
           <label className="span-2">Observações<textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Descreva detalhes da ocorrência, protocolo interno ou autorização." /></label>
           <label className="span-2">Documentos assinados/reconhecimento<input type="file" multiple accept="image/*,.pdf" onChange={async (e) => { try { const attachments = await readFiles(e.target.files, form.attachments.length); if (attachments.length) setForm({ ...form, attachments: [...form.attachments, ...attachments] }); } catch (error) { setMessage(error.message); } finally { e.target.value = ''; } }} /><small>Opcional na abertura. Selecione vários PDFs ou imagens de uma vez; novos documentos também poderão ser adicionados depois.</small></label>{form.attachments.length > 0 && <div className="span-2 attachment-cell">{form.attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`} className="row-actions"><AttachmentPreview compact name={attachment.name} data={attachment.data} label={`Documento ${index + 1}`} /><button type="button" className="danger" onClick={() => setForm({ ...form, attachments: form.attachments.filter((_, itemIndex) => itemIndex !== index) })}>Remover</button></div>)}</div>}

@@ -181,8 +181,16 @@ exports.list = asyncHandler(async (req, res) => {
     const requestFilter = stockistRequestWhere(req.user);
     if (requestFilter) where[Op.and] = [requestFilter];
   }
+  if (req.query.search) {
+    const search = String(req.query.search).trim();
+    if (search) where[Op.or] = [
+      { requestNumber: { [Op.iLike]: `%${search}%` } },
+      { requesterNotes: { [Op.iLike]: `%${search}%` } },
+    ];
+  }
   if (req.query.status) where.status = req.query.status;
   if (req.query.requestType) where.requestType = req.query.requestType;
+  if (req.query.priority) where.priority = req.query.priority;
   if (req.query.technicianId) {
     const filteredTechnician = await Technician.findByPk(req.query.technicianId, { include: [{ model: Warehouse, as: 'defaultWarehouse' }] });
     try {
